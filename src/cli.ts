@@ -84,9 +84,9 @@ const COMMANDS: readonly CommandSpec[] = [
       { name: "output.png", desc: "destination; defaults to <input>.dlss.png next to the input" },
     ],
     options: [
-      { flag: "--factor N", desc: "upscale factor; snapped to the nearest DLSS ratio (1.0/1.3/1.5/1.72/2.0/3.0)", def: "2" },
-      { flag: "--preset NAME", desc: "render preset: Default,A,B,C,D,E,F,J,K,L,M,N,O (J-M are the transformer presets)", def: "L" },
-      { flag: "--dlss-version VER", desc: "pick a specific SR DLL version (prefix ok); list them with `versions`", def: "bundled" },
+      { flag: "--factor N", desc: "upscale factor, snapped to the nearest fixed DLSS mode: 1.0=DLAA, 1.3=UltraQuality, 1.5=Quality, 1.72=Balanced, 2.0=Performance, 3.0=UltraPerformance", def: "2" },
+      { flag: "--preset NAME", desc: "render preset: Default, A-F (older CNN models) or J-O (transformer models)", def: "L" },
+      { flag: "--dlss-version VER", desc: "use a specific installed SR DLL version (prefix match ok); list them with `versions`", def: "bundled runtime DLL" },
       RUNTIME_OPT,
       ADAPTER_OPT,
     ],
@@ -100,10 +100,10 @@ const COMMANDS: readonly CommandSpec[] = [
       { name: "output.png", desc: "destination; defaults to <input>.nr.png next to the input" },
     ],
     options: [
-      { flag: "--intensity N", desc: "enhancement strength, 0..2 (1 = neutral)", def: String(DEFAULT_NR_SETTINGS.intensity) },
-      { flag: "--preset 0|1|2|3", desc: "model hint (0 = runtime default)", def: String(DEFAULT_NR_SETTINGS.preset) },
-      { flag: "--local-tone N", desc: "local tone mapping, 0..2 (1 = neutral)", def: String(DEFAULT_NR_SETTINGS.localTone) },
-      { flag: "--local-structure N", desc: "local structure / detail, 0..2 (1 = neutral)", def: String(DEFAULT_NR_SETTINGS.localStructure) },
+      { flag: "--intensity F", desc: "overall enhancement strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.intensity) },
+      { flag: "--preset ID", desc: "neural model preset: 0 = runtime default, or 10/11/12/13 = transformer models J/K/L/M", def: String(DEFAULT_NR_SETTINGS.preset) },
+      { flag: "--local-tone F", desc: "local tone-mapping strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localTone) },
+      { flag: "--local-structure F", desc: "local detail / structure strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localStructure) },
       RUNTIME_OPT,
       ADAPTER_OPT,
     ],
@@ -282,7 +282,8 @@ async function main(): Promise<void> {
       const positional = args.filter((a) => !a.startsWith("--"));
       const input = positional[0];
       if (!input) {
-        console.error("usage: bun run src/cli.ts sr <input.png> [output.png] [--factor 2] [--preset L]");
+        console.error("error: missing <input.png>\n");
+        printHelp("sr");
         process.exit(1);
       }
       const bytes = new Uint8Array(await Bun.file(input).arrayBuffer());
@@ -341,7 +342,8 @@ async function main(): Promise<void> {
       const positional = args.filter((a) => !a.startsWith("--"));
       const input = positional[0];
       if (!input) {
-        console.error("usage: bun run src/cli.ts nr <input.png> [output.png] [--intensity 1.6] [--preset 0]");
+        console.error("error: missing <input.png>\n");
+        printHelp("nr");
         process.exit(1);
       }
       const bytes = new Uint8Array(await Bun.file(input).arrayBuffer());
@@ -354,7 +356,7 @@ async function main(): Promise<void> {
       const settings = {
         ...DEFAULT_NR_SETTINGS,
         intensity: Number(option(args, "--intensity") ?? DEFAULT_NR_SETTINGS.intensity),
-        preset: Number(option(args, "--preset") ?? DEFAULT_NR_SETTINGS.preset) as 0 | 1 | 2 | 3,
+        preset: Number(option(args, "--preset") ?? DEFAULT_NR_SETTINGS.preset) as 0 | 10 | 11 | 12 | 13,
         localTone: Number(option(args, "--local-tone") ?? DEFAULT_NR_SETTINGS.localTone),
         localStructure: Number(option(args, "--local-structure") ?? DEFAULT_NR_SETTINGS.localStructure),
       };
@@ -377,7 +379,8 @@ async function main(): Promise<void> {
       const positional = args.filter((a) => !a.startsWith("--"));
       const input = positional[0];
       if (!input) {
-        console.error("usage: bun run src/cli.ts fg <input.mp4> [output.mp4] [--multiplier 2] [--quality 20]");
+        console.error("error: missing <input.mp4>\n");
+        printHelp("fg");
         process.exit(1);
       }
       const result = await processFrameGen({
