@@ -106,6 +106,11 @@ export interface JobRequest {
    * scale settings are ignored in this mode.
    */
   frameGen?: { multiplier: number };
+  /**
+   * Absolute folder of a specific DLSS DLL version to load (from GET /api/catalog);
+   * omit to use the bundled runtime DLL. Applies to the sr and nr engines.
+   */
+  dllDir?: string;
 }
 
 export type JobState = "queued" | "running" | "done" | "failed" | "cancelled";
