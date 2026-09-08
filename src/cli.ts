@@ -9,6 +9,7 @@ import { basename, dirname, extname, join } from "node:path";
 import { decodePng, encodePng, isPng } from "./codec/png.ts";
 import { buildForwarderDll } from "./ngx/forwarder.ts";
 import { runProbe } from "./ngx/probe.ts";
+import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
 import { DlssRenderPreset, DLSS_RATIO } from "./ngx/results.ts";
 import { openGpu } from "./pipeline/gpu.ts";
@@ -115,16 +116,31 @@ async function main(): Promise<void> {
       const outputHeight = evenSize(image.height * factor);
       const output = positional[1] ?? join(dirname(input), `${basename(input, extname(input))}.dlss.png`);
 
+      const runtimeDir = option(args, "--runtime") ?? join(ROOT, "runtime");
+      let dllDir: string | undefined;
+      const wantVersion = option(args, "--dlss-version");
+      if (wantVersion) {
+        const sr = buildRuntimeCatalog(runtimeDir).features.find((f) => f.id === 1);
+        const match = sr?.versions.find((v) => v.version === wantVersion || v.version.startsWith(wantVersion));
+        if (!match) {
+          console.error(`DLSS SR version ${wantVersion} not found; run 'bun run src/cli.ts versions' to list`);
+          process.exit(1);
+        }
+        dllDir = match.dir;
+        console.log(`using DLSS SR ${match.version} (${match.source}) from ${match.dir}`);
+      }
+
       const session = openGpu({ adapterIndex: option(args, "--adapter") !== undefined ? Number(option(args, "--adapter")) : undefined });
       const started = performance.now();
-      const sr = await DlssSrSession.open(session, {
+      const sr = DlssSrSession.open(session, {
         renderWidth: image.width,
         renderHeight: image.height,
         outputWidth,
         outputHeight,
         quality,
         preset,
-        runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
+        runtimeDir,
+        dllDir,
       });
       const rgba = sr.evaluate(image.rgba, true);
       await Bun.write(output, encodePng({ width: outputWidth, height: outputHeight, rgba }, { level: 6 }));
@@ -134,8 +150,18 @@ async function main(): Promise<void> {
       // The driver core's Shutdown1 is skipped; exit the process to reclaim NGX.
       process.exit(0);
     }
+    case "versions": {
+      const catalog = buildRuntimeCatalog(option(args, "--runtime") ?? join(ROOT, "runtime"));
+      for (const feature of catalog.features) {
+        console.log(`feature ${feature.id}  ${feature.name}  (${feature.dllName})  ${feature.versions.length} version(s)`);
+        for (const v of feature.versions) {
+          console.log(`  ${v.version.padEnd(14)} ${v.source.padEnd(10)} ${String(v.sizeMB).padStart(7)} MB  ${v.dir}`);
+        }
+      }
+      return;
+    }
     default:
-      console.log("usage: bun run src/cli.ts <probe|forwarder|sr> [options]");
+      console.log("usage: bun run src/cli.ts <probe|forwarder|sr|versions> [options]");
       process.exit(command ? 1 : 0);
   }
 }
