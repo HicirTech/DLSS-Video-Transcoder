@@ -71,26 +71,31 @@ const server = Bun.serve({
         try {
           body = await req.json();
         } catch {
-          return fail("request body is not JSON");
+          return fail("Request body must be valid JSON.");
         }
-        if (!isJobRequest(body)) return fail("request body is not a JobRequest");
-        if (!isAbsolute(body.input) || !existsSync(body.input)) return fail(`input does not exist: ${body.input}`);
+        if (!isJobRequest(body))
+          return fail(
+            "Invalid job request. Expected kind ('image' or 'video'), an absolute input path, engine ('nr' or 'bypass'), motion ('none' or 'flow'), and settings and scale objects.",
+          );
+        if (!isAbsolute(body.input) || !existsSync(body.input))
+          return fail(`Input file not found: ${body.input}. Provide an absolute path to a file that exists.`);
         return json(jobs.submit(body), 201);
       },
     },
     "/api/jobs/:id": (req) => {
       const status = jobs.get(req.params.id);
-      return status ? json(status) : fail("no such job", 404);
+      return status ? json(status) : fail("No job exists with that id.", 404);
     },
     "/api/jobs/:id/cancel": {
       POST: (req) => {
         const status = jobs.cancel(req.params.id);
-        return status ? json(status) : fail("no such job", 404);
+        return status ? json(status) : fail("No job exists with that id.", 404);
       },
     },
     "/api/file": (req) => {
       const path = new URL(req.url).searchParams.get("path") ?? "";
-      if (!isAbsolute(path) || !existsSync(path) || !statSync(path).isFile()) return fail("file not found", 404);
+      if (!isAbsolute(path) || !existsSync(path) || !statSync(path).isFile())
+        return fail("File not found. The 'path' query parameter must be an absolute path to an existing file.", 404);
       const type = MIME[extname(path).toLowerCase()] ?? "application/octet-stream";
       return new Response(Bun.file(path), { headers: { "content-type": type, "cache-control": "no-store" } });
     },

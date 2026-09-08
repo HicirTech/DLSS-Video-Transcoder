@@ -89,7 +89,7 @@ export class JobManager {
     next.worker = worker;
     worker.onmessage = (event: MessageEvent<WorkerMessage>) => this.onWorkerMessage(next, event.data);
     worker.onerror = (event: ErrorEvent) => {
-      this.finish(next, "failed", `worker error: ${event.message}`);
+      this.finish(next, "failed", `The job stopped unexpectedly: ${event.message}`);
     };
     const run: RunMessage = {
       type: "run",
