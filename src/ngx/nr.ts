@@ -1,25 +1,28 @@
 /**
  * The neural frame engine, registered with the pipeline's engine factory.
  *
- * Importing this module (as the worker does when a job's engine is "nr") wires a
- * DLSS-backed engine into `createEngine`. It currently drives DLSS Super
- * Resolution (NGX feature 1) at DLAA — same input and output size, so it fits
- * the pipeline's 1:1 working-size contract while giving neural anti-aliasing and
- * detail recovery. True upscaling is exposed separately through the `sr` CLI and
- * the SR session's render/output split; feature 18 neural rendering plugs in
- * behind this same interface once its create contract is solved.
+ * Importing this module (as the worker does when a job's engine is "nr") wires
+ * **DLSS Neural Rendering — NGX feature 18** (`DlssNrSession`) into `createEngine`.
+ * This is the real feature-18 path: it enhances each frame at the same size (no
+ * upscale, so it fits the pipeline's 1:1 working-size contract) and honours the
+ * `NrSettings` look controls (preset at create; intensity / local tone / local
+ * structure / skin structure / style / auto-mask / UI-correction per evaluate).
+ *
+ * Feature 18 as implemented does not consume motion vectors, so the pipeline's
+ * optical-flow motion is ignored here; `reset` still clears temporal history on
+ * the first frame and scene cuts. True DLSS upscaling (render/output split) is a
+ * separate concern exposed through the `sr` CLI / SR engine.
  */
 import { RUNTIME_DIR } from "../paths.ts";
 import { registerNeuralEngine, type Engine, type EngineOptions } from "../pipeline/engine.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
-import { PerfQuality } from "./results.ts";
-import { DlssSrSession } from "./sr.ts";
+import { DlssNrSession } from "./nr-render.ts";
 
 class NeuralEngine implements Engine {
   readonly name = "nr";
   readonly outputWidth: number;
   readonly outputHeight: number;
-  private readonly sr: DlssSrSession;
+  private readonly nr: DlssNrSession;
   private closed = false;
 
   constructor(
@@ -30,25 +33,24 @@ class NeuralEngine implements Engine {
   ) {
     this.outputWidth = width;
     this.outputHeight = height;
-    this.sr = DlssSrSession.open(session, {
-      renderWidth: width,
-      renderHeight: height,
-      outputWidth: width,
-      outputHeight: height,
-      quality: PerfQuality.DLAA,
+    this.nr = DlssNrSession.open(session, {
+      width,
+      height,
+      settings: options.settings,
       runtimeDir: options.runtimeDir ?? RUNTIME_DIR,
       appDataPath: options.appDataPath,
     });
   }
 
   process(frame: { rgba: Uint8Array; reset: boolean; motion: Float32Array | null }): Uint8Array {
-    return this.sr.evaluate(frame.rgba, frame.reset, frame.motion);
+    // Feature 18 does not take motion vectors; only the reset flag is used.
+    return this.nr.evaluate(frame.rgba, frame.reset);
   }
 
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    this.sr.close();
+    this.nr.close();
   }
 }
 
