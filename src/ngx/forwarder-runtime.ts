@@ -97,10 +97,32 @@ export function selfTestForwarder(fwd: ForwarderModule): SelfTestResult {
     ];
     const argsOk = JSON.stringify(seen) === JSON.stringify(expect);
     const retOk = r1 === 1 && r2 === 2 && r3 === 3;
-    if (argsOk && retOk) {
-      return { ok: true, detail: "exports resolved, slots stored, four register arguments and return values pass through the call thunks" };
+    // Stack-argument passthrough: a 7-argument call (as Init_ProjectID) puts args
+    // 5..7 on the stack; the thunk must copy them into the inner call frame.
+    const seen7: number[] = [];
+    const target7 = new JSCallback(
+      (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => {
+        seen7.push(asPtr(a), b, asPtr(c), asPtr(d), asPtr(e), f, asPtr(g));
+        return 0x2a;
+      },
+      { args: [FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
+    );
+    let stackOk = false;
+    try {
+      fwd.setSlots(asPtr(target7.ptr), 0, 0);
+      const call7 = callableAt(fwd.addresses.fwd_create, {
+        args: [FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.i32, FFIType.ptr],
+        returns: FFIType.i32,
+      });
+      const r7 = call7(0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77) as number;
+      stackOk = r7 === 0x2a && JSON.stringify(seen7) === JSON.stringify([0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77]);
+    } finally {
+      target7.close();
     }
-    return { ok: false, detail: `mismatch: returns=[${r1},${r2},${r3}] seen=${JSON.stringify(seen)}` };
+    if (argsOk && retOk && stackOk) {
+      return { ok: true, detail: "exports resolved, slots stored; four register arguments, seven mixed register and stack arguments, and return values pass through the call thunks" };
+    }
+    return { ok: false, detail: `mismatch: returns=[${r1},${r2},${r3}] stackOk=${stackOk} seen=${JSON.stringify(seen)} seen7=${JSON.stringify(seen7)}` };
   } catch (error) {
     return { ok: false, detail: `self-test threw: ${(error as Error).message}` };
   } finally {

@@ -83,16 +83,33 @@ class TextBuilder {
     return at;
   }
 
-  /** A stub that reserves shadow space and calls the target held in `slot`. */
-  emitCallThunk(slot: number): number {
+  /**
+   * A stub that reserves shadow space and calls the target held in `slot`.
+   * The four register arguments (rcx/rdx/r8/r9) forward for free. `stackArgs`
+   * further arguments ride the stack (Init_Ext has one, Init_ProjectID three);
+   * each is copied from the caller's frame down into the inner call's argument
+   * slot. Copying is harmless for shorter calls: the extra copies land in shadow
+   * space the shorter callee never reads.
+   */
+  emitCallThunk(slot: number, stackArgs = 0): number {
     const at = this.rva;
-    this.push(0x48, 0x83, 0xec, 0x28); // sub rsp, 0x28
+    // Keep the frame 16-byte aligned at the inner call (rsp ≡ 8 mod 16 on entry).
+    let frame = 0x20 + stackArgs * 8 + 8;
+    if (frame % 16 !== 8) frame += 8;
+    this.push(0x48, 0x83, 0xec, frame & 0xff); // sub rsp, frame
+    for (let i = 0; i < stackArgs; i++) {
+      // caller frame: arg(5+i) at [rsp + frame + 0x28 + i*8]; inner slot: [rsp + 0x20 + i*8]
+      this.push(0x48, 0x8b, 0x84, 0x24); // mov rax, [rsp + disp32]
+      this.disp32(frame + 0x28 + i * 8);
+      this.push(0x48, 0x89, 0x84, 0x24); // mov [rsp + disp32], rax
+      this.disp32(0x20 + i * 8);
+    }
     this.push(0xff, 0x15); // call [rip+disp]
     {
       const ripAfter = this.textRva + this.bytes.length + 4;
       this.disp32(this.slotRva[slot]! - ripAfter);
     }
-    this.push(0x48, 0x83, 0xc4, 0x28); // add rsp, 0x28
+    this.push(0x48, 0x83, 0xc4, frame & 0xff); // add rsp, frame
     this.push(0xc3); // ret
     return at;
   }
@@ -126,9 +143,9 @@ export function buildForwarderDll(options: { imageBase?: bigint } = {}): Forward
   // --- .text: entry point, stubs, then the export directory ---
   const text = new TextBuilder(textRva, slotRva);
   const dllMainRva = text.emitDllMain();
-  const createRva = text.emitCallThunk(0);
-  const evaluateRva = text.emitCallThunk(1);
-  const releaseRva = text.emitCallThunk(2);
+  const createRva = text.emitCallThunk(0, 3);
+  const evaluateRva = text.emitCallThunk(1, 3);
+  const releaseRva = text.emitCallThunk(2, 3);
   const setSlotsRva = text.emitSetSlots();
   text.padTo(16);
 
