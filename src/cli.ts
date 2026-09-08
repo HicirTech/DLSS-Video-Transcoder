@@ -3,10 +3,16 @@
  *
  *   bun run src/cli.ts probe [--json] [--adapter N] [--runtime DIR] [--project-init] [--debug-layer]
  *   bun run src/cli.ts forwarder [--out PATH]
+ *   bun run src/cli.ts sr <input.png> [output.png] [--factor 2] [--preset L]
  */
-import { join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
+import { decodePng, encodePng, isPng } from "./codec/png.ts";
 import { buildForwarderDll } from "./ngx/forwarder.ts";
 import { runProbe } from "./ngx/probe.ts";
+import { DlssSrSession } from "./ngx/sr.ts";
+import { DlssRenderPreset, DLSS_RATIO } from "./ngx/results.ts";
+import { openGpu } from "./pipeline/gpu.ts";
+import { evenSize } from "./pipeline/resize.ts";
 
 const ROOT = join(import.meta.dir, "..");
 
@@ -84,8 +90,52 @@ async function main(): Promise<void> {
       for (const e of built.exports) console.log(`  ${e.name} @ rva 0x${e.rva.toString(16)}`);
       return;
     }
+    case "sr": {
+      const positional = args.filter((a) => !a.startsWith("--"));
+      const input = positional[0];
+      if (!input) {
+        console.error("usage: bun run src/cli.ts sr <input.png> [output.png] [--factor 2] [--preset L]");
+        process.exit(1);
+      }
+      const bytes = new Uint8Array(await Bun.file(input).arrayBuffer());
+      if (!isPng(bytes)) {
+        console.error(`${input}: only PNG input is supported by the sr command`);
+        process.exit(1);
+      }
+      const image = decodePng(bytes);
+      const factor = Number(option(args, "--factor") ?? 2);
+      // Pick the DLSS PerfQuality whose fixed ratio is nearest the requested factor.
+      const quality = Number(
+        Object.entries(DLSS_RATIO).reduce((best, [q, ratio]) =>
+          Math.abs(ratio - factor) < Math.abs(DLSS_RATIO[Number(best)]! - factor) ? q : best, "0"),
+      );
+      const presetName = (option(args, "--preset") ?? "L").toUpperCase() as keyof typeof DlssRenderPreset;
+      const preset = DlssRenderPreset[presetName] ?? DlssRenderPreset.L;
+      const outputWidth = evenSize(image.width * factor);
+      const outputHeight = evenSize(image.height * factor);
+      const output = positional[1] ?? join(dirname(input), `${basename(input, extname(input))}.dlss.png`);
+
+      const session = openGpu({ adapterIndex: option(args, "--adapter") !== undefined ? Number(option(args, "--adapter")) : undefined });
+      const started = performance.now();
+      const sr = await DlssSrSession.open(session, {
+        renderWidth: image.width,
+        renderHeight: image.height,
+        outputWidth,
+        outputHeight,
+        quality,
+        preset,
+        runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
+      });
+      const rgba = sr.evaluate(image.rgba, true);
+      await Bun.write(output, encodePng({ width: outputWidth, height: outputHeight, rgba }, { level: 6 }));
+      sr.close();
+      console.log(`DLSS SR: ${image.width}x${image.height} -> ${outputWidth}x${outputHeight} (quality ${quality}, preset ${presetName}) in ${(performance.now() - started).toFixed(1)} ms`);
+      console.log(`wrote ${output}`);
+      // The driver core's Shutdown1 is skipped; exit the process to reclaim NGX.
+      process.exit(0);
+    }
     default:
-      console.log("usage: bun run src/cli.ts <probe|forwarder> [options]");
+      console.log("usage: bun run src/cli.ts <probe|forwarder|sr> [options]");
       process.exit(command ? 1 : 0);
   }
 }
