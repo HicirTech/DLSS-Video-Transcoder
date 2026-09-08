@@ -7,6 +7,7 @@ interface NrSettingsEditorProps {
   onChange: (next: NrSettings) => void;
 }
 
+const INTENSITY_MARKS = [{ value: 0, label: "off" }, { value: 0.5 }, { value: 1, label: "full" }];
 const NEUTRAL_MARKS = [{ value: 0 }, { value: 1, label: "neutral" }, { value: 2 }];
 const SKIN_MARKS = [{ value: -1, label: "default" }, { value: 0 }, { value: 1, label: "neutral" }, { value: 2 }];
 
@@ -14,48 +15,34 @@ function formatSkin(value: number): string {
   return value < 0 ? "runtime default" : value.toFixed(2);
 }
 
-/** Editor for the DLSS 5 neural rendering look controls. `nrPath` and `warmupFrames` live in the Settings tab. */
+/**
+ * Editor for the DLSS neural rendering (feature 18) look controls. Only the
+ * controls verified to change the result on the current runtime are shown —
+ * model preset and global tone had no effect and are omitted; `warmupFrames`
+ * lives in the Settings tab.
+ */
 export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
   const update = (patch: Partial<NrSettings>): void => onChange({ ...value, ...patch });
-  const globalToneEnabled = value.globalTone !== null;
 
   return (
     <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) minmax(0, 1fr)" }, gap: 3 }}>
       <Stack spacing={2}>
         <Box>
-          <Stack direction="row" spacing={2}>
-            <FormControl fullWidth>
-              <InputLabel id="nr-preset-label">Model preset</InputLabel>
-              <Select<NrSettings["preset"]>
-                labelId="nr-preset-label"
-                label="Model preset"
-                value={value.preset}
-                onChange={(event) => update({ preset: event.target.value })}
-              >
-                <MenuItem value={0}>Default (runtime chooses)</MenuItem>
-                <MenuItem value={10}>Model J</MenuItem>
-                <MenuItem value={11}>Model K</MenuItem>
-                <MenuItem value={12}>Model L</MenuItem>
-                <MenuItem value={13}>Model M</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl fullWidth>
-              <InputLabel id="nr-style-label">Style</InputLabel>
-              <Select<NrSettings["style"]>
-                labelId="nr-style-label"
-                label="Style"
-                value={value.style}
-                onChange={(event) => update({ style: event.target.value })}
-              >
-                <MenuItem value={0}>Default</MenuItem>
-                <MenuItem value={1}>Natural</MenuItem>
-                <MenuItem value={2}>Cinematic</MenuItem>
-              </Select>
-            </FormControl>
-          </Stack>
+          <FormControl fullWidth>
+            <InputLabel id="nr-style-label">Style</InputLabel>
+            <Select<NrSettings["style"]>
+              labelId="nr-style-label"
+              label="Style"
+              value={value.style}
+              onChange={(event) => update({ style: event.target.value })}
+            >
+              <MenuItem value={0}>Default</MenuItem>
+              <MenuItem value={1}>Natural</MenuItem>
+              <MenuItem value={2}>Cinematic</MenuItem>
+            </Select>
+          </FormControl>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-            Model preset picks the neural model revision: Default lets the runtime choose; J–M are
-            transformer models (later letter = newer). Style sets the overall look.
+            Overall look of the neural enhancement.
           </Typography>
         </Box>
 
@@ -79,27 +66,6 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
             Protect overlays, text and sharp UI edges from re-rendering.
           </Typography>
         </Box>
-        <Box>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={globalToneEnabled}
-                onChange={(_event, checked) => update({ globalTone: checked ? 1 : null })}
-              />
-            }
-            label="Send global tone"
-          />
-          <SliderRow
-            label="Global tone"
-            value={value.globalTone ?? 1}
-            min={0}
-            max={2}
-            marks={NEUTRAL_MARKS}
-            disabled={!globalToneEnabled}
-            hint={globalToneEnabled ? undefined : "Off: the parameter is not sent and the runtime keeps its own tone mapping."}
-            onChange={(globalTone) => update({ globalTone })}
-          />
-        </Box>
       </Stack>
 
       <Stack spacing={1.5}>
@@ -107,9 +73,9 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
           label="Intensity"
           value={value.intensity}
           min={0}
-          max={2}
-          marks={NEUTRAL_MARKS}
-          hint="Overall enhancement strength. 1 = neutral, 0 = off, 2 = strongest."
+          max={1}
+          marks={INTENSITY_MARKS}
+          hint="How much of the neural enhancement to blend in. 0 = original, 1 = full."
           onChange={(intensity) => update({ intensity })}
         />
         <SliderRow
@@ -137,7 +103,7 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
           max={2}
           marks={SKIN_MARKS}
           format={formatSkin}
-          hint="Detail strength on skin. Leftmost = runtime default; 1 = neutral."
+          hint="Detail strength on skin regions only. Leftmost = runtime default; 1 = neutral."
           onChange={(skinStructure) => update({ skinStructure: skinStructure < 0 ? -1 : skinStructure })}
         />
       </Stack>
