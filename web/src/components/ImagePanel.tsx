@@ -11,6 +11,7 @@ import { EngineSelect, PathFields } from "./JobFormFields";
 import { NrSettingsEditor } from "./NrSettingsEditor";
 import { ScaleSettingsEditor } from "./ScaleSettingsEditor";
 import { Section } from "./Section";
+import { VersionSelect } from "./VersionSelect";
 
 interface ImagePanelProps {
   jobs: JobStatus[];
@@ -23,8 +24,15 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
   const [engine, setEngine] = useState<EngineKind>("nr");
+  const [dllDir, setDllDir] = useState("");
 
   const canRun = input.trim() !== "" && !runner.submitting;
+  const usesDlss = engine === "sr" || engine === "nr";
+
+  const changeEngine = (next: EngineKind): void => {
+    setEngine(next);
+    setDllDir(""); // a version chosen for one feature does not apply to another
+  };
 
   const run = (): void => {
     const request: JobRequest = {
@@ -35,6 +43,7 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
       settings: settings.nr,
       scale: settings.scale,
     };
+    if (usesDlss && dllDir !== "") request.dllDir = dllDir;
     if (output.trim() !== "") request.output = output.trim();
     void runner.submit(request);
   };
@@ -56,7 +65,8 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
 
       <Section title="Engine and output size">
         <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
-          <EngineSelect value={engine} onChange={setEngine} />
+          <EngineSelect value={engine} onChange={changeEngine} />
+          {usesDlss ? <VersionSelect featureId={engine === "sr" ? 1 : 18} value={dllDir} onChange={setDllDir} /> : null}
           <ScaleSettingsEditor value={settings.scale} onChange={setScale} />
         </Stack>
       </Section>

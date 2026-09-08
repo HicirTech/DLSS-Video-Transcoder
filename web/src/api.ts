@@ -9,6 +9,7 @@ import type {
   ToolsReport,
   WsEvent,
 } from "../../src/server/api-types";
+import type { RuntimeManifest } from "../../src/ngx/runtime-catalog";
 import { ApiError, errorMessage } from "./errors";
 import { createMockBackend } from "./mock";
 
@@ -25,6 +26,8 @@ export interface ApiClient {
   runtime(): Promise<ProbeReport["runtime"]>;
   settingsDefaults(): Promise<SettingsDefaults>;
   tools(): Promise<ToolsReport>;
+  /** The installed DLSS runtime DLLs per feature (for version selection). */
+  catalog(): Promise<RuntimeManifest>;
   listJobs(): Promise<JobStatus[]>;
   getJob(id: string): Promise<JobStatus>;
   createJob(request: JobRequest): Promise<JobStatus>;
@@ -128,6 +131,7 @@ function createHttpClient(): ApiClient {
     runtime: () => request<ProbeReport["runtime"]>("/api/runtime"),
     settingsDefaults: () => request<SettingsDefaults>("/api/settings/defaults"),
     tools: () => request<ToolsReport>("/api/tools"),
+    catalog: () => request<RuntimeManifest>("/api/catalog"),
     listJobs: () => request<JobStatus[]>("/api/jobs"),
     getJob: (id) => request<JobStatus>(`/api/jobs/${encodeURIComponent(id)}`),
     createJob: (body) => request<JobStatus>("/api/jobs", postJson(body)),

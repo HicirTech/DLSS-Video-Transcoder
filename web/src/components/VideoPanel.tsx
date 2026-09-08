@@ -11,6 +11,7 @@ import { EngineSelect, MotionSelect, PathFields } from "./JobFormFields";
 import { NrSettingsEditor } from "./NrSettingsEditor";
 import { ScaleSettingsEditor } from "./ScaleSettingsEditor";
 import { Mono, Section } from "./Section";
+import { VersionSelect } from "./VersionSelect";
 
 interface VideoPanelProps {
   jobs: JobStatus[];
@@ -65,8 +66,15 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
   const [motion, setMotion] = useState<MotionKind>("flow");
   const [frameGenOn, setFrameGenOn] = useState(false);
   const [multiplier, setMultiplier] = useState(2);
+  const [dllDir, setDllDir] = useState("");
 
   const canRun = input.trim() !== "" && !runner.submitting;
+  const usesDlss = !frameGenOn && (engine === "sr" || engine === "nr");
+
+  const changeEngine = (next: EngineKind): void => {
+    setEngine(next);
+    setDllDir("");
+  };
 
   const run = (): void => {
     const request: JobRequest = {
@@ -79,6 +87,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
       encode: settings.encode,
     };
     if (frameGenOn) request.frameGen = { multiplier };
+    if (usesDlss && dllDir !== "") request.dllDir = dllDir;
     if (output.trim() !== "") request.output = output.trim();
     void runner.submit(request);
   };
@@ -136,8 +145,9 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
         }
       >
         <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
-          <EngineSelect value={engine} disabled={frameGenOn} onChange={setEngine} />
+          <EngineSelect value={engine} disabled={frameGenOn} onChange={changeEngine} />
           <MotionSelect value={motion} disabled={frameGenOn} onChange={setMotion} />
+          {usesDlss ? <VersionSelect featureId={engine === "sr" ? 1 : 18} value={dllDir} onChange={setDllDir} /> : null}
           <ScaleSettingsEditor value={settings.scale} onChange={setScale} />
         </Stack>
       </Section>
