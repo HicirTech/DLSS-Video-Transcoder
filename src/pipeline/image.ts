@@ -54,7 +54,7 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
   const progress = options.onProgress ?? (() => {});
   progress(0, "reading input");
   const bytes = new Uint8Array(await Bun.file(options.input).arrayBuffer());
-  if (!isPng(bytes)) throw new Error(`${options.input}: only PNG input is supported by the image job for now`);
+  if (!isPng(bytes)) throw new Error(`${options.input}: image jobs currently accept PNG input only. Convert the file to PNG and try again.`);
   const decoded = decodePng(bytes);
   const target = resolveTargetSize(decoded.width, decoded.height, options.scale);
   progress(0.1, `decoded ${decoded.width}x${decoded.height}, working size ${target.width}x${target.height}`);

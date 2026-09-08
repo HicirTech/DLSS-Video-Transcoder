@@ -71,13 +71,13 @@ export function probeVideo(ffprobe: string, input: string): VideoInfo {
     ],
     { stdout: "pipe", stderr: "pipe" },
   );
-  if (proc.exitCode !== 0) throw new Error(`ffprobe failed: ${new TextDecoder().decode(proc.stderr).trim()}`);
+  if (proc.exitCode !== 0) throw new Error(`ffprobe could not read this file as video: ${new TextDecoder().decode(proc.stderr).trim()}`);
   const data = JSON.parse(new TextDecoder().decode(proc.stdout)) as {
     streams?: { codec_type: string; codec_name?: string; width?: number; height?: number; r_frame_rate?: string; avg_frame_rate?: string; nb_frames?: string }[];
     format?: { duration?: string };
   };
   const video = data.streams?.find((s) => s.codec_type === "video");
-  if (!video || !video.width || !video.height) throw new Error(`${input}: no video stream`);
+  if (!video || !video.width || !video.height) throw new Error(`${input}: no video stream found in this file.`);
   const fps = parseRate(video.avg_frame_rate) || parseRate(video.r_frame_rate) || 30;
   const duration = data.format?.duration ? Number(data.format.duration) : null;
   const declared = video.nb_frames && video.nb_frames !== "N/A" ? Number(video.nb_frames) : null;
@@ -109,7 +109,7 @@ function encoderArgs(encode: EncodeSettings): string[] {
     case "av1_nvenc":
       return ["-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0", "-pix_fmt", "yuv420p"];
     default:
-      throw new Error(`Unknown codec ${String(encode.codec)}`);
+      throw new Error(`Unknown codec "${String(encode.codec)}". Choose one of: h264, hevc, av1, h264_nvenc, hevc_nvenc, av1_nvenc.`);
   }
 }
 
@@ -285,7 +285,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const encodeErr = (await new Response(encoder.stderr).text()).trim();
   if (decodeExit !== 0) throw new Error(`ffmpeg decode failed (${decodeExit}): ${decodeErr}`);
   if (encodeExit !== 0) throw new Error(`ffmpeg encode failed (${encodeExit}): ${encodeErr}`);
-  if (frames === 0) throw new Error("no frames were decoded");
+  if (frames === 0) throw new Error("No frames were decoded from the input. The file may be empty, corrupt, or not a video ffmpeg can read.");
   progress(1, `encoded ${frames} frames to ${output}${sceneCuts ? ` (${sceneCuts} scene cuts reset history)` : ""}`);
   return { output, width: outWidth, height: outHeight, fps: info.fps, frames, sceneCuts, engine: options.engine, ms: Math.round(performance.now() - started) };
 }

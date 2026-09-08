@@ -58,7 +58,7 @@ class ExactReader {
   async read(size: number): Promise<Uint8Array> {
     while (this.available < size) {
       const { value, done } = await this.reader.read();
-      if (done) throw new Error("the DLSSG worker closed its output unexpectedly");
+      if (done) throw new Error("The DLSS Frame Generation process stopped unexpectedly. Check that the runtime folder is complete and your GPU driver is up to date.");
       if (value?.byteLength) {
         this.pending.push(value);
         this.available += value.byteLength;
@@ -123,9 +123,9 @@ export class DlssgSession {
     const reply = new DataView(replyBytes.buffer, replyBytes.byteOffset, 16);
     if (reply.getUint32(0, true) !== SETUP_OUT_MAGIC) throw new Error("DLSSG setup: bad reply magic");
     const status = reply.getUint32(4, true);
-    if (status !== 0) throw new Error(`DLSSG setup failed with status ${status}`);
+    if (status !== 0) throw new Error(`DLSS Frame Generation could not be set up (status ${status}). Check the runtime folder and that your GPU driver is up to date.`);
     const maximum = reply.getUint32(8, true);
-    if (opts.generatedCount > maximum) throw new Error(`DLSSG generatedCount ${opts.generatedCount} exceeds worker maximum ${maximum}`);
+    if (opts.generatedCount > maximum) throw new Error(`This GPU/runtime can generate at most ${maximum} in-between frame(s) per source frame; ${opts.generatedCount} was requested. Use a lower multiplier.`);
     return new DlssgSession(proc, reader, maximum, opts.width, opts.height, opts.generatedCount);
   }
 
@@ -151,7 +151,7 @@ export class DlssgSession {
     const replyBytes = await this.reader.read(16);
     const reply = new DataView(replyBytes.buffer, replyBytes.byteOffset, 16);
     if (reply.getUint32(0, true) !== FRAME_OUT_MAGIC) throw new Error("DLSSG frame: bad reply magic");
-    if (reply.getUint32(4, true) !== 0) throw new Error(`DLSSG frame failed with status ${reply.getUint32(4, true)}`);
+    if (reply.getUint32(4, true) !== 0) throw new Error(`DLSS Frame Generation failed while processing a frame (status ${reply.getUint32(4, true)}).`);
     const generated = reply.getUint32(8, true);
     const disabled = reply.getUint32(12, true);
     if (disabled || generated === 0) return [];

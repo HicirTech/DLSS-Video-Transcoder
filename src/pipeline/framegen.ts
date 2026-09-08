@@ -72,7 +72,8 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
   const progress = options.onProgress ?? (() => {});
   const ffmpeg = findTool("ffmpeg");
   const ffprobe = findTool("ffprobe");
-  if (!ffmpeg || !ffprobe) throw new Error("ffmpeg and ffprobe are required for frame generation");
+  if (!ffmpeg || !ffprobe)
+    throw new Error("ffmpeg and ffprobe are required for frame generation (install with `winget install Gyan.FFmpeg` or set FFMPEG_PATH / FFPROBE_PATH).");
   const multiplier = Math.max(2, Math.round(options.multiplier));
   const generatedCount = multiplier - 1;
 
@@ -80,7 +81,7 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
   const caps = await probeDlssg(workerDir);
   if (!caps.available) throw new Error(`DLSS Frame Generation is not available: ${caps.detail}`);
   if (generatedCount > caps.multiFrameCountMax) {
-    throw new Error(`multiplier ${multiplier}x exceeds the ${caps.multiFrameCountMax + 1}x supported by this GPU/runtime`);
+    throw new Error(`Frame-rate multiplier ${multiplier}x is more than this GPU/runtime supports (maximum ${caps.multiFrameCountMax + 1}x). Use a lower --multiplier.`);
   }
 
   const info = probeVideo(ffprobe, options.input);
@@ -137,7 +138,7 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
   const encodeErr = (await new Response(encoder.stderr).text()).trim();
   if (decodeExit !== 0) throw new Error(`ffmpeg decode failed (${decodeExit})`);
   if (encodeExit !== 0) throw new Error(`ffmpeg encode failed (${encodeExit}): ${encodeErr}`);
-  if (inputFrames === 0) throw new Error("no frames were decoded");
+  if (inputFrames === 0) throw new Error("No frames were decoded from the input. The file may be empty, corrupt, or not a video ffmpeg can read.");
   progress(1, `generated ${outputFrames} frames from ${inputFrames} (${multiplier}x)`);
   return { output, width, height, sourceFps: info.fps, outputFps, inputFrames, outputFrames, multiplier, ms: Math.round(performance.now() - started) };
 }

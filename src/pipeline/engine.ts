@@ -100,6 +100,6 @@ export function createEngine(kind: EngineKind, session: GpuSession, options: Eng
       if (!neuralFactory) throw new Error("Neural engine is not registered; import src/ngx/nr.ts before creating it");
       return neuralFactory(kind, session, options);
     default:
-      throw new Error(`Unknown engine kind: ${String(kind)}`);
+      throw new Error(`Unknown engine "${String(kind)}". Choose "nr" (DLSS Neural Rendering) or "bypass" (plain copy, no processing).`);
   }
 }
