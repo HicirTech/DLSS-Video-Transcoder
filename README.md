@@ -94,13 +94,13 @@ progress; a before/after compare view; a hardware/runtime **probe** panel; and e
 
 **Honest limitations (being addressed):**
 
-- The UI `nr` engine currently runs **DLSS Super Resolution at DLAA (feature 1, same size)**, i.e.
-  neural anti-aliasing — **not** feature 18 neural rendering. Feature 18 is CLI-only for now.
-- Because of that, the **NR look sliders** (intensity, style, tone, structure, …) are collected but
-  **not yet applied** by the running server engine (only `warmupFrames`, and only for image jobs).
-- UI "output size" (factor/size) resizes with CPU/ffmpeg scaling followed by DLAA — it is **not**
-  a DLSS SR upscale. Real DLSS upscaling is the `sr` command.
-- **Frame Generation**, **DLSS version selection**, and **feature 18** are **CLI-only**.
+- The UI `nr` engine runs **DLSS Neural Rendering (feature 18)** and applies the look controls this
+  runtime actually honours — **intensity** (a 0–1 blend), **style**, **local tone**, **local
+  structure** and **skin structure** (skin regions only). Model **preset** and **global tone** had
+  no measurable effect on the current driver and are therefore not shown.
+- UI "output size" (factor/size) resizes with CPU/ffmpeg scaling — there is **not** yet a real DLSS SR
+  upscale in the UI (that is the `sr` command); an SR engine for the UI is planned.
+- **Frame Generation** and **DLSS version selection** are **CLI-only**.
 - Input is a **server-side absolute path** (no browser upload yet), so the UI is effectively
   local-host only today.
 
@@ -159,10 +159,10 @@ The driver's NGX core `_nvngx.dll` is loaded from the installed driver, never fr
 
 ## Tests
 
-`bun test` runs **96 unit-test cases** across 6 files — all pure logic, **no GPU required**: the
-PNG codec, ffmpeg/NVENC/NUT planning math, optical-flow math, the version catalog, the forwarder
-shim, and the NGX parameter object. The `tests/diag-*.ts` and `tests/run-*.ts` scripts are manual
-GPU harnesses (run individually with `bun run tests/<file>.ts`), not part of the suite.
+`bun test` runs **110 unit-test cases** across 7 files — all pure logic, **no GPU required**: the
+PNG codec, ffmpeg/NVENC/NUT planning math, encoder selection, optical-flow math, the version
+catalog, the forwarder shim, and the NGX parameter object. The `tests/diag-*.ts` and `tests/run-*.ts`
+scripts are manual GPU harnesses (run individually with `bun run tests/<file>.ts`), not part of the suite.
 
 ## Feature status
 
@@ -170,25 +170,25 @@ Verified against the source on 2026-09-09.
 
 | Capability | CLI | Web UI | Notes |
 | --- | --- | --- | --- |
-| DLSS SR upscaling (feature 1) | ✅ `sr` | ❌ | UI resize is bilinear/lanczos + DLAA, not DLSS SR |
-| DLSS SR at DLAA (same size) | ✅ (via `sr --factor 1`) | ✅ (`nr` engine) | UI `nr` is really SR-DLAA |
-| DLSS Neural Rendering (feature 18) | ✅ `nr` (PNG) | ❌ | not wired into pipeline/server yet |
+| DLSS SR upscaling (feature 1) | ✅ `sr` | ❌ | UI resize is bilinear/lanczos, not DLSS SR |
+| DLSS Neural Rendering (feature 18) | ✅ `nr` (PNG) | ✅ (`nr` engine, image & video) | wired into the pipeline |
 | DLSS Frame Generation (feature 11) | ✅ `fg` (incl. 3×/4× on RTX 50) | ❌ | no cascade needed — native multi-frame |
 | DLSS version enumeration | ✅ `versions` | ❌ (`/api/catalog` exists) | UI has no picker yet |
 | DLSS version selection | ✅ SR (`sr --dlss-version`) | ❌ | FG/NR selection not wired |
-| NR look controls (intensity/tone/…) | ✅ (`nr`) | ⚠️ collected but ignored | server engine ignores them |
-| NVENC (GPU) video encode | ⚠️ if requested | ⚠️ if selected | not auto-selected; frame-gen is CPU-only |
+| NR look controls | ✅ (`nr`) | ✅ working ones | intensity(0–1)/style/tone/structure apply; preset & global tone inert on this driver |
+| NVENC (GPU) video encode | ✅ if requested | ✅ if selected | frame-gen now GPU-encodes by default |
 | RTX Video Super Resolution / TrueHDR | ❌ | ❌ | DLLs present but no code path uses them |
 
 ### Known limitations / roadmap
 
-- **Performance (GPU under-utilized).** Frames make a synchronous CPU→GPU→CPU round trip every
-  frame with no GPU residency or pipelining, optical flow is single-threaded TypeScript, and the
-  default/only video-and-frame-gen encoder is CPU libx264. The NVENC + rational-PTS module
-  (`src/pipeline/nut.ts`) is written but not yet wired in. Planned: auto-select NVENC with CPU
-  fallback, remove per-frame pipe flushes, keep frames GPU-resident, and a native optical-flow
-  backend.
-- **Wire feature 18 into the pipeline/server** so the NR look controls actually take effect.
+- **Performance (GPU under-utilized).** _Done:_ NVENC GPU encoding with CPU fallback (video and
+  frame-gen), removed the per-frame pipe flushes, and exact-rational frame-gen timing. _Still to do:_
+  frames still make a synchronous CPU→GPU→CPU round trip each frame with no GPU residency or
+  pipelining, and optical flow is single-threaded TypeScript — planned: keep frames GPU-resident,
+  pipeline the GPU, and add a native optical-flow backend.
+- **feature 18 in the pipeline — _done_.** The `nr` engine (image and video) now runs DLSS Neural
+  Rendering and applies the look controls this runtime honours. Model preset and global tone have no
+  effect on the current driver; feature 18 also does not consume motion vectors.
 - **Expose SR upscaling, frame generation and version selection in the UI**, and add browser upload.
 - **RTX Video Super Resolution** is not implemented (the DLLs under `runtime/rtx_video` are unused).
 
