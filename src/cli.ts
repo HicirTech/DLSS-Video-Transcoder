@@ -1,9 +1,9 @@
 /**
  * Command line entry point.
  *
- *   bun run src/cli.ts probe [--json] [--adapter N] [--runtime DIR] [--project-init] [--debug-layer]
- *   bun run src/cli.ts forwarder [--out PATH]
- *   bun run src/cli.ts sr <input.png> [output.png] [--factor 2] [--preset L]
+ * Commands: probe | forwarder | sr | nr | fg | versions | help
+ * Run `bun run src/cli.ts help` for the overview or `help <command>` for details.
+ * The command specs in COMMANDS below are the single source of truth for that help.
  */
 import { basename, dirname, extname, join } from "node:path";
 import { decodePng, encodePng, isPng } from "./codec/png.ts";
@@ -27,6 +27,176 @@ function flag(args: string[], name: string): boolean {
 function option(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
+}
+
+interface OptionSpec {
+  /** As typed on the command line, e.g. "--factor N" or "--json". */
+  readonly flag: string;
+  readonly desc: string;
+  readonly def?: string;
+}
+
+interface CommandSpec {
+  readonly name: string;
+  readonly summary: string;
+  readonly usage: string;
+  readonly args?: readonly { readonly name: string; readonly desc: string }[];
+  readonly options: readonly OptionSpec[];
+  readonly notes?: readonly string[];
+}
+
+const RUNTIME_OPT: OptionSpec = { flag: "--runtime DIR", desc: "runtime folder holding the NGX DLLs / workers", def: "<repo>/runtime" };
+const ADAPTER_OPT: OptionSpec = { flag: "--adapter N", desc: "GPU adapter index (from `probe`)", def: "auto" };
+
+const COMMANDS: readonly CommandSpec[] = [
+  {
+    name: "probe",
+    summary: "Inspect the GPU, driver, NGX core and runtime folder; report which DLSS features are ready.",
+    usage: "bun run src/cli.ts probe [options]",
+    options: [
+      { flag: "--json", desc: "print the full report as JSON instead of the human summary" },
+      { flag: "--log", desc: "append the internal probe log lines to the output" },
+      ADAPTER_OPT,
+      RUNTIME_OPT,
+      { flag: "--entry loader|core", desc: "NGX entry point to initialise through", def: "core" },
+      { flag: "--init ext|plain|spy", desc: "which NGX Init variant to call", def: "ext" },
+      { flag: "--project-init", desc: "use the project-scoped Init (app id + project path) instead of the app Init" },
+      { flag: "--null-feature-info", desc: "pass a null FeatureCommonInfo to Init (diagnostic)" },
+      { flag: "--no-requirements", desc: "skip the per-feature GetFeatureRequirements queries" },
+      { flag: "--debug-layer", desc: "enable the D3D12 debug layer (needs the Graphics Tools installed)" },
+    ],
+  },
+  {
+    name: "forwarder",
+    summary: "Generate the x64 `nvngx.dll` shim that makes NGX accept our in-process calls (caller-module check).",
+    usage: "bun run src/cli.ts forwarder [--out PATH]",
+    options: [
+      { flag: "--out PATH", desc: "where to write the generated shim DLL", def: "<repo>/runtime/caller/nvngx.dll" },
+    ],
+    notes: ["Only needed to (re)build the shim by hand; sr/nr build it automatically when missing."],
+  },
+  {
+    name: "sr",
+    summary: "DLSS Super Resolution (NGX feature 1): real upscaling of a single PNG. This is the only true upscaler.",
+    usage: "bun run src/cli.ts sr <input.png> [output.png] [options]",
+    args: [
+      { name: "input.png", desc: "source image (PNG only)" },
+      { name: "output.png", desc: "destination; defaults to <input>.dlss.png next to the input" },
+    ],
+    options: [
+      { flag: "--factor N", desc: "upscale factor; snapped to the nearest DLSS ratio (1.0/1.3/1.5/1.72/2.0/3.0)", def: "2" },
+      { flag: "--preset NAME", desc: "render preset: Default,A,B,C,D,E,F,J,K,L,M,N,O (J-M are the transformer presets)", def: "L" },
+      { flag: "--dlss-version VER", desc: "pick a specific SR DLL version (prefix ok); list them with `versions`", def: "bundled" },
+      RUNTIME_OPT,
+      ADAPTER_OPT,
+    ],
+  },
+  {
+    name: "nr",
+    summary: "DLSS Neural Rendering / 'DLSS 5' (NGX feature 18): enhance a single PNG at the same size (no upscale).",
+    usage: "bun run src/cli.ts nr <input.png> [output.png] [options]",
+    args: [
+      { name: "input.png", desc: "source image (PNG only)" },
+      { name: "output.png", desc: "destination; defaults to <input>.nr.png next to the input" },
+    ],
+    options: [
+      { flag: "--intensity N", desc: "enhancement strength, 0..2 (1 = neutral)", def: String(DEFAULT_NR_SETTINGS.intensity) },
+      { flag: "--preset 0|1|2|3", desc: "model hint (0 = runtime default)", def: String(DEFAULT_NR_SETTINGS.preset) },
+      { flag: "--local-tone N", desc: "local tone mapping, 0..2 (1 = neutral)", def: String(DEFAULT_NR_SETTINGS.localTone) },
+      { flag: "--local-structure N", desc: "local structure / detail, 0..2 (1 = neutral)", def: String(DEFAULT_NR_SETTINGS.localStructure) },
+      RUNTIME_OPT,
+      ADAPTER_OPT,
+    ],
+  },
+  {
+    name: "fg",
+    summary: "DLSS Frame Generation (NGX feature 11): interpolate a video to a higher frame rate via dlssg-worker.exe.",
+    usage: "bun run src/cli.ts fg <input.mp4> [output.mp4] [options]",
+    args: [
+      { name: "input.mp4", desc: "source video (any format ffmpeg can decode)" },
+      { name: "output.mp4", desc: "destination; defaults to <input>.dlssg.mp4 next to the input" },
+    ],
+    options: [
+      { flag: "--multiplier N", desc: "output/input frame ratio (2 = double fps); 2x reliable, up to GPU max", def: "2" },
+      { flag: "--quality N", desc: "libx264 CRF for the encode, 0..51 (lower = better)", def: "20" },
+      RUNTIME_OPT,
+    ],
+  },
+  {
+    name: "versions",
+    summary: "List every DLSS runtime DLL found (per feature), with its version, source and folder.",
+    usage: "bun run src/cli.ts versions [--runtime DIR]",
+    options: [RUNTIME_OPT],
+    notes: ["Use a listed SR version string with `sr --dlss-version`."],
+  },
+  {
+    name: "help",
+    summary: "Show this overview, or detailed help for one command.",
+    usage: "bun run src/cli.ts help [command]",
+    options: [],
+  },
+];
+
+function pad(text: string, width: number): string {
+  return text.length >= width ? text : text + " ".repeat(width - text.length);
+}
+
+function printOverview(): void {
+  const lines: string[] = [];
+  lines.push("neural-render-ts — DLSS image & video processing CLI");
+  lines.push("");
+  lines.push("usage: bun run src/cli.ts <command> [args] [options]");
+  lines.push("       bun run src/cli.ts help <command>     detailed help for one command");
+  lines.push("");
+  lines.push("commands:");
+  const width = Math.max(...COMMANDS.map((c) => c.name.length));
+  for (const c of COMMANDS) lines.push(`  ${pad(c.name, width)}  ${c.summary}`);
+  lines.push("");
+  lines.push("common options (accepted where relevant):");
+  lines.push(`  ${pad(ADAPTER_OPT.flag, 20)} ${ADAPTER_OPT.desc} (default ${ADAPTER_OPT.def})`);
+  lines.push(`  ${pad(RUNTIME_OPT.flag, 20)} ${RUNTIME_OPT.desc} (default ${RUNTIME_OPT.def})`);
+  lines.push(`  ${pad("--help, -h", 20)} show help for the CLI or the given command`);
+  console.log(lines.join("\n"));
+}
+
+function printCommandHelp(spec: CommandSpec): void {
+  const lines: string[] = [];
+  lines.push(`${spec.name} — ${spec.summary}`);
+  lines.push("");
+  lines.push(`usage: ${spec.usage}`);
+  if (spec.args?.length) {
+    lines.push("");
+    lines.push("arguments:");
+    const w = Math.max(...spec.args.map((a) => a.name.length));
+    for (const a of spec.args) lines.push(`  ${pad(a.name, w)}  ${a.desc}`);
+  }
+  if (spec.options.length) {
+    lines.push("");
+    lines.push("options:");
+    const w = Math.max(...spec.options.map((o) => o.flag.length));
+    for (const o of spec.options) {
+      lines.push(`  ${pad(o.flag, w)}  ${o.desc}${o.def !== undefined ? `  (default ${o.def})` : ""}`);
+    }
+  }
+  if (spec.notes?.length) {
+    lines.push("");
+    for (const n of spec.notes) lines.push(`note: ${n}`);
+  }
+  console.log(lines.join("\n"));
+}
+
+function printHelp(command?: string): boolean {
+  if (command) {
+    const spec = COMMANDS.find((c) => c.name === command);
+    if (!spec) {
+      console.error(`unknown command '${command}'. Run 'bun run src/cli.ts help' for the list.`);
+      return false;
+    }
+    printCommandHelp(spec);
+    return true;
+  }
+  printOverview();
+  return true;
 }
 
 function printProbe(report: Awaited<ReturnType<typeof runProbe>>): void {
@@ -68,6 +238,20 @@ function printProbe(report: Awaited<ReturnType<typeof runProbe>>): void {
 
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
+  // Global help: `help`, `--help`/`-h` with no command, or no command at all.
+  if (command === "help") {
+    const ok = printHelp(args.filter((a) => !a.startsWith("-"))[0]);
+    process.exit(ok ? 0 : 1);
+  }
+  if (command === undefined || command === "--help" || command === "-h") {
+    printHelp();
+    process.exit(0);
+  }
+  // Per-command help: `<command> --help` / `-h`.
+  if (flag(args, "--help") || flag(args, "-h")) {
+    const ok = printHelp(command);
+    process.exit(ok ? 0 : 1);
+  }
   switch (command) {
     case "probe": {
       const report = await runProbe({
@@ -221,8 +405,10 @@ async function main(): Promise<void> {
       return;
     }
     default:
-      console.log("usage: bun run src/cli.ts <probe|forwarder|sr|nr|fg|versions> [options]");
-      process.exit(command ? 1 : 0);
+      console.error(`unknown command '${command}'.`);
+      console.error("");
+      printHelp();
+      process.exit(1);
   }
 }
 
