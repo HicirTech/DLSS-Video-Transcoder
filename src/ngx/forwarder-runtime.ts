@@ -8,7 +8,7 @@ import { FFIType, JSCallback } from "bun:ffi";
 import { callableAt } from "../native/com.ts";
 import { asPtr } from "../native/memory.ts";
 import { LOAD_WITH_ALTERED_SEARCH_PATH, NativeModule } from "../native/win32.ts";
-import { FORWARDER_EXPORTS, writeForwarder } from "./forwarder.ts";
+import { FORWARDER_EXPORTS, writeForwarder, writeForwarderSync } from "./forwarder.ts";
 
 export interface ForwarderModule {
   readonly path: string;
@@ -49,6 +49,13 @@ export function loadForwarder(path: string): ForwarderModule {
 export async function prepareForwarder(dir: string): Promise<{ forwarder: ForwarderModule; wrote: boolean }> {
   const path = `${dir.replace(/[\\/]+$/, "")}\\nvngx.dll`;
   const { wrote } = await writeForwarder(path);
+  return { forwarder: loadForwarder(path), wrote };
+}
+
+/** Synchronous sibling of prepareForwarder, for callers that cannot await (engine factories). */
+export function prepareForwarderSync(dir: string): { forwarder: ForwarderModule; wrote: boolean } {
+  const path = `${dir.replace(/[\\/]+$/, "")}\\nvngx.dll`;
+  const { wrote } = writeForwarderSync(path);
   return { forwarder: loadForwarder(path), wrote };
 }
 

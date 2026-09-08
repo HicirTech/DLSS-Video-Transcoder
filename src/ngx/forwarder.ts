@@ -24,6 +24,8 @@
  * enough to keep ASLR happy.
  */
 
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+
 const IMAGE_DOS_SIGNATURE = 0x5a4d;
 const IMAGE_NT_SIGNATURE = 0x00004550;
 const SECTION_ALIGNMENT = 0x1000;
@@ -314,5 +316,18 @@ export async function writeForwarder(path: string): Promise<{ path: string; wrot
     }
   }
   await Bun.write(path, built.bytes);
+  return { path, wrote: true, size: built.bytes.length };
+}
+
+/** Synchronous sibling of writeForwarder, for callers that cannot await (engine factories). */
+export function writeForwarderSync(path: string): { path: string; wrote: boolean; size: number } {
+  const built = buildForwarderDll();
+  if (existsSync(path)) {
+    const current = readFileSync(path);
+    if (current.length === built.bytes.length && current.every((b, i) => b === built.bytes[i])) {
+      return { path, wrote: false, size: built.bytes.length };
+    }
+  }
+  writeFileSync(path, built.bytes);
   return { path, wrote: true, size: built.bytes.length };
 }
