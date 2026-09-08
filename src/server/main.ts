@@ -3,7 +3,7 @@
  * api-types.ts. Start with `bun run src/server/main.ts` (PORT overrides 4080;
  * 3080 is inside a Windows reserved port range on some machines).
  */
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { extname, isAbsolute, join } from "node:path";
 import index from "../../web/index.html";
 import { runProbe } from "../ngx/probe.ts";
@@ -21,6 +21,8 @@ import { JobManager } from "./jobs.ts";
 const ROOT = join(import.meta.dir, "..", "..");
 const RUNTIME_DIR = process.env.NR_RUNTIME_DIR ?? join(ROOT, "runtime");
 const APP_DATA = process.env.NR_APPDATA ?? join(ROOT, "logs");
+const UPLOADS_DIR = join(APP_DATA, "uploads");
+mkdirSync(UPLOADS_DIR, { recursive: true });
 const PORT = Number(process.env.PORT ?? 4080);
 
 const json = (body: unknown, status = 200): Response =>
@@ -77,7 +79,7 @@ const server = Bun.serve({
         }
         if (!isJobRequest(body))
           return fail(
-            "Invalid job request. Expected kind ('image' or 'video'), an absolute input path, engine ('nr' or 'bypass'), motion ('none' or 'flow'), and settings and scale objects.",
+            "Invalid job request. Expected kind ('image' or 'video'), an absolute input path, engine ('sr', 'nr' or 'bypass'), motion ('none' or 'flow'), and settings and scale objects.",
           );
         if (!isAbsolute(body.input) || !existsSync(body.input))
           return fail(`Input file not found: ${body.input}. Provide an absolute path to a file that exists.`);
@@ -100,6 +102,26 @@ const server = Bun.serve({
         return fail("File not found. The 'path' query parameter must be an absolute path to an existing file.", 404);
       const type = MIME[extname(path).toLowerCase()] ?? "application/octet-stream";
       return new Response(Bun.file(path), { headers: { "content-type": type, "cache-control": "no-store" } });
+    },
+    "/api/upload": {
+      // Accept a browser file upload and store it server-side, returning the saved
+      // absolute path to use as a job input. The filename is generated (never taken
+      // from the client) so an upload cannot escape the uploads directory.
+      POST: async (req) => {
+        let form: FormData;
+        try {
+          form = await req.formData();
+        } catch {
+          return fail("Upload must be multipart/form-data with a 'file' field.");
+        }
+        const file = form.get("file");
+        if (!(file instanceof File)) return fail("Upload is missing the 'file' field.");
+        const ext = extname(file.name).toLowerCase().replace(/[^.a-z0-9]/g, "").slice(0, 12);
+        const name = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+        const dest = join(UPLOADS_DIR, name);
+        await Bun.write(dest, file);
+        return json({ path: dest, name: file.name, size: file.size }, 201);
+      },
     },
     "/ws": (req, srv) => (srv.upgrade(req) ? undefined : new Response("upgrade required", { status: 400 })),
   },
