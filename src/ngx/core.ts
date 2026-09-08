@@ -256,13 +256,13 @@ export class NgxCore {
     };
   }
 
-  createFeature(cmdList: number, featureId: number, params: NgxParameters): { result: number; handle: number } {
+  createFeature(cmdList: number, featureId: number, params: { readonly ptr: number }): { result: number; handle: number } {
     const out = new OutPointer();
     const result = this.fn("NVSDK_NGX_D3D12_CreateFeature", [FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.ptr])(cmdList, featureId, params.ptr, out.ptr) as number;
     return { result, handle: out.value };
   }
 
-  evaluateFeature(cmdList: number, handle: number, params: NgxParameters): number {
+  evaluateFeature(cmdList: number, handle: number, params: { readonly ptr: number }): number {
     return this.fn("NVSDK_NGX_D3D12_EvaluateFeature", [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr])(cmdList, handle, params.ptr, null) as number;
   }
 
