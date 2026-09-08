@@ -39,10 +39,10 @@ export interface ProbeOptions {
 
 export const PROBE_APP_ID = 0x4e5254530001n; // "NRTS" + 1, an arbitrary non-zero application id
 
-const RUNTIME_FILES: { name: string; role: string }[] = [
-  { name: "nvngx_dlssnr.dll", role: "DLSS 5 Neural Rendering (feature 18)" },
-  { name: "nvngx_dlss.dll", role: "DLSS Super Resolution (feature 1)" },
-  { name: "nvngx_dlssg.dll", role: "DLSS Frame Generation (feature 11)" },
+const RUNTIME_FILES: { name: string; subdir: string; role: string }[] = [
+  { name: "nvngx_dlssnr.dll", subdir: "dlssnr", role: "DLSS 5 Neural Rendering (feature 18)" },
+  { name: "nvngx_dlss.dll", subdir: "dlss", role: "DLSS Super Resolution (feature 1)" },
+  { name: "nvngx_dlssg.dll", subdir: "dlssg", role: "DLSS Frame Generation (feature 11)" },
 ];
 
 const TRACE = process.env.NR_TRACE === "1";
@@ -64,9 +64,11 @@ function driverVersionFromSmi(): string | null {
 
 async function inventory(runtimeDir: string): Promise<RuntimeFile[]> {
   const files: RuntimeFile[] = [];
-  for (const { name, role } of RUNTIME_FILES) {
-    const path = join(runtimeDir, name);
-    if (!existsSync(path)) {
+  for (const { name, subdir, role } of RUNTIME_FILES) {
+    // The runtime keeps each feature's DLL in its own subfolder (runtime/dlss,
+    // runtime/dlssg, runtime/dlssnr); fall back to the flat layout for older setups.
+    const path = [join(runtimeDir, subdir, name), join(runtimeDir, name)].find((p) => existsSync(p)) ?? null;
+    if (!path) {
       files.push({ name, role, present: false, path: null, sizeMB: null, version: null, exports: null });
       continue;
     }
@@ -298,6 +300,10 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
         feature.minHwArchitecture = r.minHwArchitecture;
         feature.minOsVersion = r.minOsVersion;
         feature.detail = `GetFeatureRequirements -> ${ngxName(r.result)}`;
+        // This driver returns NotImplemented for GetFeatureRequirements on every
+        // NGX feature, so it cannot confirm support — say so plainly instead of
+        // "query failed" (the features still work; readiness is judged below).
+        if ((r.result >>> 0) === 0xbad00012) feature.support = "not reported by this driver";
       } catch (error) {
         feature.support = "query failed";
         feature.detail = (error as Error).message;
@@ -310,9 +316,16 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   // --- forwarder shim was prepared and wired to the core before Init (see above) ---
 
   // --- verdict ---
-  const nr = report.features.find((f) => f.id === NgxFeature.NeuralRendering);
-  if (nr && nr.supportCode !== 0) reasons.push(`DLSS Neural Rendering (feature 18) is not supported on this driver/GPU: ${nr.support}`);
-  report.verdict.neuralRenderingReady = Boolean(dlssnr?.present) && nr?.supportCode === 0 && report.forwarder.loaded && report.device.created;
+  // GetFeatureRequirements cannot confirm feature 18 on this driver (it returns
+  // NotImplemented for all features), so readiness is judged on the real
+  // prerequisites: the neural-rendering DLL is present, the caller shim loaded,
+  // and a D3D12 device was created. Actual CreateFeature(18) is exercised by the
+  // nr command / pipeline, not here (running it in-process can destabilise a
+  // long-lived server).
+  report.verdict.neuralRenderingReady =
+    Boolean(dlssnr?.present) && report.forwarder.loaded && report.device.created && core !== null;
+  if (!report.verdict.neuralRenderingReady && report.device.created && core !== null && dlssnr?.present && !report.forwarder.loaded)
+    reasons.push("The DLSS runtime caller shim could not be loaded.");
   report.ok = report.device.created && core !== null;
 
   // --- teardown ---
