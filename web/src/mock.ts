@@ -622,6 +622,10 @@ export function createMockBackend(): { client: ApiClient; events: JobEventSource
       if (!job) throw new ApiError(404, `No job with id ${id}`);
       return job;
     },
+    uploadFile: async (file) => {
+      await delay(150);
+      return { path: `C:\\mock\\uploads\\${file.name}`, name: file.name, size: file.size };
+    },
     fileUrl: (path) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(mockPreviewSvg(path))}`,
   };
   const events: JobEventSource = {

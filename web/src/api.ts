@@ -29,6 +29,8 @@ export interface ApiClient {
   getJob(id: string): Promise<JobStatus>;
   createJob(request: JobRequest): Promise<JobStatus>;
   cancelJob(id: string): Promise<JobStatus>;
+  /** Uploads a browser file to the server; resolves to the saved absolute path to use as a job input. */
+  uploadFile(file: File): Promise<{ path: string; name: string; size: number }>;
   /** URL that serves the raw bytes of a local file (input / output previews). */
   fileUrl(path: string): string;
 }
@@ -130,6 +132,11 @@ function createHttpClient(): ApiClient {
     getJob: (id) => request<JobStatus>(`/api/jobs/${encodeURIComponent(id)}`),
     createJob: (body) => request<JobStatus>("/api/jobs", postJson(body)),
     cancelJob: (id) => request<JobStatus>(`/api/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
+    uploadFile: (file) => {
+      const form = new FormData();
+      form.append("file", file);
+      return request<{ path: string; name: string; size: number }>("/api/upload", { method: "POST", body: form });
+    },
     fileUrl: (path) => `/api/file?path=${encodeURIComponent(path)}`,
   };
 }
