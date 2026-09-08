@@ -12,6 +12,7 @@
  * Decoded images are always 8-bit RGBA; 16-bit samples are reduced by keeping their high byte.
  * Encoded images are always 8-bit RGBA (colour type 6), filter type 0 on every scanline, a single IDAT chunk.
  */
+import { deflateSync as nodeDeflate, inflateSync as nodeInflate } from "node:zlib";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -399,7 +400,9 @@ export function decodePng(bytes: Uint8Array): RgbaImage {
   }
   let data: Uint8Array;
   try {
-    data = Bun.inflateSync(compressed);
+    // node:zlib, not Bun.inflateSync: Bun 1.4.2's inflate rejects valid multi-block streams
+    // ("invalid stored block lengths") that real encoders (e.g. libpng) emit.
+    data = new Uint8Array(nodeInflate(compressed));
   } catch (err) {
     throw new PngError(`zlib inflate failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -778,7 +781,9 @@ export function encodePng(img: RgbaImage, options: PngEncodeOptions = {}): Uint8
   for (let y = 0, src = 0, dst = 1; y < height; y++, src += rowBytes, dst += stride) {
     raw.set(rgba.subarray(src, src + rowBytes), dst);
   }
-  const compressed = Bun.deflateSync(raw, { level: level as ZlibLevel });
+  // node:zlib, not Bun.deflateSync: Bun 1.4.2's deflate emits a stream that strict decoders
+  // (ffmpeg/libpng) reject, so our own PNGs were unreadable outside this codec.
+  const compressed = new Uint8Array(nodeDeflate(raw, { level }));
 
   const ihdr = new Uint8Array(13);
   writeU32(ihdr, 0, width);

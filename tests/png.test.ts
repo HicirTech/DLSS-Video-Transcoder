@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { deflateSync as nodeDeflate } from "node:zlib";
 import {
   PNG_SIGNATURE,
   PngError,
@@ -69,7 +70,7 @@ function ihdr(width: number, height: number, bitDepth: number, colorType: number
 }
 
 function idat(filteredScanlines: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
-  return chunk("IDAT", Bun.deflateSync(filteredScanlines));
+  return chunk("IDAT", new Uint8Array(nodeDeflate(filteredScanlines)));
 }
 
 const IEND = chunk("IEND");
@@ -503,7 +504,7 @@ describe("hand-constructed images", () => {
   test("multiple IDAT chunks are concatenated before inflating", () => {
     const image = randomImage(23, 11, 77);
     const rows = buildImageData({ width: 23, height: 11, bitDepth: 8, channels: 4, samples: (x, y) => Array.from(image.rgba.subarray((y * 23 + x) * 4, (y * 23 + x) * 4 + 4)) });
-    const stream = Bun.deflateSync(rows);
+    const stream = new Uint8Array(nodeDeflate(rows));
     const parts = [stream.subarray(0, 1), stream.subarray(1, 1), stream.subarray(1, 30), stream.subarray(30)];
     const file = png(ihdr(23, 11, 8, 6), ...parts.map((p) => chunk("IDAT", p)), IEND);
     expectSameImage(decodePng(file), 23, 11, image.rgba);
