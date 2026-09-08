@@ -9,8 +9,10 @@ import { basename, dirname, extname, join } from "node:path";
 import { decodePng, encodePng, isPng } from "./codec/png.ts";
 import { buildForwarderDll } from "./ngx/forwarder.ts";
 import { runProbe } from "./ngx/probe.ts";
+import { DlssNrSession } from "./ngx/nr-render.ts";
 import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
+import { DEFAULT_NR_SETTINGS } from "./server/api-types.ts";
 import { DlssRenderPreset, DLSS_RATIO } from "./ngx/results.ts";
 import { openGpu } from "./pipeline/gpu.ts";
 import { evenSize } from "./pipeline/resize.ts";
@@ -150,6 +152,42 @@ async function main(): Promise<void> {
       // The driver core's Shutdown1 is skipped; exit the process to reclaim NGX.
       process.exit(0);
     }
+    case "nr": {
+      const positional = args.filter((a) => !a.startsWith("--"));
+      const input = positional[0];
+      if (!input) {
+        console.error("usage: bun run src/cli.ts nr <input.png> [output.png] [--intensity 1.6] [--preset 0]");
+        process.exit(1);
+      }
+      const bytes = new Uint8Array(await Bun.file(input).arrayBuffer());
+      if (!isPng(bytes)) {
+        console.error(`${input}: only PNG input is supported by the nr command`);
+        process.exit(1);
+      }
+      const image = decodePng(bytes);
+      const output = positional[1] ?? join(dirname(input), `${basename(input, extname(input))}.nr.png`);
+      const settings = {
+        ...DEFAULT_NR_SETTINGS,
+        intensity: Number(option(args, "--intensity") ?? DEFAULT_NR_SETTINGS.intensity),
+        preset: Number(option(args, "--preset") ?? DEFAULT_NR_SETTINGS.preset) as 0 | 1 | 2 | 3,
+        localTone: Number(option(args, "--local-tone") ?? DEFAULT_NR_SETTINGS.localTone),
+        localStructure: Number(option(args, "--local-structure") ?? DEFAULT_NR_SETTINGS.localStructure),
+      };
+      const session = openGpu({ adapterIndex: option(args, "--adapter") !== undefined ? Number(option(args, "--adapter")) : undefined });
+      const started = performance.now();
+      const nr = DlssNrSession.open(session, {
+        width: image.width,
+        height: image.height,
+        settings,
+        runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
+      });
+      const rgba = nr.evaluate(image.rgba, true);
+      await Bun.write(output, encodePng({ width: image.width, height: image.height, rgba }, { level: 6 }));
+      nr.close();
+      console.log(`DLSS NR: ${image.width}x${image.height} enhanced (intensity ${settings.intensity}, preset ${settings.preset}) in ${(performance.now() - started).toFixed(1)} ms`);
+      console.log(`wrote ${output}`);
+      process.exit(0);
+    }
     case "versions": {
       const catalog = buildRuntimeCatalog(option(args, "--runtime") ?? join(ROOT, "runtime"));
       for (const feature of catalog.features) {
@@ -161,7 +199,7 @@ async function main(): Promise<void> {
       return;
     }
     default:
-      console.log("usage: bun run src/cli.ts <probe|forwarder|sr|versions> [options]");
+      console.log("usage: bun run src/cli.ts <probe|forwarder|sr|nr|versions> [options]");
       process.exit(command ? 1 : 0);
   }
 }
