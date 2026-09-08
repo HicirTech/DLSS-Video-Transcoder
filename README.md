@@ -87,22 +87,25 @@ Served by the Bun server at `/` (Bun bundles `web/index.html` directly — no se
 For front-end-only work, `bun run web/mock-server.ts` serves the UI with mock data on
 http://127.0.0.1:3080/, and appending `?mock=1` uses an in-browser mock client.
 
-**What the UI does today:** run **image** and **video** jobs with two engines — `bypass`
-(a plain GPU passthrough copy, for A/B comparison) and `nr`; a live job queue with WebSocket
-progress; a before/after compare view; a hardware/runtime **probe** panel; and encode settings
-(codec, quality, container, audio) for video. Optical-flow motion can be enabled for video.
+**What the UI does today:** run **image** and **video** jobs with three engines — `sr` (DLSS Super
+Resolution upscaling to the chosen output size), `nr` (DLSS Neural Rendering enhancement), and
+`bypass` (a plain GPU passthrough copy, for A/B comparison); **DLSS Frame Generation** for video
+(2×/3×/4×); **DLSS DLL version selection** per feature; **browser file upload** for the input; a live
+job queue with WebSocket progress; a before/after compare view; a hardware/runtime **probe** panel;
+and encode settings (codec incl. NVENC, quality, container, audio) for video. Optical-flow motion can
+be enabled for video.
 
-**Honest limitations (being addressed):**
+**Notes / honest caveats:**
 
-- The UI `nr` engine runs **DLSS Neural Rendering (feature 18)** and applies the look controls this
-  runtime actually honours — **intensity** (a 0–1 blend), **style**, **local tone**, **local
-  structure** and **skin structure** (skin regions only). Model **preset** and **global tone** had
-  no measurable effect on the current driver and are therefore not shown.
-- UI "output size" (factor/size) resizes with CPU/ffmpeg scaling — there is **not** yet a real DLSS SR
-  upscale in the UI (that is the `sr` command); an SR engine for the UI is planned.
-- **Frame Generation** and **DLSS version selection** are **CLI-only**.
-- Input is a **server-side absolute path** (no browser upload yet), so the UI is effectively
-  local-host only today.
+- The `nr` engine applies the feature-18 controls this runtime actually honours — **intensity**
+  (a 0–1 blend), **style**, **local tone**, **local structure** and **skin structure** (skin only).
+  Model **preset** and **global tone** had no measurable effect on the current driver, so the UI
+  does not show them.
+- **DLSS version selection**: the picker defaults to the bundled DLL. Loading an alternate (not
+  driver-matched) DLSS DLL can intermittently fail to initialise on newer drivers (a known
+  DLSS-Swapper behaviour); the job then reports a clear error and you can retry or pick another.
+- Uploaded files are stored server-side under `logs/uploads/`; the browser sends the file to the
+  server, which runs entirely on your machine.
 
 ## HTTP API
 
@@ -118,11 +121,12 @@ All JSON unless noted. Base is same-origin.
 | `GET /api/jobs` · `POST /api/jobs` | list jobs · submit a `JobRequest` → `JobStatus` (201) |
 | `GET /api/jobs/:id` · `POST /api/jobs/:id/cancel` | one job · cancel it |
 | `GET /api/file?path=<abs>` | raw bytes of a local file (previews; absolute path only) |
+| `POST /api/upload` | multipart file upload; returns `{ path }` (a saved absolute path to use as job input) |
 | `WS /ws` | server→client `WsEvent` stream (`hello` / `job` / `log`) |
 
-`JobRequest`: `{ kind: "image"|"video", input, output?, engine: "bypass"|"nr", motion: "none"|"flow",
-settings: NrSettings, scale: ScaleSettings, encode? }`. Payload shapes are defined in
-[`src/server/api-types.ts`](src/server/api-types.ts).
+`JobRequest`: `{ kind: "image"|"video", input, output?, engine: "sr"|"nr"|"bypass",
+motion: "none"|"flow", settings, scale, encode?, frameGen?: { multiplier }, dllDir? }`. Payload shapes
+are defined in [`src/server/api-types.ts`](src/server/api-types.ts).
 
 ## Architecture
 
@@ -170,13 +174,14 @@ Verified against the source on 2026-09-09.
 
 | Capability | CLI | Web UI | Notes |
 | --- | --- | --- | --- |
-| DLSS SR upscaling (feature 1) | ✅ `sr` | ❌ | UI resize is bilinear/lanczos, not DLSS SR |
+| DLSS SR upscaling (feature 1) | ✅ `sr` | ✅ (`sr` engine) | real render/output split in image & video |
 | DLSS Neural Rendering (feature 18) | ✅ `nr` (PNG) | ✅ (`nr` engine, image & video) | wired into the pipeline |
-| DLSS Frame Generation (feature 11) | ✅ `fg` (incl. 3×/4× on RTX 50) | ❌ | no cascade needed — native multi-frame |
-| DLSS version enumeration | ✅ `versions` | ❌ (`/api/catalog` exists) | UI has no picker yet |
-| DLSS version selection | ✅ SR (`sr --dlss-version`) | ❌ | FG/NR selection not wired |
+| DLSS Frame Generation (feature 11) | ✅ `fg` (incl. 3×/4× on RTX 50) | ✅ (video tab) | no cascade needed — native multi-frame |
+| DLSS version enumeration | ✅ `versions` | ✅ (`/api/catalog`) | shown in the version picker |
+| DLSS version selection | ✅ SR (`sr --dlss-version`) | ✅ (sr/nr) | alternate DLLs may fail to init on newer drivers |
+| Browser file upload | n/a | ✅ | POST /api/upload; stored under logs/uploads/ |
 | NR look controls | ✅ (`nr`) | ✅ working ones | intensity(0–1)/style/tone/structure apply; preset & global tone inert on this driver |
-| NVENC (GPU) video encode | ✅ if requested | ✅ if selected | frame-gen now GPU-encodes by default |
+| NVENC (GPU) video encode | ✅ if requested | ✅ if selected | frame-gen GPU-encodes by default |
 | RTX Video Super Resolution / TrueHDR | ❌ | ❌ | DLLs present but no code path uses them |
 
 ### Known limitations / roadmap
@@ -189,7 +194,8 @@ Verified against the source on 2026-09-09.
 - **feature 18 in the pipeline — _done_.** The `nr` engine (image and video) now runs DLSS Neural
   Rendering and applies the look controls this runtime honours. Model preset and global tone have no
   effect on the current driver; feature 18 also does not consume motion vectors.
-- **Expose SR upscaling, frame generation and version selection in the UI**, and add browser upload.
+- **UI feature exposure — _done_.** SR upscaling, frame generation, DLSS version selection and
+  browser upload are now in the web UI (see the table above).
 - **RTX Video Super Resolution** is not implemented (the DLLs under `runtime/rtx_video` are unused).
 
 ## License
