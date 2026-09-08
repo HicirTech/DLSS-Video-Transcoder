@@ -12,7 +12,7 @@ import { runProbe } from "./ngx/probe.ts";
 import { DlssNrSession } from "./ngx/nr-render.ts";
 import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
-import { DEFAULT_NR_SETTINGS } from "./server/api-types.ts";
+import { DEFAULT_NR_SETTINGS, type EncodeSettings } from "./server/api-types.ts";
 import { DlssRenderPreset, DLSS_RATIO } from "./ngx/results.ts";
 import { processFrameGen } from "./pipeline/framegen.ts";
 import { openGpu } from "./pipeline/gpu.ts";
@@ -118,7 +118,8 @@ const COMMANDS: readonly CommandSpec[] = [
     ],
     options: [
       { flag: "--multiplier N", desc: "output/input frame ratio (2 = double fps); 2x reliable, up to GPU max", def: "2" },
-      { flag: "--quality N", desc: "libx264 CRF for the encode, 0..51 (lower = better)", def: "20" },
+      { flag: "--codec NAME", desc: "encoder: h264, hevc, av1, or h264_nvenc/hevc_nvenc/av1_nvenc for GPU", def: "GPU NVENC when available, else libx264" },
+      { flag: "--quality N", desc: "encoder quality (CRF for CPU, CQ for NVENC), 0..51 (lower = better)", def: "20" },
       RUNTIME_OPT,
     ],
   },
@@ -388,6 +389,7 @@ async function main(): Promise<void> {
         output: positional[1],
         multiplier: Number(option(args, "--multiplier") ?? 2),
         quality: Number(option(args, "--quality") ?? 20),
+        codec: option(args, "--codec") as EncodeSettings["codec"] | undefined,
         runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
         onProgress: (f, m, frames) => {
           if (frames === undefined) console.log(`  ${(f * 100).toFixed(0)}%  ${m}`);
