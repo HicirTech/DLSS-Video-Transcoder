@@ -100,8 +100,8 @@ const COMMANDS: readonly CommandSpec[] = [
       { name: "output.png", desc: "destination; defaults to <input>.nr.png next to the input" },
     ],
     options: [
-      { flag: "--intensity F", desc: "overall enhancement strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.intensity) },
-      { flag: "--preset ID", desc: "neural model preset: 0 = runtime default, or 10/11/12/13 = transformer models J/K/L/M", def: String(DEFAULT_NR_SETTINGS.preset) },
+      { flag: "--intensity F", desc: "enhancement blend, 0..1 (0 = original, 1 = full; values above 1 are clamped)", def: String(DEFAULT_NR_SETTINGS.intensity) },
+      { flag: "--preset ID", desc: "neural model preset hint (0, or 10/11/12/13 = J/K/L/M); note: no visible effect on the current runtime", def: String(DEFAULT_NR_SETTINGS.preset) },
       { flag: "--local-tone F", desc: "local tone-mapping strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localTone) },
       { flag: "--local-structure F", desc: "local detail / structure strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localStructure) },
       RUNTIME_OPT,
