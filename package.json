@@ -1,0 +1,29 @@
+{
+  "name": "neural-render-ts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DLSS 5 neural rendering for photos and video, written in TypeScript on Bun (D3D12 and NGX through bun:ffi).",
+  "scripts": {
+    "cli": "bun run src/cli.ts",
+    "probe": "bun run src/cli.ts probe",
+    "dev": "bun --hot run src/server/main.ts",
+    "start": "bun run src/server/main.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^9.4.0",
+    "@mui/material": "^9.4.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "typescript": "^7.0.2"
+  }
+}
