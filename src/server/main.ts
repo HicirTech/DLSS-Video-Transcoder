@@ -45,7 +45,7 @@ function isJobRequest(value: unknown): value is JobRequest {
   return (
     (v.kind === "image" || v.kind === "video") &&
     typeof v.input === "string" &&
-    (v.engine === "bypass" || v.engine === "nr") &&
+    (v.engine === "bypass" || v.engine === "nr" || v.engine === "sr") &&
     (v.motion === "none" || v.motion === "flow") &&
     typeof v.settings === "object" &&
     v.settings !== null &&

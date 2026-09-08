@@ -39,6 +39,8 @@ async function run(message: RunMessage): Promise<void> {
       // Registers the neural engine with the engine factory (kept out of the
       // bypass path so a missing runtime never blocks plumbing checks).
       await import("../ngx/nr.ts");
+    } else if (request.engine === "sr") {
+      await import("../ngx/sr-engine.ts");
     }
     if (request.kind === "image") {
       const result = await processImage({

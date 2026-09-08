@@ -15,7 +15,7 @@
  *   /ws  server -> client messages are WsEvent JSON; the client never needs to send anything.
  */
 
-export type EngineKind = "bypass" | "nr";
+export type EngineKind = "bypass" | "nr" | "sr";
 export type MotionKind = "none" | "flow";
 export type NrPath = "auto" | "core" | "snippet";
 

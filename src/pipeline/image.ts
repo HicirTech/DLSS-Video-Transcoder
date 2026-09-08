@@ -57,23 +57,33 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
   if (!isPng(bytes)) throw new Error(`${options.input}: image jobs currently accept PNG input only. Convert the file to PNG and try again.`);
   const decoded = decodePng(bytes);
   const target = resolveTargetSize(decoded.width, decoded.height, options.scale);
-  progress(0.1, `decoded ${decoded.width}x${decoded.height}, working size ${target.width}x${target.height}`);
-  const working = resizeRgba(decoded.rgba, decoded.width, decoded.height, target.width, target.height);
+  // The SR engine upscales inside DLSS, so feed it the source frame and let it
+  // write the larger output. Other engines get a frame pre-resized to the target.
+  const upscaling = options.engine === "sr";
+  const renderWidth = upscaling ? decoded.width : target.width;
+  const renderHeight = upscaling ? decoded.height : target.height;
+  progress(
+    0.1,
+    `decoded ${decoded.width}x${decoded.height}, ${upscaling ? `upscaling to ${target.width}x${target.height}` : `working size ${target.width}x${target.height}`}`,
+  );
+  const working = upscaling ? decoded.rgba : resizeRgba(decoded.rgba, decoded.width, decoded.height, target.width, target.height);
 
   const session = openGpu({ adapterIndex: options.adapterIndex, debugLayer: options.debugLayer });
   let passes = 0;
   let result: Uint8Array;
   try {
     const engine = createEngine(options.engine, session, {
-      width: target.width,
-      height: target.height,
+      width: renderWidth,
+      height: renderHeight,
+      outputWidth: upscaling ? target.width : undefined,
+      outputHeight: upscaling ? target.height : undefined,
       settings: options.settings,
       runtimeDir: options.runtimeDir,
       appDataPath: options.appDataPath,
     });
     try {
       // A still image has no history; run extra passes so temporal state settles.
-      const total = options.engine === "nr" ? Math.max(1, options.settings.warmupFrames + 1) : 1;
+      const total = options.engine !== "bypass" ? Math.max(1, options.settings.warmupFrames + 1) : 1;
       result = working;
       for (let i = 0; i < total; i++) {
         result = engine.process({ rgba: working, reset: i === 0, motion: null });

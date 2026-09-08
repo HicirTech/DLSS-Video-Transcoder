@@ -202,12 +202,19 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const info = probeVideo(ffprobe, options.input);
   const target = resolveTargetSize(info.width, info.height, options.scale);
   const output = options.output ?? defaultVideoOutput(options.input, options.engine, encode.container);
-  progress(0, `source ${info.width}x${info.height} ${info.codec} ${info.fpsText} fps, ${info.frames ?? "?"} frames; working size ${target.width}x${target.height}`);
+  // SR upscales inside DLSS: decode at source size and let the engine write the
+  // target size. Other engines get frames pre-scaled to the target by ffmpeg.
+  const upscaling = options.engine === "sr";
+  const renderWidth = upscaling ? info.width : target.width;
+  const renderHeight = upscaling ? info.height : target.height;
+  progress(0, `source ${info.width}x${info.height} ${info.codec} ${info.fpsText} fps, ${info.frames ?? "?"} frames; ${upscaling ? `upscaling to ${target.width}x${target.height}` : `working size ${target.width}x${target.height}`}`);
 
   const session = openGpu({ adapterIndex: options.adapterIndex, debugLayer: options.debugLayer });
   const engine = createEngine(options.engine, session, {
-    width: target.width,
-    height: target.height,
+    width: renderWidth,
+    height: renderHeight,
+    outputWidth: upscaling ? target.width : undefined,
+    outputHeight: upscaling ? target.height : undefined,
     settings: options.settings,
     runtimeDir: options.runtimeDir,
     appDataPath: options.appDataPath,
@@ -216,7 +223,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const outHeight = engine.outputHeight;
 
   const decodeArgs = [ffmpeg, "-v", "error", "-nostdin", "-i", options.input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba"];
-  if (target.width !== info.width || target.height !== info.height) decodeArgs.push("-vf", `scale=${target.width}:${target.height}:flags=lanczos`);
+  if (renderWidth !== info.width || renderHeight !== info.height) decodeArgs.push("-vf", `scale=${renderWidth}:${renderHeight}:flags=lanczos`);
   decodeArgs.push("pipe:1");
   const decoder = Bun.spawn(decodeArgs, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
 
@@ -248,10 +255,11 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   ];
   const encoder = Bun.spawn(encodeArgs, { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
 
-  const frameBytes = target.width * target.height * 4;
+  // Decoded frames arrive at the render size (source for SR, target otherwise).
+  const frameBytes = renderWidth * renderHeight * 4;
   const reader = new FrameReader(decoder.stdout);
-  const cuts = new SceneCutDetector(target.width, target.height);
-  const estimator = options.motion === "flow" ? createMotionEstimator(target.width, target.height) : null;
+  const cuts = new SceneCutDetector(renderWidth, renderHeight);
+  const estimator = options.motion === "flow" ? createMotionEstimator(renderWidth, renderHeight) : null;
   let frames = 0;
   let sceneCuts = 0;
   try {
