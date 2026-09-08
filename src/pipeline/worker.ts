@@ -59,6 +59,23 @@ async function run(message: RunMessage): Promise<void> {
       post({ type: "done", id, output: result.output, detail: { ...result } });
       return;
     }
+    if (request.frameGen) {
+      const { processFrameGen } = await import("./framegen.ts");
+      const result = await processFrameGen({
+        input: request.input,
+        output: request.output,
+        multiplier: request.frameGen.multiplier,
+        quality: request.encode?.quality,
+        codec: request.encode?.codec,
+        runtimeDir: message.runtimeDir,
+        onProgress: (fraction, text, frames) => {
+          post({ type: "progress", id, fraction, message: text });
+          if (frames === undefined) log(text);
+        },
+      });
+      post({ type: "done", id, output: result.output, detail: { ...result } });
+      return;
+    }
     const { processVideo } = await import("./video.ts");
     const result = await processVideo({
       input: request.input,
