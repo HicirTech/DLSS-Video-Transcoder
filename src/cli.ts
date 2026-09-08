@@ -14,6 +14,7 @@ import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
 import { DEFAULT_NR_SETTINGS } from "./server/api-types.ts";
 import { DlssRenderPreset, DLSS_RATIO } from "./ngx/results.ts";
+import { processFrameGen } from "./pipeline/framegen.ts";
 import { openGpu } from "./pipeline/gpu.ts";
 import { evenSize } from "./pipeline/resize.ts";
 
@@ -188,6 +189,27 @@ async function main(): Promise<void> {
       console.log(`wrote ${output}`);
       process.exit(0);
     }
+    case "fg": {
+      const positional = args.filter((a) => !a.startsWith("--"));
+      const input = positional[0];
+      if (!input) {
+        console.error("usage: bun run src/cli.ts fg <input.mp4> [output.mp4] [--multiplier 2] [--quality 20]");
+        process.exit(1);
+      }
+      const result = await processFrameGen({
+        input,
+        output: positional[1],
+        multiplier: Number(option(args, "--multiplier") ?? 2),
+        quality: Number(option(args, "--quality") ?? 20),
+        runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
+        onProgress: (f, m, frames) => {
+          if (frames === undefined) console.log(`  ${(f * 100).toFixed(0)}%  ${m}`);
+        },
+      });
+      console.log(`DLSS Frame Generation: ${result.inputFrames} -> ${result.outputFrames} frames, ${result.sourceFps.toFixed(2)} -> ${result.outputFps.toFixed(2)} fps in ${result.ms} ms`);
+      console.log(`wrote ${result.output}`);
+      process.exit(0);
+    }
     case "versions": {
       const catalog = buildRuntimeCatalog(option(args, "--runtime") ?? join(ROOT, "runtime"));
       for (const feature of catalog.features) {
@@ -199,7 +221,7 @@ async function main(): Promise<void> {
       return;
     }
     default:
-      console.log("usage: bun run src/cli.ts <probe|forwarder|sr|nr|versions> [options]");
+      console.log("usage: bun run src/cli.ts <probe|forwarder|sr|nr|fg|versions> [options]");
       process.exit(command ? 1 : 0);
   }
 }
