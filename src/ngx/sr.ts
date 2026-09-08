@@ -23,7 +23,7 @@ import {
 } from "../native/d3d12.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
 import { FeatureCommonInfo, NgxCore } from "./core.ts";
-import { prepareForwarder } from "./forwarder-runtime.ts";
+import { prepareForwarderSync } from "./forwarder-runtime.ts";
 import { NgxParam, NgxParameters } from "./params.ts";
 import { DLSS_PRESET_PARAM, DlssCreateFlag, DlssRenderPreset, ngxCheck } from "./results.ts";
 
@@ -65,12 +65,12 @@ export class DlssSrSession {
     private readonly forwarderKeep: unknown,
   ) {}
 
-  static async open(session: GpuSession, opts: SrOptions): Promise<DlssSrSession> {
+  static open(session: GpuSession, opts: SrOptions): DlssSrSession {
     const appData = opts.appDataPath ?? join(opts.runtimeDir, "..", "logs");
     mkdirSync(appData, { recursive: true });
 
     const core = NgxCore.load(); // driver core
-    const { forwarder } = await prepareForwarder(join(opts.runtimeDir, "caller"));
+    const { forwarder } = prepareForwarderSync(join(opts.runtimeDir, "caller"));
     core.useForwarder(forwarder);
     ngxCheck(
       core.initExt(session.device.ptr, SR_APP_ID, appData, new FeatureCommonInfo([join(opts.runtimeDir, "dlss")])),
