@@ -178,6 +178,28 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     }
   }
 
+  // --- forwarder shim: prepared before Init so every NGX call routes through nvngx.dll ---
+  if (core) {
+    try {
+      const callerDir = join(runtimeDir, "caller");
+      mkdirSync(callerDir, { recursive: true });
+      trace("prepareForwarder");
+      const { forwarder, wrote } = await prepareForwarder(callerDir);
+      report.forwarder.path = forwarder.path;
+      report.forwarder.generated = true;
+      report.forwarder.loaded = true;
+      core.useForwarder(forwarder);
+      say(`forwarder ${wrote ? "written" : "up to date"} and wired to the NGX core`);
+      const test = selfTestForwarder(forwarder);
+      report.forwarder.selfTest = `${test.ok ? "ok" : "FAILED"}: ${test.detail}`;
+      say(`forwarder self-test ${test.ok ? "passed" : "failed"}: ${test.detail}`);
+      if (!test.ok) reasons.push("forwarder self-test failed");
+    } catch (error) {
+      report.forwarder.selfTest = `error: ${(error as Error).message}`;
+      reasons.push(`forwarder could not be generated or loaded: ${(error as Error).message}`);
+    }
+  }
+
   // --- Init first: the core keeps global state that later queries rely on ---
   if (core && device) {
     report.ngxInit.attempted = true;
@@ -285,24 +307,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     }
   }
 
-  // --- forwarder shim ---
-  try {
-    const callerDir = join(runtimeDir, "caller");
-    mkdirSync(callerDir, { recursive: true });
-    trace("prepareForwarder");
-    const { forwarder, wrote } = await prepareForwarder(callerDir);
-    report.forwarder.path = forwarder.path;
-    report.forwarder.generated = true;
-    report.forwarder.loaded = true;
-    say(`forwarder ${wrote ? "written" : "up to date"} at ${forwarder.path}`);
-    const test = selfTestForwarder(forwarder);
-    report.forwarder.selfTest = `${test.ok ? "ok" : "FAILED"}: ${test.detail}`;
-    say(`forwarder self-test ${test.ok ? "passed" : "failed"}: ${test.detail}`);
-    if (!test.ok) reasons.push("forwarder self-test failed");
-  } catch (error) {
-    report.forwarder.selfTest = `error: ${(error as Error).message}`;
-    reasons.push(`forwarder could not be generated or loaded: ${(error as Error).message}`);
-  }
+  // --- forwarder shim was prepared and wired to the core before Init (see above) ---
 
   // --- verdict ---
   const nr = report.features.find((f) => f.id === NgxFeature.NeuralRendering);
@@ -311,13 +316,17 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   report.ok = report.device.created && core !== null;
 
   // --- teardown ---
+  // The driver's _nvngx.dll core releases the device inside Shutdown1, so a
+  // second ID3D12Device::Release() double-frees it (a fault at a hooked vtable
+  // slot). Release the device ourselves only when NGX never initialised.
+  const ngxWasInitialised = core?.isInitialised ?? false;
   try {
     trace("NVSDK_NGX_D3D12_Shutdown1");
     core?.shutdown();
   } catch {
     /* ignore */
   }
-  device?.release();
+  if (!ngxWasInitialised) device?.release();
   for (const a of adapters) a.release();
   factory?.release();
   return report;
