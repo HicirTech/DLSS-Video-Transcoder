@@ -27,21 +27,22 @@ export type NrPath = "auto" | "core" | "snippet";
  */
 export interface NrSettings {
   /**
-   * Neural model preset hint (sent as DLSSNR.Hint.Render.Preset, i32):
-   * 0 = runtime default; 10/11/12/13 = transformer model revisions J/K/L/M (later letter = newer).
+   * Neural model preset hint (DLSSNR.Hint.Render.Preset, i32): 0 = runtime default; 10/11/12/13 =
+   * transformer models J/K/L/M. NOTE: verified to have no visible effect on the current runtime,
+   * so the UI does not surface it; kept for forward compatibility.
    */
   preset: 0 | 10 | 11 | 12 | 13;
-  /** Look style: 0 = default, 1 = natural, 2 = cinematic. */
+  /** Look style: 0 = default, 1 = natural, 2 = cinematic. (Verified to change the result.) */
   style: 0 | 1 | 2;
-  /** Overall enhancement strength (float). Typical 0..2, 1 = neutral. */
+  /** Overall enhancement blend, 0..1 (0 = off / original, 1 = full). Values above 1 are clamped. */
   intensity: number;
   /** Local tone-mapping strength (float). Typical 0..2, 1 = neutral. */
   localTone: number;
   /** Local detail / micro-structure strength (float). Typical 0..2, 1 = neutral. */
   localStructure: number;
-  /** Skin detail strength (float). Typical -1..2; -1 = runtime default, 1 = neutral. */
+  /** Skin detail strength (float). Typical -1..2; -1 = runtime default. Affects skin regions only. */
   skinStructure: number;
-  /** Global tone-mapping strength (float), or null to not send it (runtime keeps its own). */
+  /** Global tone-mapping strength, or null. NOTE: not applied by the current runtime. */
   globalTone: number | null;
   /** Let the runtime derive the processed-region mask instead of processing the whole frame. */
   autoMask: boolean;
