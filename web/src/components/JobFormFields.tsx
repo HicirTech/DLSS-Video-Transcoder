@@ -1,4 +1,4 @@
-import { FormControl, InputLabel, MenuItem, Select, Stack, TextField } from "@mui/material";
+import { FormControl, FormHelperText, InputLabel, MenuItem, Select, Stack, TextField } from "@mui/material";
 import type { EngineKind, MotionKind } from "../../../src/server/api-types";
 
 interface PathFieldsProps {
@@ -55,9 +55,13 @@ export function EngineSelect({ value, disabled, onChange }: EngineSelectProps) {
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
-        <MenuItem value="nr">Neural rendering (NGX feature 18)</MenuItem>
-        <MenuItem value="bypass">Bypass (D3D12 copy, no NGX)</MenuItem>
+        <MenuItem value="nr">DLSS Neural Rendering</MenuItem>
+        <MenuItem value="bypass">Bypass (passthrough copy, no DLSS)</MenuItem>
       </Select>
+      <FormHelperText>
+        Neural rendering enhances each frame with DLSS at its current size. Bypass copies frames unchanged, for
+        comparison or testing.
+      </FormHelperText>
     </FormControl>
   );
 }
@@ -78,9 +82,13 @@ export function MotionSelect({ value, disabled, onChange }: MotionSelectProps) {
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
-        <MenuItem value="none">None (frames independent)</MenuItem>
-        <MenuItem value="flow">Optical flow vectors</MenuItem>
+        <MenuItem value="none">None — process each frame independently</MenuItem>
+        <MenuItem value="flow">Optical flow (estimate motion between frames)</MenuItem>
       </Select>
+      <FormHelperText>
+        Optical flow estimates motion between frames for steadier temporal results, but the current estimator is
+        slow.
+      </FormHelperText>
     </FormControl>
   );
 }

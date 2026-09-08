@@ -8,12 +8,12 @@ interface EncodeSettingsEditorProps {
 }
 
 const CODECS: Array<{ value: EncodeSettings["codec"]; label: string }> = [
-  { value: "h264", label: "H.264 (libx264)" },
-  { value: "hevc", label: "HEVC (libx265)" },
+  { value: "h264", label: "H.264 (software)" },
+  { value: "hevc", label: "HEVC / H.265 (software)" },
   { value: "av1", label: "AV1 (software)" },
-  { value: "h264_nvenc", label: "H.264 NVENC" },
-  { value: "hevc_nvenc", label: "HEVC NVENC" },
-  { value: "av1_nvenc", label: "AV1 NVENC" },
+  { value: "h264_nvenc", label: "H.264 (NVIDIA GPU)" },
+  { value: "hevc_nvenc", label: "HEVC / H.265 (NVIDIA GPU)" },
+  { value: "av1_nvenc", label: "AV1 (NVIDIA GPU)" },
 ];
 
 export function EncodeSettingsEditor({ value, onChange }: EncodeSettingsEditorProps) {
@@ -43,8 +43,8 @@ export function EncodeSettingsEditor({ value, onChange }: EncodeSettingsEditorPr
         max={51}
         step={1}
         integer
-        helperText="Lower is better"
-        sx={{ width: 160 }}
+        helperText="0–51, lower = better quality and larger file. Default 18."
+        sx={{ width: 240 }}
         onChange={(quality) => update({ quality })}
       />
       <FormControl sx={{ minWidth: 120 }}>
@@ -63,7 +63,7 @@ export function EncodeSettingsEditor({ value, onChange }: EncodeSettingsEditorPr
       <FormControlLabel
         sx={{ ml: 0, mt: 0.5 }}
         control={<Switch checked={value.copyAudio} onChange={(_event, checked) => update({ copyAudio: checked })} />}
-        label="Copy audio"
+        label="Copy source audio track"
       />
     </Stack>
   );

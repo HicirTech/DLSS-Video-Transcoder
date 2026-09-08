@@ -20,9 +20,9 @@ export function ScaleSettingsEditor({ value, onChange }: ScaleSettingsEditorProp
           value={value.mode}
           onChange={(event) => update({ mode: event.target.value })}
         >
-          <MenuItem value="none">Keep source size</MenuItem>
-          <MenuItem value="factor">Multiply by factor</MenuItem>
-          <MenuItem value="size">Explicit size</MenuItem>
+          <MenuItem value="none">None — keep source size</MenuItem>
+          <MenuItem value="factor">Multiply by a factor</MenuItem>
+          <MenuItem value="size">Set exact width × height</MenuItem>
         </Select>
       </FormControl>
       {value.mode === "factor" ? (
@@ -32,7 +32,8 @@ export function ScaleSettingsEditor({ value, onChange }: ScaleSettingsEditorProp
           min={0.25}
           max={8}
           step={0.25}
-          sx={{ width: 140 }}
+          helperText="Multiplies source resolution. 0.25–8×, default 1.5×."
+          sx={{ width: 200 }}
           onChange={(factor) => update({ factor })}
         />
       ) : null}
@@ -45,7 +46,8 @@ export function ScaleSettingsEditor({ value, onChange }: ScaleSettingsEditorProp
             max={16384}
             step={16}
             integer
-            sx={{ width: 140 }}
+            helperText="Output width in pixels (16–16384). Default 1920."
+            sx={{ width: 220 }}
             onChange={(width) => update({ width })}
           />
           <NumberField
@@ -55,7 +57,8 @@ export function ScaleSettingsEditor({ value, onChange }: ScaleSettingsEditorProp
             max={16384}
             step={16}
             integer
-            sx={{ width: 140 }}
+            helperText="Output height in pixels (16–16384). Default 1080."
+            sx={{ width: 220 }}
             onChange={(height) => update({ height })}
           />
         </>

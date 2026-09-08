@@ -12,9 +12,9 @@ import { NumberField } from "./NumberField";
 import { Mono, Section } from "./Section";
 
 const NR_PATH_OPTIONS: Array<{ value: NrPath; label: string; hint: string }> = [
-  { value: "auto", label: "Auto", hint: "Prefer the driver core; fall back to the runtime DLL when the core refuses feature 18." },
-  { value: "core", label: "Driver core (_nvngx.dll)", hint: "Always go through the NGX core shipped with the driver." },
-  { value: "snippet", label: "Runtime DLL (snippet)", hint: "Load the neural rendering runtime DLL directly, bypassing the driver core." },
+  { value: "auto", label: "Auto (recommended)", hint: "Prefer the neural rendering built into your GPU driver, and fall back to the standalone runtime DLL if the driver cannot run it." },
+  { value: "core", label: "Driver built-in (_nvngx.dll)", hint: "Always use the neural rendering built into your GPU driver." },
+  { value: "snippet", label: "Standalone runtime DLL (nvngx_dlssnr.dll)", hint: "Load the standalone neural rendering DLL directly, bypassing the driver's built-in copy." },
 ];
 
 export function SettingsPanel() {
@@ -39,13 +39,13 @@ export function SettingsPanel() {
 
   return (
     <Stack spacing={3} sx={{ maxWidth: 720 }}>
-      <Section title="NGX entry point">
+      <Section title="Neural rendering runtime">
         <Stack spacing={1}>
-          <FormControl sx={{ maxWidth: 360 }}>
-            <InputLabel id="nr-path-label">NGX path</InputLabel>
+          <FormControl sx={{ maxWidth: 420 }}>
+            <InputLabel id="nr-path-label">Neural rendering path</InputLabel>
             <Select<NrPath>
               labelId="nr-path-label"
-              label="NGX path"
+              label="Neural rendering path"
               value={settings.nr.nrPath}
               onChange={(event) => setNr({ ...settings.nr, nrPath: event.target.value })}
             >
@@ -76,7 +76,7 @@ export function SettingsPanel() {
           />
           <Typography variant="caption" color="text.secondary">
             Extra evaluations of the first frame so the temporal state settles before the output is taken. Images use
-            this; videos settle naturally over their first frames.
+            this; videos settle naturally over their first frames. Use 0 or more; default 4.
           </Typography>
         </Stack>
       </Section>
@@ -93,8 +93,8 @@ export function SettingsPanel() {
           </Stack>
           <Typography variant="caption" color="text.secondary">
             Neural rendering, scale and encode settings persist in this browser under the localStorage key{" "}
-            <Mono>{STORAGE_KEY}</Mono>. Reset uses the defaults from the API contract; the second button asks the
-            server for its own.
+            <Mono>{STORAGE_KEY}</Mono>. Reset to defaults restores the app's built-in defaults; Load server defaults
+            fetches the server's own instead.
           </Typography>
           <LogPanel lines={JSON.stringify(settings, null, 2).split("\n")} maxHeight={320} />
         </Stack>
