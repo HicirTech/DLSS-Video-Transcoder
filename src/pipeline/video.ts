@@ -7,6 +7,7 @@ import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings, EngineKind, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { DEFAULT_ENCODE_SETTINGS } from "../server/api-types.ts";
 import { createEngine } from "./engine.ts";
+import { createMotionEstimator } from "./flow.ts";
 import { openGpu } from "./gpu.ts";
 import { resolveTargetSize } from "./image.ts";
 import { findTool } from "./tools.ts";
@@ -190,9 +191,8 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   if (!ffmpeg || !ffprobe) {
     throw new Error("ffmpeg and ffprobe are required for video jobs (install with `winget install Gyan.FFmpeg` or set FFMPEG_PATH / FFPROBE_PATH)");
   }
-  if (options.motion === "flow") {
-    throw new Error("motion=flow is not available yet; the optical-flow motion source has not been implemented, use motion=none");
-  }
+  // motion="flow" derives per-frame motion vectors from an optical-flow
+  // estimator wired into the frame loop below; motion="none" feeds zero motion.
   const encode = options.encode ?? DEFAULT_ENCODE_SETTINGS;
   const info = probeVideo(ffprobe, options.input);
   const target = resolveTargetSize(info.width, info.height, options.scale);
@@ -246,16 +246,27 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const frameBytes = target.width * target.height * 4;
   const reader = new FrameReader(decoder.stdout);
   const cuts = new SceneCutDetector(target.width, target.height);
+  const estimator = options.motion === "flow" ? createMotionEstimator(target.width, target.height) : null;
   let frames = 0;
   let sceneCuts = 0;
   try {
     for (;;) {
       const rgba = await reader.next(frameBytes);
       if (!rgba) break;
-      const cut = frames > 0 && cuts.isCut(rgba);
-      if (cut) sceneCuts++;
-      else if (frames === 0) cuts.isCut(rgba);
-      const result = engine.process({ rgba, reset: frames === 0 || cut, motion: null });
+      let reset: boolean;
+      let motion: Float32Array | null = null;
+      if (estimator) {
+        const guide = estimator.process(rgba);
+        reset = frames === 0 || guide.reset;
+        motion = guide.motion;
+        if (guide.reset && frames > 0) sceneCuts++;
+      } else {
+        const cut = frames > 0 && cuts.isCut(rgba);
+        if (cut) sceneCuts++;
+        else if (frames === 0) cuts.isCut(rgba);
+        reset = frames === 0 || cut;
+      }
+      const result = engine.process({ rgba, reset, motion });
       const wrote = encoder.stdin.write(result);
       if (wrote instanceof Promise) await wrote;
       await encoder.stdin.flush();
@@ -265,6 +276,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
     }
     encoder.stdin.end();
   } finally {
+    estimator?.close();
     engine.close();
     session.close();
   }
