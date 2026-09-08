@@ -99,6 +99,13 @@ export interface JobRequest {
   settings: NrSettings;
   scale: ScaleSettings;
   encode?: EncodeSettings;
+  /**
+   * Video only. When set, the job runs DLSS Frame Generation (interpolate to a
+   * higher frame rate) instead of the per-frame engine; `multiplier` is the
+   * output-to-input frame ratio (2 = double the fps). The per-frame engine and
+   * scale settings are ignored in this mode.
+   */
+  frameGen?: { multiplier: number };
 }
 
 export type JobState = "queued" | "running" | "done" | "failed" | "cancelled";

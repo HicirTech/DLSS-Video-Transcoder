@@ -50,7 +50,9 @@ function isJobRequest(value: unknown): value is JobRequest {
     typeof v.settings === "object" &&
     v.settings !== null &&
     typeof v.scale === "object" &&
-    v.scale !== null
+    v.scale !== null &&
+    (v.frameGen === undefined ||
+      (typeof v.frameGen === "object" && v.frameGen !== null && typeof (v.frameGen as { multiplier?: unknown }).multiplier === "number"))
   );
 }
 
