@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { callableAt } from "../native/com.ts";
 import { NativeStruct, OutPointer, cstring, readCString, wstring } from "../native/memory.ts";
 import { NativeModule } from "../native/win32.ts";
+import type { ForwarderModule } from "./forwarder-runtime.ts";
 import { NgxParameters } from "./params.ts";
 import { NGX_ENGINE_TYPE_CUSTOM, NGX_VERSION_API, describeSupport, ngxCheck, ngxOk } from "./results.ts";
 
@@ -76,6 +77,7 @@ export class NgxCore {
   private readonly module: NativeModule;
   private initialised = false;
   private device = 0;
+  private forwarder: ForwarderModule | null = null;
   private readonly keep: unknown[] = [];
 
   private constructor(
@@ -106,8 +108,25 @@ export class NgxCore {
     return this.module.proc(exportName) !== 0;
   }
 
+  /**
+   * Route every NGX call through the generated nvngx.dll shim so the runtime's
+   * caller-module check sees the trusted image name. Feature 18 and the neural
+   * runtimes reject callers whose return address is in bun's JIT memory; a NULL
+   * fault inside the core (or FeatureNotSupported) is the symptom without this.
+   */
+  useForwarder(forwarder: ForwarderModule | null): void {
+    this.forwarder = forwarder;
+  }
+
   private fn(name: string, args: FFIType[], returns: FFIType = FFIType.i32) {
-    return callableAt(this.address(name), { args, returns });
+    const address = this.address(name);
+    if (!this.forwarder) return callableAt(address, { args, returns });
+    const forwarder = this.forwarder;
+    const stub = callableAt(forwarder.addresses.fwd_create, { args, returns });
+    return (...callArgs: unknown[]) => {
+      forwarder.setSlots(address, 0, 0);
+      return stub(...callArgs);
+    };
   }
 
   /**
