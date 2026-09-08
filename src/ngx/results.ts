@@ -119,3 +119,38 @@ export const PerfQuality = {
   UltraQuality: 4,
   DLAA: 5,
 } as const;
+
+/** NVSDK_NGX_DLSS_Feature_Flags bits (verbatim from nvngx_dlss.dll / the public SDK header). */
+export const DlssCreateFlag = {
+  IsHDR: 0x01,
+  MVLowRes: 0x02,
+  MVJittered: 0x04,
+  DepthInverted: 0x08,
+  DoSharpening: 0x20,
+  AutoExposure: 0x40,
+  AlphaUpscaling: 0x80,
+} as const;
+
+/** NVSDK_NGX_DLSS_Hint_Render_Preset values. J/K/L/M (10-13) are the transformer-model presets. */
+export const DlssRenderPreset = {
+  Default: 0, A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, J: 10, K: 11, L: 12, M: 13, N: 14, O: 15,
+} as const;
+
+/**
+ * The per-quality-mode preset parameter name, keyed by PerfQuality value. DLSS SR
+ * exposes six per-mode preset params, not one bare hint; MaxPerf(0) uses the
+ * .Performance slot. Verified verbatim in nvngx_dlss.dll.
+ */
+export const DLSS_PRESET_PARAM: Record<number, string> = {
+  0: "DLSS.Hint.Render.Preset.Performance",
+  1: "DLSS.Hint.Render.Preset.Balanced",
+  2: "DLSS.Hint.Render.Preset.Quality",
+  3: "DLSS.Hint.Render.Preset.UltraPerformance",
+  4: "DLSS.Hint.Render.Preset.UltraQuality",
+  5: "DLSS.Hint.Render.Preset.DLAA",
+};
+
+/** Output/render ratio per PerfQuality (fallback when GetOptimalSettings is not queried). */
+export const DLSS_RATIO: Record<number, number> = {
+  5: 1.0, 2: 1.5, 1: 1.7241379, 0: 2.0, 3: 3.0, 4: 1.3,
+};
