@@ -1,5 +1,9 @@
-import { FormControl, FormHelperText, InputLabel, MenuItem, Select, Stack, TextField } from "@mui/material";
+import { useState, type ChangeEvent } from "react";
+import { Button, FormControl, FormHelperText, InputLabel, MenuItem, Select, Stack, TextField } from "@mui/material";
+import UploadFileIcon from "@mui/icons-material/UploadFile";
 import type { EngineKind, MotionKind } from "../../../src/server/api-types";
+import { api } from "../api";
+import { errorMessage } from "../errors";
 
 interface PathFieldsProps {
   kind: "image" | "video";
@@ -13,19 +17,52 @@ interface PathFieldsProps {
 /** Absolute input / optional output path fields shared by the Image and Video tabs. */
 export function PathFields({ kind, input, output, disabled, onInputChange, onOutputChange }: PathFieldsProps) {
   const example = kind === "image" ? "C:\\Pictures\\photo.png" : "D:\\Footage\\clip.mp4";
+  const accept = kind === "image" ? "image/*" : "video/*";
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const onPick = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const result = await api.uploadFile(file);
+      onInputChange(result.path);
+    } catch (err) {
+      setUploadError(errorMessage(err));
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <Stack spacing={1.5}>
-      <TextField
-        label="Input path"
-        placeholder={example}
-        value={input}
-        disabled={disabled}
-        fullWidth
-        required
-        helperText="Absolute path on the machine that runs the server."
-        onChange={(event) => onInputChange(event.target.value)}
-        slotProps={{ htmlInput: { spellCheck: false } }}
-      />
+      <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start" }}>
+        <TextField
+          label="Input path"
+          placeholder={example}
+          value={input}
+          disabled={disabled}
+          fullWidth
+          required
+          error={Boolean(uploadError)}
+          helperText={uploadError ?? "Absolute path on the machine that runs the server — or upload a file."}
+          onChange={(event) => onInputChange(event.target.value)}
+          slotProps={{ htmlInput: { spellCheck: false } }}
+        />
+        <Button
+          component="label"
+          variant="outlined"
+          startIcon={<UploadFileIcon />}
+          disabled={disabled || uploading}
+          sx={{ mt: 1, whiteSpace: "nowrap", flexShrink: 0 }}
+        >
+          {uploading ? "Uploading…" : "Upload"}
+          <input hidden type="file" accept={accept} onChange={(event) => void onPick(event)} />
+        </Button>
+      </Stack>
       <TextField
         label="Output path"
         placeholder="Leave empty to write next to the input with a suffix"
