@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Box, Button, Chip, Link, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Chip, FormControl, FormControlLabel, FormHelperText, InputLabel, Link, MenuItem, Select, Stack, Switch, Typography } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import type { EngineKind, JobRequest, JobStatus, MotionKind, ToolsReport } from "../../../src/server/api-types";
 import { api } from "../api";
@@ -63,6 +63,8 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
   const [output, setOutput] = useState("");
   const [engine, setEngine] = useState<EngineKind>("nr");
   const [motion, setMotion] = useState<MotionKind>("flow");
+  const [frameGenOn, setFrameGenOn] = useState(false);
+  const [multiplier, setMultiplier] = useState(2);
 
   const canRun = input.trim() !== "" && !runner.submitting;
 
@@ -76,6 +78,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
       scale: settings.scale,
       encode: settings.encode,
     };
+    if (frameGenOn) request.frameGen = { multiplier };
     if (output.trim() !== "") request.output = output.trim();
     void runner.submit(request);
   };
@@ -96,10 +99,45 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
         />
       </Section>
 
-      <Section title="Engine, motion and output size">
+      <Section title="Frame generation">
+        <Stack direction="row" spacing={2} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
+          <FormControlLabel
+            control={<Switch checked={frameGenOn} onChange={(_e, checked) => setFrameGenOn(checked)} />}
+            label="Interpolate to a higher frame rate"
+          />
+          <FormControl sx={{ minWidth: 160 }} disabled={!frameGenOn}>
+            <InputLabel id="fg-mult-label">Frame rate</InputLabel>
+            <Select<number>
+              labelId="fg-mult-label"
+              label="Frame rate"
+              value={multiplier}
+              onChange={(event) => setMultiplier(Number(event.target.value))}
+            >
+              <MenuItem value={2}>2× (double)</MenuItem>
+              <MenuItem value={3}>3×</MenuItem>
+              <MenuItem value={4}>4×</MenuItem>
+            </Select>
+            <FormHelperText>
+              DLSS Frame Generation. Higher than 2× needs an RTX 50 GPU. Uses the codec/quality below; the engine
+              and output-size settings do not apply.
+            </FormHelperText>
+          </FormControl>
+        </Stack>
+      </Section>
+
+      <Section
+        title="Engine, motion and output size"
+        action={
+          frameGenOn ? (
+            <Typography variant="caption" color="warning.main">
+              Ignored while frame generation is on
+            </Typography>
+          ) : undefined
+        }
+      >
         <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
-          <EngineSelect value={engine} onChange={setEngine} />
-          <MotionSelect value={motion} onChange={setMotion} />
+          <EngineSelect value={engine} disabled={frameGenOn} onChange={setEngine} />
+          <MotionSelect value={motion} disabled={frameGenOn} onChange={setMotion} />
           <ScaleSettingsEditor value={settings.scale} onChange={setScale} />
         </Stack>
       </Section>
