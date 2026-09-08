@@ -6,13 +6,14 @@ driven in-process from **Bun + TypeScript** through `bun:ffi` over Direct3D 12 a
 with a **React + Material UI** web front end. DLSS runtimes are version-switchable
 (DLSS-Swapper style).
 
-> **Status (2026-09-09).** The **command line** is the full-capability surface and is the
-> recommended way to use every DLSS feature today. The **web UI** currently runs a useful subset
-> (see [Web UI](#web-ui) for exactly what it does and does not do). Several capabilities are
-> CLI-only, and some UI controls are not yet wired to the engine — this is documented honestly in
-> [Feature status](#feature-status) rather than hidden. Anything marked "needs an RTX GPU to
-> verify" has been exercised on the project's RTX 5090 where noted; DLL presence alone is not proof
-> a feature works.
+![Neural Render — image job with DLSS engine and settings](docs/images/ui-image.png)
+
+> **Status (2026-09-09).** Runs on the project's RTX 5090. The **web UI** now covers the whole
+> pipeline — DLSS Super Resolution upscaling, Neural Rendering (feature 18), Frame Generation, DLSS
+> version selection and browser upload — and the **command line** offers the same features for
+> scripting. A couple of deep items remain (GPU-resident pipelining, RTX Video SR); the
+> [Feature status](#feature-status) table documents honestly what is verified vs. still gated. DLL
+> presence alone is not proof a feature works — everything below was exercised on real hardware.
 
 ---
 
@@ -94,6 +95,14 @@ Resolution upscaling to the chosen output size), `nr` (DLSS Neural Rendering enh
 job queue with WebSocket progress; a before/after compare view; a hardware/runtime **probe** panel;
 and encode settings (codec incl. NVENC, quality, container, audio) for video. Optical-flow motion can
 be enabled for video.
+
+**Video tab** — DLSS Frame Generation, engine/motion, NVENC encoding and the neural-rendering controls:
+
+![Neural Render — video job with frame generation](docs/images/ui-video.png)
+
+**Probe tab** — hardware/runtime check (adapters, driver, NGX core, runtime DLLs, caller-shim self-test):
+
+![Neural Render — hardware and runtime probe](docs/images/ui-probe.png)
 
 **Notes / honest caveats:**
 
