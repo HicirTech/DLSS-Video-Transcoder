@@ -28,7 +28,7 @@ export function DriverCard({ driver, device, ngxInit, capabilities }: DriverCard
               { label: "NGX core version", value: driver.ngxCoreVersion ?? <Mono dim>unknown</Mono> },
               { label: "NGX core path", value: driver.ngxCorePath ? <Mono>{driver.ngxCorePath}</Mono> : <Mono dim>not found</Mono> },
               {
-                label: "D3D12 device",
+                label: "Direct3D 12 device",
                 value: (
                   <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
                     <BoolChip value={device.created} trueLabel="created" falseLabel="not created" />
@@ -38,7 +38,7 @@ export function DriverCard({ driver, device, ngxInit, capabilities }: DriverCard
                 ),
               },
               {
-                label: "NGX init",
+                label: "NGX runtime init",
                 value: (
                   <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
                     {ngxInit.attempted ? (

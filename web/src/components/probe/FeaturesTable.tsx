@@ -15,9 +15,9 @@ export function FeaturesTable({ features }: { features: ProbeFeature[] }) {
             <TableCell>ID</TableCell>
             <TableCell>Feature</TableCell>
             <TableCell>Support</TableCell>
-            <TableCell align="right">Code</TableCell>
-            <TableCell>Min HW arch</TableCell>
-            <TableCell>Min OS</TableCell>
+            <TableCell align="right">Support code</TableCell>
+            <TableCell>Min GPU architecture</TableCell>
+            <TableCell>Min OS version</TableCell>
             <TableCell>Detail</TableCell>
           </TableRow>
         </TableHead>
@@ -40,7 +40,7 @@ export function FeaturesTable({ features }: { features: ProbeFeature[] }) {
           })}
           {features.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={7}>The NGX core reported no features.</TableCell>
+              <TableCell colSpan={7}>The NGX runtime reported no features.</TableCell>
             </TableRow>
           ) : null}
         </TableBody>

@@ -14,12 +14,12 @@ export function AdaptersTable({ adapters, selected }: AdaptersTableProps) {
       <Table>
         <TableHead>
           <TableRow>
-            <TableCell>#</TableCell>
+            <TableCell>Index</TableCell>
             <TableCell>Adapter</TableCell>
-            <TableCell>Vendor : device</TableCell>
+            <TableCell>Vendor : device ID</TableCell>
             <TableCell align="right">Dedicated VRAM</TableCell>
             <TableCell>LUID</TableCell>
-            <TableCell>Flags</TableCell>
+            <TableCell>Status</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -40,14 +40,14 @@ export function AdaptersTable({ adapters, selected }: AdaptersTableProps) {
                 <Stack direction="row" spacing={0.5}>
                   {adapter.index === selected ? <Chip label="selected" color="primary" /> : null}
                   {adapter.isNvidia ? <Chip label="NVIDIA" color="success" variant="outlined" /> : null}
-                  {adapter.software ? <Chip label="software" color="warning" variant="outlined" /> : null}
+                  {adapter.software ? <Chip label="software renderer" color="warning" variant="outlined" /> : null}
                 </Stack>
               </TableCell>
             </TableRow>
           ))}
           {adapters.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6}>No DXGI adapters were enumerated.</TableCell>
+              <TableCell colSpan={6}>No display adapters (GPUs) were found.</TableCell>
             </TableRow>
           ) : null}
         </TableBody>

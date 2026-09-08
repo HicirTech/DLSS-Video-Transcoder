@@ -31,15 +31,17 @@ export function ProbePanel({ probe, probing, onProbe }: ProbePanelProps) {
           {probing ? "Probing..." : probe ? "Run probe again" : "Run probe"}
         </Button>
         <Typography variant="body2" color="text.secondary">
-          Enumerates DXGI adapters, creates a D3D12 device, initialises the NGX core and checks feature 18 plus the runtime DLLs.
-          Takes a few seconds.
+          Checks whether this machine can run DLSS neural rendering: it lists your display adapters (GPUs), creates a
+          Direct3D 12 device, starts NVIDIA&apos;s NGX runtime, and confirms the neural rendering feature and its support
+          files are available. Takes a few seconds.
         </Typography>
       </Box>
       {probing ? <LinearProgress /> : null}
 
       {!probe && !probing ? (
         <Alert severity="info" variant="outlined">
-          No probe has been run in this session. The status chip in the title bar updates from the verdict.
+          No probe has run yet in this session. Run it to check DLSS neural rendering support; the status chip in the
+          title bar will update with the result.
         </Alert>
       ) : null}
 
@@ -48,7 +50,7 @@ export function ProbePanel({ probe, probing, onProbe }: ProbePanelProps) {
           <VerdictCard verdict={probe.verdict} />
           <Typography variant="caption" color="text.secondary">
             Generated {formatDateTime(probe.generatedAt)} on {probe.platform.os}, Bun {probe.platform.bun}
-            {probe.ok ? "" : " - the probe itself reported a failure"}
+            {probe.ok ? "" : " - the probe reported a problem while running"}
           </Typography>
 
           <Section title="Adapters">
@@ -63,7 +65,7 @@ export function ProbePanel({ probe, probing, onProbe }: ProbePanelProps) {
           <Section title="Runtime files">
             <RuntimeFilesTable folder={probe.runtime.folder} files={probe.runtime.files} />
           </Section>
-          <Section title="Forwarder self-test">
+          <Section title="NGX bridge self-test">
             <ForwarderSection forwarder={probe.forwarder} />
           </Section>
           <Section title="Raw log">

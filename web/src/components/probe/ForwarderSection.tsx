@@ -1,4 +1,4 @@
-import { Paper, Stack } from "@mui/material";
+import { Paper, Stack, Typography } from "@mui/material";
 import type { ProbeReport } from "../../../../src/server/api-types";
 import { KeyValueList, Mono } from "../Section";
 import { BoolChip, SupportChip } from "../StatusChips";
@@ -6,9 +6,13 @@ import { BoolChip, SupportChip } from "../StatusChips";
 export function ForwarderSection({ forwarder }: { forwarder: ProbeReport["forwarder"] }) {
   return (
     <Paper variant="outlined" sx={{ p: 1.5 }}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+        A small generated DLL that lets the app reach NVIDIA&apos;s NGX runtime. This self-test confirms it can be built
+        and loaded on this machine.
+      </Typography>
       <KeyValueList
         rows={[
-          { label: "Forwarder DLL", value: forwarder.path ? <Mono>{forwarder.path}</Mono> : <Mono dim>not available</Mono> },
+          { label: "NGX bridge DLL", value: forwarder.path ? <Mono>{forwarder.path}</Mono> : <Mono dim>not available</Mono> },
           {
             label: "State",
             value: (
