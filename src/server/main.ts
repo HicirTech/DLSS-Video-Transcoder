@@ -7,6 +7,7 @@ import { existsSync, statSync } from "node:fs";
 import { extname, isAbsolute, join } from "node:path";
 import index from "../../web/index.html";
 import { runProbe } from "../ngx/probe.ts";
+import { buildRuntimeCatalog } from "../ngx/runtime-catalog.ts";
 import { toolsReport } from "../pipeline/tools.ts";
 import {
   DEFAULT_ENCODE_SETTINGS,
@@ -61,6 +62,7 @@ const server = Bun.serve({
     "/api/probe": async () => json(await runProbe({ runtimeDir: RUNTIME_DIR, appDataPath: APP_DATA })),
     "/api/runtime": async () => json((await runProbe({ runtimeDir: RUNTIME_DIR, appDataPath: APP_DATA, requirements: false })).runtime),
     "/api/tools": () => json(toolsReport()),
+    "/api/catalog": () => json(buildRuntimeCatalog(RUNTIME_DIR)),
     "/api/settings/defaults": () => json({ settings: DEFAULT_NR_SETTINGS, scale: DEFAULT_SCALE_SETTINGS, encode: DEFAULT_ENCODE_SETTINGS }),
     "/api/jobs": {
       GET: () => json(jobs.list()),
