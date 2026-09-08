@@ -61,7 +61,7 @@ export function CompareView({ beforeSrc, afterSrc, beforeLabel = "Before", after
     <Box>
       {failed.length > 0 ? (
         <Alert severity="warning" sx={{ mb: 1 }}>
-          Could not load the {failed.join(" and ")} preview through /api/file. The path must be readable by the server.
+          Could not load the {failed.join(" and ")} preview. The file path must be readable by the server.
         </Alert>
       ) : null}
       <Box

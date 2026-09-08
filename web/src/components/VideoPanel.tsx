@@ -23,7 +23,7 @@ function ToolsBanner({ tools, toolsError }: { tools: ToolsReport | null; toolsEr
   if (toolsError) {
     return (
       <Alert severity="info" variant="outlined">
-        Could not query /api/tools ({toolsError}); ffmpeg availability is unknown.
+        Could not check for ffmpeg ({toolsError}); its availability is unknown.
       </Alert>
     );
   }
@@ -113,7 +113,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
         action={
           engine === "bypass" ? (
             <Typography variant="caption" color="warning.main">
-              Ignored by the bypass engine
+              Not used by the bypass engine (plain passthrough copy)
             </Typography>
           ) : undefined
         }

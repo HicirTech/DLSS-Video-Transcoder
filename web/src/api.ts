@@ -103,7 +103,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(path, init);
   } catch (err) {
-    throw new ApiError(0, `Cannot reach the server: ${errorMessage(err)}`);
+    throw new ApiError(0, `Cannot reach the server. Check that it is still running, then try again: ${errorMessage(err)}`);
   }
   const text = await response.text();
   if (!response.ok) {
@@ -112,7 +112,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     return JSON.parse(text) as T;
   } catch {
-    throw new ApiError(response.status, `Invalid JSON in the response from ${path}`);
+    throw new ApiError(response.status, `The server sent an unreadable response (invalid JSON) from ${path}`);
   }
 }
 

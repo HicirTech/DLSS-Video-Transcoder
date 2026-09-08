@@ -45,7 +45,7 @@ export function JobCard({ job, now, onCancel, cancelling = false, defaultExpande
           {baseName(job.input)}
         </Typography>
         <StateChip state={job.state} />
-        <Chip label={job.engine === "nr" ? "neural rendering" : "bypass"} variant="outlined" />
+        <Chip label={job.engine === "nr" ? "neural rendering" : "bypass (passthrough)"} variant="outlined" />
         <Box sx={{ flex: 1 }} />
         <Mono dim>{job.id}</Mono>
         {active && onCancel ? (

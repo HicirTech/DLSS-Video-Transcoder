@@ -47,7 +47,7 @@ export function useJobRunner(jobs: JobStatus[]): JobRunner {
       const status = await api.cancelJob(created.id);
       setCreated(status);
     } catch (err) {
-      toast.showError(`Could not cancel ${created.id}: ${errorMessage(err)}`);
+      toast.showError(`Could not cancel job ${created.id}: ${errorMessage(err)}`);
     } finally {
       setCancelling(false);
     }

@@ -12,5 +12,5 @@ export class ApiError extends Error {
 export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === "string") return err;
-  return "Unknown error";
+  return "An unexpected error occurred.";
 }

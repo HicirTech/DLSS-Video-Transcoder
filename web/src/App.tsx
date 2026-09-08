@@ -100,7 +100,7 @@ function Shell() {
             Neural Render
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: { xs: "none", md: "block" } }}>
-            DLSS 5 neural rendering for photos and video, offline through D3D12
+            DLSS neural rendering for images and video, run locally on your GPU
           </Typography>
           <Box sx={{ flex: 1 }} />
           {isMockMode() ? <Chip label="mock data" color="warning" variant="outlined" /> : null}

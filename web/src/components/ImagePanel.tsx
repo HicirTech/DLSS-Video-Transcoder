@@ -66,7 +66,7 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
         action={
           engine === "bypass" ? (
             <Typography variant="caption" color="warning.main">
-              Ignored by the bypass engine
+              Not used by the bypass engine (plain passthrough copy)
             </Typography>
           ) : undefined
         }
