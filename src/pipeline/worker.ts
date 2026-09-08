@@ -50,6 +50,7 @@ async function run(message: RunMessage): Promise<void> {
         scale: request.scale,
         settings: request.settings,
         runtimeDir: message.runtimeDir,
+        dllDir: request.dllDir,
         appDataPath: message.appDataPath,
         onProgress: (fraction, text) => {
           post({ type: "progress", id, fraction, message: text });
@@ -86,6 +87,7 @@ async function run(message: RunMessage): Promise<void> {
       settings: request.settings,
       encode: request.encode,
       runtimeDir: message.runtimeDir,
+      dllDir: request.dllDir,
       appDataPath: message.appDataPath,
       onProgress: (fraction, text, frames) => {
         post({ type: "progress", id, fraction, message: text });

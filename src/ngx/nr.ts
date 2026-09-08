@@ -38,6 +38,7 @@ class NeuralEngine implements Engine {
       height,
       settings: options.settings,
       runtimeDir: options.runtimeDir ?? RUNTIME_DIR,
+      dllDir: options.dllDir,
       appDataPath: options.appDataPath,
     });
   }

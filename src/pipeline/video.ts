@@ -24,6 +24,8 @@ export interface VideoJobOptions {
   adapterIndex?: number;
   debugLayer?: boolean;
   runtimeDir?: string;
+  /** Specific DLSS DLL folder to load (version switching); defaults to the runtime feature folder. */
+  dllDir?: string;
   appDataPath?: string;
   /** `frames` is set for per-frame updates so callers can skip logging them. */
   onProgress?: (fraction: number, message: string, frames?: number) => void;
@@ -217,6 +219,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
     outputHeight: upscaling ? target.height : undefined,
     settings: options.settings,
     runtimeDir: options.runtimeDir,
+    dllDir: options.dllDir,
     appDataPath: options.appDataPath,
   });
   const outWidth = engine.outputWidth;

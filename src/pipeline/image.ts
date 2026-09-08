@@ -17,6 +17,8 @@ export interface ImageJobOptions {
   adapterIndex?: number;
   debugLayer?: boolean;
   runtimeDir?: string;
+  /** Specific DLSS DLL folder to load (version switching); defaults to the runtime feature folder. */
+  dllDir?: string;
   appDataPath?: string;
   onProgress?: (fraction: number, message: string) => void;
 }
@@ -79,6 +81,7 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
       outputHeight: upscaling ? target.height : undefined,
       settings: options.settings,
       runtimeDir: options.runtimeDir,
+      dllDir: options.dllDir,
       appDataPath: options.appDataPath,
     });
     try {
