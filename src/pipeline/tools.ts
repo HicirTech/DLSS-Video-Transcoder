@@ -7,6 +7,7 @@ import { join } from "node:path";
 import type { ToolsReport } from "../server/api-types.ts";
 
 const EXTRA_DIRS = [
+  join(import.meta.dir, "..", "..", "runtime", "ffmpeg", "bin"), // ffmpeg bundled under the project runtime
   join(process.env.LOCALAPPDATA ?? "", "Microsoft", "WinGet", "Links"),
   "C:\\ffmpeg\\bin",
   "C:\\Program Files\\ffmpeg\\bin",
