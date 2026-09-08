@@ -40,8 +40,13 @@ export interface EngineOptions {
   width: number;
   height: number;
   settings: NrSettings;
+  /** Output size for an upscaling engine (sr); defaults to width/height (1:1) when omitted. */
+  outputWidth?: number;
+  outputHeight?: number;
   /** Folder with user-supplied NVIDIA runtime DLLs (neural engine only). */
   runtimeDir?: string;
+  /** Specific DLSS DLL folder to load (version switching); defaults to the runtime feature folder. */
+  dllDir?: string;
   appDataPath?: string;
 }
 
@@ -86,10 +91,16 @@ export class BypassEngine implements Engine {
 export type EngineFactory = (kind: EngineKind, session: GpuSession, options: EngineOptions) => Engine;
 
 let neuralFactory: EngineFactory | null = null;
+let srFactory: EngineFactory | null = null;
 
-/** The neural engine registers itself here so this module does not import NGX code. */
+/** The neural (feature 18) engine registers itself here so this module does not import NGX code. */
 export function registerNeuralEngine(factory: EngineFactory): void {
   neuralFactory = factory;
+}
+
+/** The DLSS Super Resolution engine registers itself here (kept out of this module's imports). */
+export function registerSrEngine(factory: EngineFactory): void {
+  srFactory = factory;
 }
 
 export function createEngine(kind: EngineKind, session: GpuSession, options: EngineOptions): Engine {
@@ -99,7 +110,10 @@ export function createEngine(kind: EngineKind, session: GpuSession, options: Eng
     case "nr":
       if (!neuralFactory) throw new Error("Neural engine is not registered; import src/ngx/nr.ts before creating it");
       return neuralFactory(kind, session, options);
+    case "sr":
+      if (!srFactory) throw new Error("SR engine is not registered; import src/ngx/sr-engine.ts before creating it");
+      return srFactory(kind, session, options);
     default:
-      throw new Error(`Unknown engine "${String(kind)}". Choose "nr" (DLSS Neural Rendering) or "bypass" (plain copy, no processing).`);
+      throw new Error(`Unknown engine "${String(kind)}". Choose "sr" (DLSS Super Resolution), "nr" (DLSS Neural Rendering) or "bypass" (plain copy).`);
   }
 }
