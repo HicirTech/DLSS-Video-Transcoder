@@ -46,7 +46,7 @@ function pick<T>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback;
 }
 
-const PRESETS = [0, 1, 2, 3] as const;
+const PRESETS = [0, 10, 11, 12, 13] as const;
 const STYLES = [0, 1, 2] as const;
 const NR_PATHS = ["auto", "core", "snippet"] as const;
 const SCALE_MODES = ["none", "factor", "size"] as const;

@@ -19,25 +19,35 @@ export type EngineKind = "bypass" | "nr";
 export type MotionKind = "none" | "flow";
 export type NrPath = "auto" | "core" | "snippet";
 
-/** DLSS 5 Neural Rendering controls (NGX feature 18). Ranges follow what community tools expose. */
+/**
+ * DLSS 5 Neural Rendering controls (NGX feature 18). Feature 18 enhances an image at the same
+ * size (no upscale). These parameters are community-established (not in any public NVIDIA header);
+ * the strength ranges below are the typical ranges community tools expose and our sliders allow,
+ * not hard limits enforced by the DLL.
+ */
 export interface NrSettings {
-  /** Model hint 0..3 (0 = runtime default). */
-  preset: 0 | 1 | 2 | 3;
-  /** 0 = default, 1 = natural, 2 = cinematic. */
+  /**
+   * Neural model preset hint (sent as DLSSNR.Hint.Render.Preset, i32):
+   * 0 = runtime default; 10/11/12/13 = transformer model revisions J/K/L/M (later letter = newer).
+   */
+  preset: 0 | 10 | 11 | 12 | 13;
+  /** Look style: 0 = default, 1 = natural, 2 = cinematic. */
   style: 0 | 1 | 2;
-  /** 0..2, 1 = neutral. */
+  /** Overall enhancement strength (float). Typical 0..2, 1 = neutral. */
   intensity: number;
-  /** 0..2, 1 = neutral. */
+  /** Local tone-mapping strength (float). Typical 0..2, 1 = neutral. */
   localTone: number;
-  /** 0..2, 1 = neutral. */
+  /** Local detail / micro-structure strength (float). Typical 0..2, 1 = neutral. */
   localStructure: number;
-  /** -1..2, -1 = runtime default. */
+  /** Skin detail strength (float). Typical -1..2; -1 = runtime default, 1 = neutral. */
   skinStructure: number;
-  /** null = do not send the parameter. */
+  /** Global tone-mapping strength (float), or null to not send it (runtime keeps its own). */
   globalTone: number | null;
+  /** Let the runtime derive the processed-region mask instead of processing the whole frame. */
   autoMask: boolean;
+  /** Protect overlays / text / sharp UI edges from being re-rendered. */
   uiCorrection: boolean;
-  /** Which NGX entry to drive: the driver core or the runtime DLL directly. */
+  /** Which NGX entry drives feature 18: the driver core, the standalone DLL ("snippet"), or auto. */
   nrPath: NrPath;
   /** Extra evaluations of the first frame so the temporal state settles (images use this). */
   warmupFrames: number;
