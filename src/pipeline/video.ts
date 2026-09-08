@@ -7,6 +7,7 @@ import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings, EngineKind, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { DEFAULT_ENCODE_SETTINGS } from "../server/api-types.ts";
 import { createEngine } from "./engine.ts";
+import { resolveEncodeCodec } from "./encode-select.ts";
 import { createMotionEstimator } from "./flow.ts";
 import { openGpu } from "./gpu.ts";
 import { resolveTargetSize } from "./image.ts";
@@ -93,7 +94,7 @@ export function probeVideo(ffprobe: string, input: string): VideoInfo {
   };
 }
 
-function encoderArgs(encode: EncodeSettings): string[] {
+export function encoderArgs(encode: EncodeSettings): string[] {
   const q = String(Math.max(0, Math.min(51, Math.round(encode.quality))));
   switch (encode.codec) {
     case "h264":
@@ -193,7 +194,11 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   }
   // motion="flow" derives per-frame motion vectors from an optical-flow
   // estimator wired into the frame loop below; motion="none" feeds zero motion.
-  const encode = options.encode ?? DEFAULT_ENCODE_SETTINGS;
+  const requestedEncode = options.encode ?? DEFAULT_ENCODE_SETTINGS;
+  // Fall back from an NVENC codec to its CPU sibling if NVENC will not run here.
+  const resolvedCodec = resolveEncodeCodec(requestedEncode.codec, ffmpeg, options.adapterIndex);
+  if (resolvedCodec.note) progress(0, resolvedCodec.note);
+  const encode: EncodeSettings = { ...requestedEncode, codec: resolvedCodec.codec };
   const info = probeVideo(ffprobe, options.input);
   const target = resolveTargetSize(info.width, info.height, options.scale);
   const output = options.output ?? defaultVideoOutput(options.input, options.engine, encode.container);
@@ -267,9 +272,11 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
         reset = frames === 0 || cut;
       }
       const result = engine.process({ rgba, reset, motion });
+      // Write with backpressure only: await when the sink buffer is full, but do
+      // not flush every frame (that drained the pipe and stalled the loop). The
+      // final stdin.end() flushes whatever remains.
       const wrote = encoder.stdin.write(result);
       if (wrote instanceof Promise) await wrote;
-      await encoder.stdin.flush();
       frames++;
       const total = info.frames;
       progress(total ? Math.min(0.98, frames / total) : 0.5, `frame ${frames}/${total ?? "?"}`, frames);
