@@ -55,12 +55,13 @@ export function EngineSelect({ value, disabled, onChange }: EngineSelectProps) {
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
-        <MenuItem value="nr">DLSS Neural Rendering</MenuItem>
+        <MenuItem value="sr">DLSS Super Resolution (upscale)</MenuItem>
+        <MenuItem value="nr">DLSS Neural Rendering (enhance)</MenuItem>
         <MenuItem value="bypass">Bypass (passthrough copy, no DLSS)</MenuItem>
       </Select>
       <FormHelperText>
-        Neural rendering enhances each frame with DLSS at its current size. Bypass copies frames unchanged, for
-        comparison or testing.
+        Super Resolution upscales to the output size below. Neural rendering enhances each frame at its current
+        size. Bypass copies frames unchanged, for comparison.
       </FormHelperText>
     </FormControl>
   );

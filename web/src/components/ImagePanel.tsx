@@ -64,9 +64,11 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
       <Section
         title="Neural rendering"
         action={
-          engine === "bypass" ? (
+          engine !== "nr" ? (
             <Typography variant="caption" color="warning.main">
-              Not used by the bypass engine (plain passthrough copy)
+              {engine === "sr"
+                ? "Not used by Super Resolution — it upscales to the output size above"
+                : "Not used by the bypass engine (plain passthrough copy)"}
             </Typography>
           ) : undefined
         }
