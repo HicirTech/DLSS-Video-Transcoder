@@ -42,7 +42,7 @@ class NeuralEngine implements Engine {
   }
 
   process(frame: { rgba: Uint8Array; reset: boolean; motion: Float32Array | null }): Uint8Array {
-    return this.sr.evaluate(frame.rgba, frame.reset);
+    return this.sr.evaluate(frame.rgba, frame.reset, frame.motion);
   }
 
   close(): void {
