@@ -24,6 +24,7 @@ import {
 import type { GpuSession } from "../pipeline/gpu.ts";
 import { FeatureCommonInfo, NgxCore } from "./core.ts";
 import { prepareForwarderSync } from "./forwarder-runtime.ts";
+import { encodeMotionR16G16 } from "../pipeline/flow.ts";
 import { NgxParam, NgxParameters } from "./params.ts";
 import { DLSS_PRESET_PARAM, DlssCreateFlag, DlssRenderPreset, ngxCheck } from "./results.ts";
 
@@ -45,6 +46,8 @@ export interface SrOptions {
   hdr?: boolean;
   /** Folder that holds `caller/nvngx.dll` and `dlss/nvngx_dlss.dll`. */
   runtimeDir: string;
+  /** Folder holding the chosen nvngx_dlss.dll version (defaults to runtimeDir/dlss). Enables version switching. */
+  dllDir?: string;
   appDataPath?: string;
 }
 
@@ -73,7 +76,7 @@ export class DlssSrSession {
     const { forwarder } = prepareForwarderSync(join(opts.runtimeDir, "caller"));
     core.useForwarder(forwarder);
     ngxCheck(
-      core.initExt(session.device.ptr, SR_APP_ID, appData, new FeatureCommonInfo([join(opts.runtimeDir, "dlss")])),
+      core.initExt(session.device.ptr, SR_APP_ID, appData, new FeatureCommonInfo([opts.dllDir ?? join(opts.runtimeDir, "dlss")])),
       "DLSS SR Init_Ext",
     );
 
@@ -108,18 +111,22 @@ export class DlssSrSession {
   }
 
   /** Upscale one render-resolution RGBA8 frame; returns the output-resolution RGBA8 frame. */
-  evaluate(colorRgba: Uint8Array, reset = true): Uint8Array {
+  evaluate(colorRgba: Uint8Array, reset = true, motion: Float32Array | null = null): Uint8Array {
     const expected = this.renderWidth * this.renderHeight * 4;
     if (colorRgba.byteLength !== expected) throw new Error(`DLSS SR: expected ${expected} color bytes, got ${colorRgba.byteLength}`);
     const gpu = this.session.gpu;
     gpu.uploadTexture(this.color, colorRgba, UAV);
+    if (motion) {
+      const half = encodeMotionR16G16(motion);
+      gpu.uploadTexture(this.motion, new Uint8Array(half.buffer, half.byteOffset, half.byteLength), UAV);
+    }
     gpu.list.transition(this.output, UAV);
     this.params.setResource(NgxParam.Color, this.color.ptr);
     this.params.setResource(NgxParam.Output, this.output.ptr);
     this.params.setResource(NgxParam.Depth, this.depth.ptr);
     this.params.setResource(NgxParam.MotionVectors, this.motion.ptr);
-    this.params.setF32(NgxParam.MVScaleX, 0);
-    this.params.setF32(NgxParam.MVScaleY, 0);
+    this.params.setF32(NgxParam.MVScaleX, motion ? 1 : 0);
+    this.params.setF32(NgxParam.MVScaleY, motion ? 1 : 0);
     this.params.setF32(NgxParam.JitterOffsetX, 0);
     this.params.setF32(NgxParam.JitterOffsetY, 0);
     this.params.setU32(NgxParam.Reset, reset ? 1 : 0);
