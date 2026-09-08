@@ -130,7 +130,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     }));
     adapter = selectAdapter(adapters, options.adapterIndex);
     if (!adapter) {
-      reasons.push("No NVIDIA adapter found");
+      reasons.push("No NVIDIA GPU was found. DLSS requires an NVIDIA RTX GPU.");
       say("no NVIDIA adapter");
     } else {
       report.selectedAdapter = adapter.info.index;
@@ -146,13 +146,13 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
       }
     }
   } catch (error) {
-    reasons.push(`DXGI enumeration failed: ${(error as Error).message}`);
+    reasons.push(`Could not list graphics adapters: ${(error as Error).message}`);
   }
 
   // --- runtime folder ---
   report.runtime.files = await inventory(runtimeDir);
   const dlssnr = report.runtime.files.find((f) => f.name === "nvngx_dlssnr.dll");
-  if (!dlssnr?.present) reasons.push(`nvngx_dlssnr.dll is not in ${runtimeDir}`);
+  if (!dlssnr?.present) reasons.push(`The DLSS Neural Rendering runtime file nvngx_dlssnr.dll was not found in ${runtimeDir}. Copy it into that folder.`);
 
   // --- NGX core ---
   let core: NgxCore | null = null;
@@ -189,14 +189,14 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
       report.forwarder.generated = true;
       report.forwarder.loaded = true;
       core.useForwarder(forwarder);
-      say(`forwarder ${wrote ? "written" : "up to date"} and wired to the NGX core`);
+      say(`DLSS runtime setup ${wrote ? "written" : "up to date"} and connected to the NVIDIA NGX core`);
       const test = selfTestForwarder(forwarder);
       report.forwarder.selfTest = `${test.ok ? "ok" : "FAILED"}: ${test.detail}`;
-      say(`forwarder self-test ${test.ok ? "passed" : "failed"}: ${test.detail}`);
-      if (!test.ok) reasons.push("forwarder self-test failed");
+      say(`DLSS runtime self-test ${test.ok ? "passed" : "failed"}: ${test.detail}`);
+      if (!test.ok) reasons.push("The DLSS runtime setup failed its self-test, so calls could not be routed to the NVIDIA driver.");
     } catch (error) {
       report.forwarder.selfTest = `error: ${(error as Error).message}`;
-      reasons.push(`forwarder could not be generated or loaded: ${(error as Error).message}`);
+      reasons.push(`The DLSS runtime setup could not be completed: ${(error as Error).message}`);
     }
   }
 
@@ -229,10 +229,10 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
       }
       report.ngxInit.result = ngxName(result);
       report.ngxInit.ok = ngxOk(result);
-      if (!ngxOk(result)) reasons.push(`NGX Init failed: ${ngxName(result)}`);
+      if (!ngxOk(result)) reasons.push(`NVIDIA NGX runtime initialization failed: ${ngxName(result)}`);
     } catch (error) {
       report.ngxInit.result = (error as Error).message;
-      reasons.push(`NGX Init threw: ${(error as Error).message}`);
+      reasons.push(`NVIDIA NGX runtime initialization failed: ${(error as Error).message}`);
     }
   }
 
@@ -244,7 +244,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
       trace("NgxParameters.detectLayout");
       const layout = NgxParameters.detectLayout(caps);
       report.capabilities["NgxParameters.vtableLayout"] = layout;
-      say(`parameter vtable layout: ${layout}`);
+      say(`parameter memory layout: ${layout}`);
       const readNames: string[] = [
         NgxParam.SuperSamplingAvailable,
         NgxParam.SuperSamplingNeedsUpdatedDriver,
@@ -270,10 +270,10 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
           report.capabilities[name] = caps.getU32(name);
         }
       } else {
-        say("skipping capability reads: parameter vtable layout could not be confirmed");
+        say("skipping capability reads: the parameter memory layout could not be confirmed");
       }
     } catch (error) {
-      reasons.push(`capability query threw: ${(error as Error).message}`);
+      reasons.push(`DLSS capability query failed: ${(error as Error).message}`);
     }
   }
 
@@ -299,7 +299,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
         feature.minOsVersion = r.minOsVersion;
         feature.detail = `GetFeatureRequirements -> ${ngxName(r.result)}`;
       } catch (error) {
-        feature.support = "query threw";
+        feature.support = "query failed";
         feature.detail = (error as Error).message;
       }
       report.features.push(feature);
@@ -311,7 +311,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
 
   // --- verdict ---
   const nr = report.features.find((f) => f.id === NgxFeature.NeuralRendering);
-  if (nr && nr.supportCode !== 0) reasons.push(`feature 18 on this driver/GPU: ${nr.support}`);
+  if (nr && nr.supportCode !== 0) reasons.push(`DLSS Neural Rendering (feature 18) is not supported on this driver/GPU: ${nr.support}`);
   report.verdict.neuralRenderingReady = Boolean(dlssnr?.present) && nr?.supportCode === 0 && report.forwarder.loaded && report.device.created;
   report.ok = report.device.created && core !== null;
 
