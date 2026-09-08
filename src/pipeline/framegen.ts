@@ -5,10 +5,13 @@
  * frame, and a second ffmpeg encodes the result at the multiplied frame rate.
  */
 import { basename, dirname, extname, join } from "node:path";
+import type { EncodeSettings } from "../server/api-types.ts";
 import { DlssgSession, probeDlssg } from "./dlssg.ts";
+import { resolveEncodeCodec } from "./encode-select.ts";
 import { createMotionEstimator, encodeMotionR16G16 } from "./flow.ts";
+import { formatRational, parseRational, ratMul, rational } from "./nut.ts";
 import { findTool } from "./tools.ts";
-import { probeVideo } from "./video.ts";
+import { encoderArgs, probeVideo } from "./video.ts";
 
 export interface FrameGenOptions {
   input: string;
@@ -17,6 +20,8 @@ export interface FrameGenOptions {
   multiplier: number;
   runtimeDir: string;
   quality?: number;
+  /** Output codec; defaults to NVENC H.264 when available, else CPU libx264. */
+  codec?: EncodeSettings["codec"];
   onProgress?: (fraction: number, message: string, frames?: number) => void;
 }
 
@@ -94,9 +99,15 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
 
   const decoder = Bun.spawn([ffmpeg, "-v", "error", "-nostdin", "-i", options.input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const audioArgs = info.hasAudio ? ["-map", "1:a:0", "-c:a", "aac", "-b:a", "192k"] : ["-an"];
-  const q = String(Math.max(0, Math.min(51, Math.round(options.quality ?? 20))));
+  // Exact rational output rate (source rate x multiplier) so 29.97 -> 59.94 etc.
+  // never drifts from a rounded float over a long clip.
+  const outputRate = formatRational(ratMul(parseRational(info.fpsText), rational(multiplier)));
+  // GPU encode by default; falls back to CPU libx264 if NVENC will not run.
+  const resolvedCodec = resolveEncodeCodec(options.codec ?? "h264_nvenc", ffmpeg);
+  if (resolvedCodec.note) progress(0, resolvedCodec.note);
+  const codecArgs = encoderArgs({ codec: resolvedCodec.codec, quality: options.quality ?? 20, container: "mp4", copyAudio: true });
   const encoder = Bun.spawn(
-    [ffmpeg, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-r", String(outputFps), "-i", "pipe:0", "-i", options.input, "-map", "0:v:0", ...audioArgs, "-c:v", "libx264", "-preset", "medium", "-crf", q, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-shortest", output],
+    [ffmpeg, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-framerate", outputRate, "-i", "pipe:0", "-i", options.input, "-map", "0:v:0", ...audioArgs, ...codecArgs, "-movflags", "+faststart", "-shortest", output],
     { stdin: "pipe", stdout: "ignore", stderr: "pipe" },
   );
 
@@ -106,10 +117,11 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
   const reader = new FrameReader(decoder.stdout as ReadableStream<Uint8Array>);
   const stdin = encoder.stdin as { write(b: Uint8Array): unknown; flush(): number | Promise<number>; end(): unknown };
 
+  // Write with backpressure only; the final stdin.end() flushes the remainder.
+  // Flushing every frame drained the pipe and stalled the loop.
   const write = async (frame: Uint8Array): Promise<void> => {
     const w = stdin.write(frame);
     if (w instanceof Promise) await w;
-    await stdin.flush();
   };
 
   let inputFrames = 0;
