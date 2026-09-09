@@ -28,8 +28,17 @@ export function openGpu(options: GpuOptions = {}): GpuSession {
     factory.release();
     throw new Error("No NVIDIA adapter found (use --adapter to pick one explicitly)");
   }
-  const device = D3D12Device.create(adapter, { debugLayer: options.debugLayer });
-  const gpu = new GpuContext(device);
+  let device: D3D12Device | null = null;
+  let gpu: GpuContext;
+  try {
+    device = D3D12Device.create(adapter, { debugLayer: options.debugLayer });
+    gpu = new GpuContext(device);
+  } catch (error) {
+    device?.release();
+    for (const a of adapters) a.release();
+    factory.release();
+    throw error;
+  }
   let closed = false;
   return {
     factory,

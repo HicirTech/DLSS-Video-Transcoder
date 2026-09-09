@@ -6,7 +6,7 @@
 import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings, EngineKind, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { DEFAULT_ENCODE_SETTINGS } from "../server/api-types.ts";
-import { createEngine } from "./engine.ts";
+import { createEngine, type Engine } from "./engine.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
 import { createMotionEstimator } from "./flow.ts";
 import { FrameReader } from "./frame-reader.ts";
@@ -17,6 +17,7 @@ import { tryCreateNvofBackend } from "./nvof.ts";
 import { DXGI_FORMAT_R8G8B8A8_UNORM, linearLayout } from "../native/d3d12.ts";
 import { openGpu } from "./gpu.ts";
 import { resolveTargetSize } from "./image.ts";
+import { evenSize } from "./resize.ts";
 import { findTool } from "./tools.ts";
 
 export interface VideoJobOptions {
@@ -197,7 +198,12 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
   const encode: EncodeSettings = { ...requestedEncode, codec: resolvedCodec.codec };
   const info = probeVideo(ffprobe, options.input);
-  const target = resolveTargetSize(info.width, info.height, options.scale);
+  // Force even dimensions: every video codec here encodes 4:2:0 (yuv420p / NVENC
+  // NV12), which requires even width/height. resolveTargetSize leaves 'none'
+  // (the default) at the raw source size, so an odd-dimension source would fail
+  // at encode without this.
+  const rawTarget = resolveTargetSize(info.width, info.height, options.scale);
+  const target = { width: evenSize(rawTarget.width), height: evenSize(rawTarget.height) };
   const output = options.output ?? defaultVideoOutput(options.input, options.engine, encode.container);
   // SR upscales inside DLSS: decode at source size and let the engine write the
   // target size. Other engines get frames pre-scaled to the target by ffmpeg.
@@ -259,16 +265,22 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
     }
   }
 
-  const engine = createEngine(options.engine, session, {
-    width: renderWidth,
-    height: renderHeight,
-    outputWidth: upscaling ? target.width : undefined,
-    outputHeight: upscaling ? target.height : undefined,
-    settings: options.settings,
-    runtimeDir: options.runtimeDir,
-    dllDir: options.dllDir,
-    appDataPath: options.appDataPath,
-  });
+  let engine: Engine;
+  try {
+    engine = createEngine(options.engine, session, {
+      width: renderWidth,
+      height: renderHeight,
+      outputWidth: upscaling ? target.width : undefined,
+      outputHeight: upscaling ? target.height : undefined,
+      settings: options.settings,
+      runtimeDir: options.runtimeDir,
+      dllDir: options.dllDir,
+      appDataPath: options.appDataPath,
+    });
+  } catch (error) {
+    session.close(); // engine setup failed before the main try/finally; don't leak the GPU session
+    throw error;
+  }
   const outWidth = engine.outputWidth;
   const outHeight = engine.outputHeight;
 
@@ -292,10 +304,16 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const cuts = new SceneCutDetector(renderWidth, renderHeight);
   let estimator: ReturnType<typeof createMotionEstimator> | null = null;
   if (options.motion === "flow") {
-    // Prefer the GPU optical-flow engine (NVOFA); fall back to the CPU matcher.
-    const nvof = tryCreateNvofBackend(renderWidth, renderHeight);
-    estimator = createMotionEstimator(renderWidth, renderHeight, nvof ? { backend: nvof } : {});
-    progress(0, nvof ? "optical flow: NVIDIA hardware (NVOFA)" : "optical flow: CPU block matching (NVOFA unavailable)");
+    try {
+      // Prefer the GPU optical-flow engine (NVOFA); fall back to the CPU matcher.
+      const nvof = tryCreateNvofBackend(renderWidth, renderHeight);
+      estimator = createMotionEstimator(renderWidth, renderHeight, nvof ? { backend: nvof } : {});
+      progress(0, nvof ? "optical flow: NVIDIA hardware (NVOFA)" : "optical flow: CPU block matching (NVOFA unavailable)");
+    } catch (error) {
+      engine.close();
+      session.close();
+      throw error;
+    }
   }
   const guide = (rgba: Uint8Array, index: number): { reset: boolean; motion: Float32Array | null; sceneCut: boolean } => {
     if (estimator) {

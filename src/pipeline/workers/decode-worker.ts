@@ -40,6 +40,10 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
 async function run(msg: StartMsg): Promise<void> {
   try {
     const proc = Bun.spawn([msg.ffmpeg, ...msg.args], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    // Drain stderr concurrently so a chatty ffmpeg can't fill the stderr pipe,
+    // block, and stall stdout (which would hang the read loop below).
+    let stderrText = "";
+    const stderrDrained = new Response(proc.stderr as ReadableStream<Uint8Array>).text().then((t) => { stderrText = t; }).catch(() => {});
     const reader = new FrameReader(proc.stdout as ReadableStream<Uint8Array>);
     let index = 0;
     for (;;) {
@@ -50,7 +54,8 @@ async function run(msg: StartMsg): Promise<void> {
       self.postMessage({ type: "frame", index, buf: frame.buffer }, [frame.buffer]);
       index++;
     }
-    const err = (await new Response(proc.stderr).text()).trim();
+    await stderrDrained;
+    const err = stderrText.trim();
     const code = await proc.exited;
     if (code !== 0) {
       self.postMessage({ type: "error", message: `ffmpeg decode failed (${code}): ${err}` });

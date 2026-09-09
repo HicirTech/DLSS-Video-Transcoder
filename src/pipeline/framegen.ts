@@ -112,6 +112,13 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
         { stdin: "pipe", stdout: "ignore", stderr: "pipe" },
       );
 
+  // Drain both ffmpeg stderr streams concurrently for the whole run so neither
+  // process can fill its stderr pipe, block, and stall the frame loop.
+  let decodeErrText = "";
+  let encodeErrText = "";
+  const decodeErrDrained = new Response(decoder.stderr as ReadableStream<Uint8Array>).text().then((t) => { decodeErrText = t; }).catch(() => {});
+  const encodeErrDrained = new Response(encoder.stderr as ReadableStream<Uint8Array>).text().then((t) => { encodeErrText = t; }).catch(() => {});
+
   const session = await DlssgSession.open(workerDir, { width, height, frameCount: info.frames ?? 1, generatedCount });
   // Prefer the GPU optical-flow engine (NVOFA) for the motion field; fall back to CPU.
   const nvof = tryCreateNvofBackend(width, height);
@@ -154,9 +161,9 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
   }
 
   const [decodeExit, encodeExit] = await Promise.all([decoder.exited, encoder.exited]);
-  const encodeErr = (await new Response(encoder.stderr).text()).trim();
-  if (decodeExit !== 0) throw new Error(`ffmpeg decode failed (${decodeExit})`);
-  if (encodeExit !== 0) throw new Error(`ffmpeg encode failed (${encodeExit}): ${encodeErr}`);
+  await Promise.all([decodeErrDrained, encodeErrDrained]);
+  if (decodeExit !== 0) throw new Error(`ffmpeg decode failed (${decodeExit}): ${decodeErrText.trim()}`);
+  if (encodeExit !== 0) throw new Error(`ffmpeg encode failed (${encodeExit}): ${encodeErrText.trim()}`);
   if (inputFrames === 0) throw new Error("No frames were decoded from the input. The file may be empty, corrupt, or not a video ffmpeg can read.");
   progress(1, `generated ${outputFrames} frames from ${inputFrames} (${multiplier}x)`);
   return { output, width, height, sourceFps: info.fps, outputFps, inputFrames, outputFrames, multiplier, ms: Math.round(performance.now() - started) };

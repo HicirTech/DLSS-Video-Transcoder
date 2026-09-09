@@ -32,7 +32,12 @@ export async function probeDlssg(workerDir: string): Promise<DlssgProbe> {
     stderr: "pipe",
     windowsHide: true,
   });
-  const text = await new Response(proc.stdout).text();
+  // Drain stdout AND stderr concurrently; reading only stdout would deadlock if
+  // the worker filled the unread stderr pipe before finishing its stdout.
+  const [text] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
   await proc.exited;
   const line = text.trim().split(/\r?\n/).filter((l) => l.trim()).pop() ?? "{}";
   const json = JSON.parse(line) as Record<string, unknown>;

@@ -66,7 +66,12 @@ export class BypassEngine implements Engine {
     this.outputWidth = width;
     this.outputHeight = height;
     this.source = session.device.createTexture2D({ width, height, format: DXGI_FORMAT_R8G8B8A8_UNORM, allowUnorderedAccess: true, label: "bypass source" });
-    this.target = session.device.createTexture2D({ width, height, format: DXGI_FORMAT_R8G8B8A8_UNORM, allowUnorderedAccess: true, label: "bypass target" });
+    try {
+      this.target = session.device.createTexture2D({ width, height, format: DXGI_FORMAT_R8G8B8A8_UNORM, allowUnorderedAccess: true, label: "bypass target" });
+    } catch (error) {
+      this.source.release(); // no instance exists yet, so close() will never run — release the first texture here
+      throw error;
+    }
   }
 
   process(frame: FrameInput): Uint8Array {

@@ -154,11 +154,13 @@ export function sparseSceneScore(current: Uint8Array, previous: Uint8Array, widt
 // -- Grayscale box-average downscale ------------------------------------------
 
 /**
- * Compute the flow-grid dimensions for a render size, per guides.py:24-26:
- * scale = min(1, flowWidth/width); dims rounded to even and clamped to >= 64.
+ * Compute the flow-grid dimensions for a render size: scale so the LONG side is
+ * ~flowWidth (matching the documented "long-side resolution"); dims rounded to
+ * even and clamped to >= 64. Scaling by the long side keeps portrait frames from
+ * running the flow at a much larger grid than intended.
  */
 export function flowGridSize(width: number, height: number, flowWidth = DEFAULT_FLOW_WIDTH): { flowW: number; flowH: number } {
-  const scale = Math.min(1, flowWidth / Math.max(1, width));
+  const scale = Math.min(1, flowWidth / Math.max(1, width, height));
   const flowW = Math.max(64, Math.round((width * scale) / 2) * 2);
   const flowH = Math.max(64, Math.round((height * scale) / 2) * 2);
   return { flowW, flowH };
