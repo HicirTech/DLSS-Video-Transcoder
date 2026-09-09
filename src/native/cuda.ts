@@ -21,6 +21,8 @@ const cuda = dlopen("nvcuda.dll", {
   cuMemcpyHtoD_v2: { args: [FFIType.u64, FFIType.ptr, FFIType.u64], returns: FFIType.i32 },
   cuMemcpyDtoH_v2: { args: [FFIType.ptr, FFIType.u64, FFIType.u64], returns: FFIType.i32 },
   cuMemcpy2D_v2: { args: [FFIType.ptr], returns: FFIType.i32 },
+  cuMemAlloc_v2: { args: [FFIType.ptr, FFIType.u64], returns: FFIType.i32 },
+  cuMemFree_v2: { args: [FFIType.u64], returns: FFIType.i32 },
 });
 
 const CU_NAMES: Record<number, string> = {
@@ -62,6 +64,18 @@ export function cudaDeviceCount(): number {
 
 export function cudaSynchronize(): void {
   ck(cuda.symbols.cuCtxSynchronize() as number, "cuCtxSynchronize");
+}
+
+/** Allocate `bytes` of device memory; returns the CUdeviceptr. */
+export function cudaMalloc(bytes: number): bigint {
+  const out = new OutU64();
+  ck(cuda.symbols.cuMemAlloc_v2(out.ptr, BigInt(bytes)) as number, "cuMemAlloc");
+  return out.value;
+}
+
+/** Free device memory previously returned by cudaMalloc. */
+export function cudaFree(device: bigint): void {
+  ck(cuda.symbols.cuMemFree_v2(device) as number, "cuMemFree");
 }
 
 /** Copy `bytes` from a host buffer into a device pointer (tightly packed). */
