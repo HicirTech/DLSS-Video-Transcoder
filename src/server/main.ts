@@ -57,7 +57,12 @@ function isJobRequest(value: unknown): value is JobRequest {
     isObject(v.settings) &&
     isObject(v.scale) &&
     (v.frameGen === undefined ||
-      (isObject(v.frameGen) && typeof v.frameGen.multiplier === "number"))
+      (isObject(v.frameGen) &&
+        // Either a target rate or a multiplier must be present; both optional fields must be well-typed when given.
+        (typeof v.frameGen.multiplier === "number" || typeof v.frameGen.targetFps === "string") &&
+        (v.frameGen.multiplier === undefined || typeof v.frameGen.multiplier === "number") &&
+        (v.frameGen.targetFps === undefined || typeof v.frameGen.targetFps === "string") &&
+        (v.frameGen.engine === undefined || v.frameGen.engine === "auto" || v.frameGen.engine === "native" || v.frameGen.engine === "cascade")))
   );
 }
 

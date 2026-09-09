@@ -90,6 +90,13 @@ export interface EncodeSettings {
 
 export const DEFAULT_ENCODE_SETTINGS: EncodeSettings = { codec: "h264", quality: 18, container: "mp4", copyAudio: true };
 
+/** Named frame-generation output rates, ascending; the pipeline's exact-rational FPS table uses the same names. */
+export const FRAME_GEN_FPS_CHOICES = ["23.976", "25", "29.97", "30", "50", "59.94", "60", "90", "119.88", "120", "144", "165", "180", "240", "360", "480"] as const;
+export type FrameGenFps = (typeof FRAME_GEN_FPS_CHOICES)[number];
+/** Frame-generation path selection; see JobRequest.frameGen.engine. */
+export const FRAME_GEN_ENGINES = ["auto", "native", "cascade"] as const;
+export type FrameGenEngine = (typeof FRAME_GEN_ENGINES)[number];
+
 export interface JobRequest {
   kind: "image" | "video";
   /** Absolute path on the machine running the server. */
@@ -103,11 +110,26 @@ export interface JobRequest {
   encode?: EncodeSettings;
   /**
    * Video only. When set, the job runs DLSS Frame Generation (interpolate to a
-   * higher frame rate) instead of the per-frame engine; `multiplier` is the
-   * output-to-input frame ratio (2 = double the fps). The per-frame engine and
-   * scale settings are ignored in this mode.
+   * higher frame rate) instead of the per-frame engine. The per-frame engine and
+   * scale settings are ignored in this mode. Give either `targetFps` or
+   * `multiplier` (targetFps wins when both are present).
    */
-  frameGen?: { multiplier: number };
+  frameGen?: {
+    /**
+     * Output frame rate: one of the named choices "23.976", "25", "29.97", "30",
+     * "50", "59.94", "60", "90", "119.88", "120", "144", "165", "180", "240",
+     * "360", "480", or an exact "num/den" such as "60000/1001".
+     */
+    targetFps?: string;
+    /** Convenience ratio when targetFps is absent: output = source rate x multiplier (2 = double the fps). */
+    multiplier?: number;
+    /**
+     * auto (default): native multi-frame DLSSG when target/source is an exact
+     * integer the runtime supports and HAGS is on, otherwise a cascade of 2x
+     * stages. native / cascade force that path (native needs HAGS for 3x+).
+     */
+    engine?: FrameGenEngine;
+  };
   /**
    * Absolute folder of a specific DLSS DLL version to load (from GET /api/catalog);
    * omit to use the bundled runtime DLL. Applies to the sr and nr engines.
