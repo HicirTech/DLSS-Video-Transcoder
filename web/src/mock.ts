@@ -355,7 +355,7 @@ export function isJobRequest(value: unknown): value is JobRequest {
     (value.kind === "image" || value.kind === "video") &&
     typeof value.input === "string" &&
     (value.output === undefined || typeof value.output === "string") &&
-    (value.engine === "bypass" || value.engine === "nr") &&
+    (value.engine === "bypass" || value.engine === "nr" || value.engine === "sr") &&
     (value.motion === "none" || value.motion === "flow") &&
     isRecord(value.settings) &&
     isRecord(value.scale)

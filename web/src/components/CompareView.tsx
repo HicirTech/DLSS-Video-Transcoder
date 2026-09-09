@@ -103,11 +103,15 @@ export function CompareView({ beforeSrc, afterSrc, beforeLabel = "Before", after
           draggable={false}
           onError={() => markFailed(beforeLabel.toLowerCase())}
           style={{
+            // Same sizing model as the base image (width:100%, natural height,
+            // anchored top-left) so the two overlap exactly and the split line
+            // lands on the same content column in both.
             position: "absolute",
-            inset: 0,
+            top: 0,
+            left: 0,
             width: "100%",
-            height: "100%",
-            objectFit: "contain",
+            height: "auto",
+            display: "block",
             clipPath: `inset(0 ${100 - position}% 0 0)`,
           }}
         />

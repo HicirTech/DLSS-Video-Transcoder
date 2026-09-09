@@ -33,7 +33,7 @@ export function DriverCard({ driver, device, ngxInit, capabilities }: DriverCard
                   <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
                     <BoolChip value={device.created} trueLabel="created" falseLabel="not created" />
                     {device.featureLevel ? <Mono>{device.featureLevel}</Mono> : null}
-                    {device.hresult ? <Mono dim>HRESULT {device.hresult}</Mono> : null}
+                    {!device.created && device.hresult ? <Mono dim>HRESULT {device.hresult}</Mono> : null}
                   </Stack>
                 ),
               },

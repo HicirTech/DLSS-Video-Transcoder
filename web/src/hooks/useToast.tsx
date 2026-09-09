@@ -21,9 +21,13 @@ const ToastContext = createContext<ToastApi | null>(null);
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<Toast | null>(null);
   const [open, setOpen] = useState(false);
+  // Bumped on every show; used as the Snackbar key so MUI remounts it and
+  // restarts the auto-hide timer even when consecutive toasts share a severity.
+  const [seq, setSeq] = useState(0);
 
   const show = useCallback((message: string, severity: Severity) => {
     setToast({ message, severity });
+    setSeq((s) => s + 1);
     setOpen(true);
   }, []);
 
@@ -41,6 +45,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={toastApi}>
       {children}
       <Snackbar
+        key={seq}
         open={open}
         autoHideDuration={toast?.severity === "error" ? 8000 : 4000}
         onClose={(_event, reason) => {

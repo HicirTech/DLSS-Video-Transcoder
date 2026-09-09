@@ -46,6 +46,12 @@ function pick<T>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback;
 }
 
+/** Confines a numeric field to [min, max], falling back to the default when it is not finite. */
+function clamp(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
 const PRESETS = [0, 1, 2, 3] as const;
 const STYLES = [0, 1, 2] as const;
 const NR_PATHS = ["auto", "core", "snippet"] as const;
@@ -73,13 +79,24 @@ export function loadSettings(raw: string | null): StoredSettings {
       preset: pick(nr.preset, PRESETS, defaults.nr.preset),
       style: pick(nr.style, STYLES, defaults.nr.style),
       nrPath: pick(nr.nrPath, NR_PATHS, defaults.nr.nrPath),
-      warmupFrames: Math.max(0, Math.round(nr.warmupFrames)),
+      intensity: clamp(nr.intensity, 0, 2, defaults.nr.intensity),
+      localTone: clamp(nr.localTone, 0, 2, defaults.nr.localTone),
+      localStructure: clamp(nr.localStructure, 0, 2, defaults.nr.localStructure),
+      skinStructure: clamp(nr.skinStructure, -1, 2, defaults.nr.skinStructure),
+      warmupFrames: clamp(Math.round(nr.warmupFrames), 0, 64, defaults.nr.warmupFrames),
     },
-    scale: { ...scale, mode: pick(scale.mode, SCALE_MODES, defaults.scale.mode) },
+    scale: {
+      ...scale,
+      mode: pick(scale.mode, SCALE_MODES, defaults.scale.mode),
+      factor: clamp(scale.factor, 0.25, 8, defaults.scale.factor),
+      width: clamp(Math.round(scale.width), 16, 16384, defaults.scale.width),
+      height: clamp(Math.round(scale.height), 16, 16384, defaults.scale.height),
+    },
     encode: {
       ...encode,
       codec: pick(encode.codec, CODECS, defaults.encode.codec),
       container: pick(encode.container, CONTAINERS, defaults.encode.container),
+      quality: clamp(Math.round(encode.quality), 0, 51, defaults.encode.quality),
     },
   };
 }

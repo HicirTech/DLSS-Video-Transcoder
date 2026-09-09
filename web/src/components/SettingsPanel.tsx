@@ -76,7 +76,7 @@ export function SettingsPanel() {
           />
           <Typography variant="caption" color="text.secondary">
             Extra evaluations of the first frame so the temporal state settles before the output is taken. Images use
-            this; videos settle naturally over their first frames. Use 0 or more; default 4.
+            this; videos settle naturally over their first frames. Range 0–64; default 4.
           </Typography>
         </Stack>
       </Section>

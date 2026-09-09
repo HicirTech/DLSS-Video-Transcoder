@@ -10,9 +10,13 @@ export function baseName(path: string): string {
 export function formatDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "-";
   const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)} s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${String(Math.floor(seconds % 60)).padStart(2, "0")}s`;
+  if (seconds < 10) return `${seconds.toFixed(1)} s`;
+  // Round to whole seconds first, then pick the unit, so a value that rounds up
+  // to 60 shows as "1m 00s" rather than "60 s" (and 3600 as "1h 00m").
+  const whole = Math.round(seconds);
+  if (whole < 60) return `${whole} s`;
+  const minutes = Math.floor(whole / 60);
+  if (minutes < 60) return `${minutes}m ${String(whole % 60).padStart(2, "0")}s`;
   const hours = Math.floor(minutes / 60);
   return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
