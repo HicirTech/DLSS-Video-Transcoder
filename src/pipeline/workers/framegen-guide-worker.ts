@@ -1,16 +1,23 @@
 /**
- * Guide-stage worker for frame generation: one per DLSSG stage.
+ * Guide-side workers for frame generation, in two roles:
  *
- * Owns that stage's motion-guide history — the optical-flow estimator (with its
- * own NVOFA session on this thread), the previous frame's segment/timestamp,
- * and the scene-cut / duplicate decisions — so the ~12 ms of CPU work per
- * evaluation runs off the main thread and in parallel across stages while the
- * main thread keeps the dlssg-worker pipes busy. Frames arrive as
- * SharedArrayBuffer-backed RGBA (no copy); the packed R16G16_FLOAT motion goes
- * back as a transferred ArrayBuffer. The coordinator sends one "prepare" at a
- * time per worker, in stream order, which is what keeps the history correct.
+ *   - guide ("open"): owns one stage's motion-guide history — the optical-flow
+ *     estimator (with its own NVOFA session on this thread), the previous
+ *     frame's segment/timestamp and the scene-cut / duplicate decisions — so
+ *     that CPU work runs off the main thread and in parallel across stages.
+ *   - packer ("open-packer"): upsamples a stage's grid flow to render
+ *     resolution, scales it and packs it as R16G16_FLOAT halves.
+ *
+ * The last cascade stage runs 2^(stages-1) evaluations per source frame and is
+ * the pipeline's bottleneck, so it gets a packer thread and its analysis and
+ * packing pipeline across frames; earlier stages pack inline (packInline),
+ * because more threads than the machine has cores only adds contention.
+ *
+ * Frames arrive as SharedArrayBuffer-backed RGBA (no copy); flow and packed
+ * fields go back as transferred ArrayBuffers. The coordinator sends one request
+ * at a time per worker, in stream order, which is what keeps the history correct.
  */
-import { createMotionEstimator, type MotionEstimator } from "../flow.ts";
+import { createMotionEstimator, flowGridSize, packFlowResizedR16G16, type MotionEstimator } from "../flow.ts";
 import { tryCreateNvofBackend } from "../nvof.ts";
 
 interface OpenMsg {
@@ -20,6 +27,18 @@ interface OpenMsg {
   /** Only the first stage discovers scene cuts; later stages inherit them as segment changes. */
   detectSourceCuts: boolean;
   ordinal?: number;
+  /** Pack on this thread instead of handing the grid flow to a packer thread. */
+  packInline?: boolean;
+}
+interface OpenPackerMsg {
+  type: "open-packer";
+  width: number;
+  height: number;
+}
+interface PackMsg {
+  type: "pack";
+  id: number;
+  small: ArrayBuffer;
 }
 interface PrepareMsg {
   type: "prepare";
@@ -29,7 +48,7 @@ interface PrepareMsg {
   tsNum: bigint;
   tsDen: bigint;
 }
-type InMsg = OpenMsg | PrepareMsg | { type: "close" };
+type InMsg = OpenMsg | OpenPackerMsg | PrepareMsg | PackMsg | { type: "close" };
 
 declare const self: Worker;
 
@@ -38,6 +57,8 @@ let detectSourceCuts = false;
 let previous: { segment: number; tsNum: bigint; tsDen: bigint } | null = null;
 let sceneCuts = 0;
 let duplicates = 0;
+let packInline = false;
+let packer: { width: number; height: number; flowW: number; flowH: number } | null = null;
 
 self.onmessage = (event: MessageEvent<InMsg>) => {
   const m = event.data;
@@ -46,13 +67,24 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
       const nvof = tryCreateNvofBackend(m.width, m.height, undefined, m.ordinal ?? 0);
       estimator = createMotionEstimator(m.width, m.height, nvof ? { backend: nvof } : {});
       detectSourceCuts = m.detectSourceCuts;
+      packInline = m.packInline ?? false;
       self.postMessage({ type: "opened", flow: nvof ? "nvof" : "cpu" });
+    } else if (m.type === "open-packer") {
+      // The same grid the estimators compute flow on (flowGridSize default long side).
+      const { flowW, flowH } = flowGridSize(m.width, m.height);
+      packer = { width: m.width, height: m.height, flowW, flowH };
+      self.postMessage({ type: "opened", flow: "pack" });
     } else if (m.type === "prepare") {
       if (!estimator) throw new Error("frame-generation guide worker used before open");
       let segment = m.segment;
       // A segment change (timestamp discontinuity, or a cut found by an earlier stage) is a known reset.
       let forceReset = previous !== null && segment !== previous.segment;
-      const guide = estimator.processPacked(m.rgba, forceReset);
+      const guide = packInline
+        ? (() => {
+            const packed = estimator.processPacked(m.rgba, forceReset);
+            return { small: null as Float32Array | null, half: packed.half, reset: packed.reset, sceneScore: packed.sceneScore, duplicate: packed.duplicate, confidence: packed.confidence };
+          })()
+        : estimator.analyzePacked(m.rgba, forceReset);
       if (previous !== null && detectSourceCuts && guide.reset && !forceReset) {
         segment = previous.segment + 1;
         forceReset = true;
@@ -62,7 +94,12 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
       const reset = previous === null || forceReset || guide.reset;
       const before = previous;
       previous = { segment, tsNum: m.tsNum, tsDen: m.tsDen };
+      // Copy the grid flow: transferring it must not detach a buffer the backend reuses.
+      const small = guide.small ? guide.small.slice() : null;
       const half = guide.half;
+      const transfer: ArrayBuffer[] = [];
+      if (small) transfer.push(small.buffer as ArrayBuffer);
+      if (half) transfer.push(half.buffer as ArrayBuffer);
       self.postMessage(
         {
           type: "prepared",
@@ -71,12 +108,17 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
           segment,
           previousTsNum: before ? before.tsNum : null,
           previousTsDen: before ? before.tsDen : null,
+          small: small ? small.buffer : null,
           half: half ? half.buffer : null,
           sceneCuts,
           duplicates,
         },
-        half ? [half.buffer as ArrayBuffer] : [],
+        transfer,
       );
+    } else if (m.type === "pack") {
+      if (!packer) throw new Error("frame-generation packer used before open");
+      const packed = packFlowResizedR16G16(new Float32Array(m.small), packer.flowW, packer.flowH, packer.width, packer.height);
+      self.postMessage({ type: "packed", id: m.id, half: packed.buffer }, [packed.buffer as ArrayBuffer]);
     } else if (m.type === "close") {
       estimator?.close();
       estimator = null;

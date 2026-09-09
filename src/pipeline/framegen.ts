@@ -47,7 +47,7 @@ import {
   outputFrameCount,
   resolveTargetRate,
 } from "./framegen-plan.ts";
-import { NvencEncoder, probeNvenc } from "./nvenc.ts";
+import type { NvencCodec } from "./nvenc.ts";
 import { type Rational, formatRational, parseRational, ratAdd, ratCmp, ratDiv, ratMul, ratSub, ratToNumber, rational } from "./nut.ts";
 import { findTool } from "./tools.ts";
 import { encoderArgs, nvencNativeTarget, probeVideo } from "./video.ts";
@@ -187,12 +187,28 @@ interface GuideReply {
   segment: number;
   previousTsNum: bigint | null;
   previousTsDen: bigint | null;
+  small: ArrayBuffer | null;
   half: ArrayBuffer | null;
   sceneCuts: number;
   duplicates: number;
 }
 
-/** One DLSSG stage: a worker-process session on the main thread plus a guide Worker thread. */
+interface PackReply {
+  type: "packed";
+  id: number;
+  half: ArrayBuffer;
+}
+
+/** A frame the guide thread has analysed; its grid flow still needs packing unless the slow path already did it. */
+interface AnalyzedFrame {
+  frame: TimedFrame;
+  previousTimestamp: Rational | null;
+  reset: boolean;
+  small: Float32Array | null;
+  half: Uint16Array | null;
+}
+
+/** One DLSSG stage: a worker-process session driven from the main thread, a guide thread, and (for the bottleneck stage) a packer thread. */
 class Stage {
   sceneCuts = 0;
   duplicates = 0;
@@ -201,12 +217,14 @@ class Stage {
   generatedTotal = 0;
   flow: "nvof" | "cpu" | "?" = "?";
   private nextIndex = 0;
-  private waiter: { frame: TimedFrame; resolve: (p: PreparedFrame) => void; reject: (e: Error) => void } | null = null;
+  private waiter: { frame: TimedFrame; resolve: (a: AnalyzedFrame) => void; reject: (e: Error) => void } | null = null;
+  private packWaiter: { analyzed: AnalyzedFrame; resolve: (p: PreparedFrame) => void; reject: (e: Error) => void } | null = null;
   private failed: Error | null = null;
 
   constructor(
     readonly session: DlssgSession,
     readonly guide: Worker,
+    readonly packer: Worker | null,
     readonly generatedCount: number,
     private readonly zeros: Uint16Array,
   ) {
@@ -221,14 +239,29 @@ class Stage {
         w.resolve({
           frame: m.segment === w.frame.segment ? w.frame : { ...w.frame, segment: m.segment },
           previousTimestamp: m.previousTsNum !== null && m.previousTsDen !== null ? { num: m.previousTsNum, den: m.previousTsDen } : null,
-          half: m.half ? new Uint16Array(m.half) : null,
           reset: m.reset,
+          small: m.small ? new Float32Array(m.small) : null,
+          half: m.half ? new Uint16Array(m.half) : null,
         });
       } else if (m.type === "error") {
         this.fail(new Error(`frame-generation guide worker: ${m.message}`));
       }
     };
     guide.addEventListener("error", (e) => this.fail(new Error(`frame-generation guide worker crashed: ${(e as ErrorEvent).message}`)));
+    if (packer) {
+      packer.onmessage = (event: MessageEvent) => {
+        const m = event.data as PackReply | { type: "error"; message: string } | { type: "opened" | "closed" };
+        if (m.type === "packed") {
+          const w = this.packWaiter;
+          this.packWaiter = null;
+          if (!w) return;
+          w.resolve({ frame: w.analyzed.frame, previousTimestamp: w.analyzed.previousTimestamp, half: new Uint16Array(m.half), reset: w.analyzed.reset });
+        } else if (m.type === "error") {
+          this.fail(new Error(`frame-generation packer worker: ${m.message}`));
+        }
+      };
+      packer.addEventListener("error", (e) => this.fail(new Error(`frame-generation packer worker crashed: ${(e as ErrorEvent).message}`)));
+    }
   }
 
   private fail(error: Error): void {
@@ -236,14 +269,30 @@ class Stage {
     const w = this.waiter;
     this.waiter = null;
     w?.reject(error);
+    const p = this.packWaiter;
+    this.packWaiter = null;
+    p?.reject(error);
   }
 
-  /** Run the guide for one frame on this stage's thread (one at a time, in stream order). */
-  prepare(frame: TimedFrame, id: number): Promise<PreparedFrame> {
+  /** Run the guide analysis for one frame on this stage's thread (one at a time, in stream order). */
+  prepare(frame: TimedFrame, id: number): Promise<AnalyzedFrame> {
     if (this.failed) return Promise.reject(this.failed);
-    return new Promise<PreparedFrame>((resolve, reject) => {
+    return new Promise<AnalyzedFrame>((resolve, reject) => {
       this.waiter = { frame, resolve, reject };
       this.guide.postMessage({ type: "prepare", id, rgba: frame.rgba, segment: frame.segment, tsNum: frame.timestamp.num, tsDen: frame.timestamp.den });
+    });
+  }
+
+  /** Upsample + pack the grid flow on this stage's packer thread; immediate when the guide already packed it. */
+  pack(analyzed: AnalyzedFrame, id: number): Promise<PreparedFrame> {
+    if (this.failed) return Promise.reject(this.failed);
+    if (analyzed.small === null) return Promise.resolve({ frame: analyzed.frame, previousTimestamp: analyzed.previousTimestamp, half: analyzed.half, reset: analyzed.reset });
+    const packer = this.packer;
+    if (!packer) return Promise.reject(new Error("frame-generation stage got unpacked flow but has no packer thread"));
+    return new Promise<PreparedFrame>((resolve, reject) => {
+      this.packWaiter = { analyzed, resolve, reject };
+      const buffer = analyzed.small!.buffer as ArrayBuffer;
+      packer.postMessage({ type: "pack", id, small: buffer }, [buffer]);
     });
   }
 
@@ -272,23 +321,141 @@ class Stage {
 
   async close(): Promise<void> {
     try { this.guide.terminate(); } catch {}
+    if (this.packer) try { this.packer.terminate(); } catch {}
     await this.session.close();
   }
 }
 
-/** Open a guide worker for a stage and wait until its estimator (and NVOFA session) is up. */
-function openGuideWorker(width: number, height: number, detectSourceCuts: boolean): Promise<{ worker: Worker; flow: "nvof" | "cpu" }> {
+type OpenGuide = { type: "open"; width: number; height: number; detectSourceCuts: boolean; packInline: boolean } | { type: "open-packer"; width: number; height: number };
+
+/** Start a guide-side worker in either role and wait until it is ready (its NVOFA session included). */
+function openGuideWorker(open: OpenGuide): Promise<{ worker: Worker; flow: "nvof" | "cpu" | "pack" }> {
   return new Promise((resolve, reject) => {
+    const role = open.type === "open" ? "guide" : "packer";
     const worker = new Worker(new URL("./workers/framegen-guide-worker.ts", import.meta.url).href);
-    const onError = (e: Event) => { reject(new Error(`frame-generation guide worker failed to start: ${(e as ErrorEvent).message}`)); };
+    const onError = (e: Event) => { reject(new Error(`frame-generation ${role} worker failed to start: ${(e as ErrorEvent).message}`)); };
     worker.addEventListener("error", onError, { once: true });
     worker.onmessage = (event: MessageEvent) => {
-      const m = event.data as { type: string; flow?: "nvof" | "cpu"; message?: string };
+      const m = event.data as { type: string; flow?: "nvof" | "cpu" | "pack"; message?: string };
       if (m.type === "opened") { worker.removeEventListener("error", onError); worker.onmessage = null; resolve({ worker, flow: m.flow ?? "cpu" }); }
-      else if (m.type === "error") { reject(new Error(`frame-generation guide worker: ${m.message}`)); }
+      else if (m.type === "error") { reject(new Error(`frame-generation ${role} worker: ${m.message}`)); }
     };
-    worker.postMessage({ type: "open", width, height, detectSourceCuts });
+    worker.postMessage(open);
   });
+}
+
+interface OpenEncode {
+  type: "open";
+  ffmpeg: string;
+  nvencArgs: string[];
+  rawArgs: string[];
+  nvenc: { width: number; height: number; fpsNum: number; fpsDen: number; codec: NvencCodec; cq: number } | null;
+}
+
+/**
+ * Main-thread handle for the encode worker. write() resolves as soon as the
+ * frame is accepted, with at most `window` frames in flight, so encoding
+ * overlaps the rest of the pipeline while staying in display order (the worker
+ * processes requests through one promise chain) and bounded in memory.
+ */
+class EncodeSink {
+  usesNvenc = false;
+  note = "";
+  private inFlight = 0;
+  private readonly waiters: Array<() => void> = [];
+  private failure: Error | null = null;
+  private openSettle: { resolve: (sink: EncodeSink) => void; reject: (error: Error) => void } | null = null;
+  private finishSettle: { resolve: () => void; reject: (error: Error) => void } | null = null;
+  private abortSettle: (() => void) | null = null;
+
+  private constructor(private readonly worker: Worker, private readonly window: number) {
+    worker.onmessage = (event: MessageEvent) => {
+      const m = event.data as { type: string; nvenc?: boolean; note?: string; message?: string };
+      if (m.type === "opened") {
+        this.usesNvenc = Boolean(m.nvenc);
+        this.note = m.note ?? "";
+        const settle = this.openSettle;
+        this.openSettle = null;
+        settle?.resolve(this);
+      } else if (m.type === "encoded") {
+        this.inFlight--;
+        this.waiters.shift()?.();
+      } else if (m.type === "done") {
+        const settle = this.finishSettle;
+        this.finishSettle = null;
+        settle?.resolve();
+      } else if (m.type === "aborted") {
+        const settle = this.abortSettle;
+        this.abortSettle = null;
+        settle?.();
+      } else if (m.type === "error") {
+        this.fail(new Error(m.message ?? "frame-generation encode worker failed"));
+      }
+    };
+    worker.addEventListener("error", (e) => this.fail(new Error(`frame-generation encode worker crashed: ${(e as ErrorEvent).message}`)));
+  }
+
+  private fail(error: Error): void {
+    this.failure ??= error;
+    const open = this.openSettle;
+    this.openSettle = null;
+    open?.reject(this.failure);
+    const finish = this.finishSettle;
+    this.finishSettle = null;
+    finish?.reject(this.failure);
+    const abort = this.abortSettle;
+    this.abortSettle = null;
+    abort?.();
+    // Wake every writer so it observes the failure instead of waiting for a credit that will never come.
+    for (const wake of this.waiters.splice(0)) wake();
+  }
+
+  static open(message: OpenEncode, window = 8): Promise<EncodeSink> {
+    const worker = new Worker(new URL("./workers/framegen-encode-worker.ts", import.meta.url).href);
+    const sink = new EncodeSink(worker, window);
+    return new Promise<EncodeSink>((resolve, reject) => {
+      sink.openSettle = { resolve, reject };
+      worker.postMessage(message);
+    });
+  }
+
+  async write(rgba: Uint8Array): Promise<void> {
+    if (this.failure) throw this.failure;
+    while (this.inFlight >= this.window) {
+      await new Promise<void>((resolve) => this.waiters.push(resolve));
+      if (this.failure) throw this.failure;
+    }
+    this.inFlight++;
+    this.worker.postMessage({ type: "frame", rgba });
+  }
+
+  /** Flush the encoder, close ffmpeg's stdin and wait for it to exit cleanly. */
+  finish(): Promise<void> {
+    if (this.failure) return Promise.reject(this.failure);
+    return new Promise<void>((resolve, reject) => {
+      this.finishSettle = { resolve, reject };
+      this.worker.postMessage({ type: "finish" });
+    });
+  }
+
+  /** Kill ffmpeg and wait for it to release the output file so the caller can delete it. */
+  async abort(): Promise<void> {
+    await new Promise<void>((resolve) => {
+      this.abortSettle = resolve;
+      try {
+        this.worker.postMessage({ type: "abort" });
+      } catch {
+        resolve();
+        return;
+      }
+      setTimeout(resolve, 5000);
+    });
+    this.close();
+  }
+
+  close(): void {
+    try { this.worker.terminate(); } catch {}
+  }
 }
 
 interface RunParams {
@@ -318,6 +485,7 @@ async function runOverlapped(p: RunParams): Promise<{ decoded: number; peak: num
   const maxGenerated = Math.max(0, ...stages.map((s) => s.generatedCount));
   const edgeCapacity = Math.max(4, maxGenerated + 1);
   const edges: TimedFrame[][] = Array.from({ length: stages.length + 1 }, () => []);
+  const analyzed: AnalyzedFrame[][] = stages.map(() => []);
   const prepared: PreparedFrame[][] = stages.map(() => []);
   const pending = new Set<string>();
   const done: Array<{ name: string; value?: unknown; error?: Error }> = [];
@@ -366,7 +534,9 @@ async function runOverlapped(p: RunParams): Promise<{ decoded: number; peak: num
         if (frame === null) { ended = true; used -= 1; }
         else { edges[0]!.push(frame); decoded++; }
       } else if (d.name.startsWith("guide:")) {
-        prepared[Number(d.name.slice(6))]!.push(d.value as PreparedFrame);
+        analyzed[Number(d.name.slice(6))]!.push(d.value as AnalyzedFrame);
+      } else if (d.name.startsWith("pack:")) {
+        prepared[Number(d.name.slice(5))]!.push(d.value as PreparedFrame);
       } else if (d.name.startsWith("native:")) {
         const k = Number(d.name.slice(7));
         const { items, credits } = d.value as { items: TimedFrame[]; credits: number };
@@ -395,9 +565,17 @@ async function runOverlapped(p: RunParams): Promise<{ decoded: number; peak: num
       }
     }
     for (let k = stages.length - 1; k >= 0; k--) {
+      const name = `pack:${k}`;
+      // The analysed item already holds this frame's motion credit; packing just swaps the grid flow for the full field.
+      if (!pending.has(name) && analyzed[k]!.length) {
+        const item = analyzed[k]!.shift()!;
+        start(name, stages[k]!.pack(item, ++guideSeq));
+      }
+    }
+    for (let k = stages.length - 1; k >= 0; k--) {
       const name = `guide:${k}`;
-      // Retain native output headroom even if the GPU is idle.
-      if (!pending.has(name) && edges[k]!.length && prepared[k]!.length < 2 && used + 1 <= capacity - maxGenerated) {
+      // Retain native output headroom even if the GPU is idle; let analysis run a little ahead of packing.
+      if (!pending.has(name) && edges[k]!.length && analyzed[k]!.length + prepared[k]!.length < 3 && used + 1 <= capacity - maxGenerated) {
         reserve(1);
         const frame = edges[k]!.shift()!;
         start(name, stages[k]!.prepare(frame, ++guideSeq));
@@ -409,7 +587,7 @@ async function runOverlapped(p: RunParams): Promise<{ decoded: number; peak: num
     }
 
     if (pending.size === 0) {
-      if (ended && edges.every((e) => e.length === 0) && prepared.every((q) => q.length === 0)) break;
+      if (ended && edges.every((e) => e.length === 0) && analyzed.every((q) => q.length === 0) && prepared.every((q) => q.length === 0)) break;
       throw new Error("Frame generation could not drain its bounded pipeline.");
     }
     if (done.length === 0) await new Promise<void>((resolve) => { wake = () => { wake = null; resolve(); }; });
@@ -435,7 +613,7 @@ async function runSequential(p: RunParams): Promise<{ decoded: number; peak: num
     let items: TimedFrame[] = [{ rgba, timestamp: ratDiv(rational(decoded), p.sourceRate), segment: 0, provenance: "Source", sourceIndex: decoded }];
     for (const stage of p.stages) {
       const next: TimedFrame[] = [];
-      for (const item of items) next.push(...(await stage.evaluate(await stage.prepare(item, ++guideSeq))));
+      for (const item of items) next.push(...(await stage.evaluate(await stage.pack(await stage.prepare(item, ++guideSeq), ++guideSeq))));
       items = next;
     }
     for (const item of items) await p.writer.push(item);
@@ -519,49 +697,42 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   // of ingesting an 8 MB/frame rawvideo pipe. Falls back to the rawvideo pipe
   // for CPU/AV1 codecs or when NVENC will not run.
   const nativeTarget = nvencNativeTarget(resolvedCodec.codec, width, height);
-  let nvenc: NvencEncoder | null = null;
-  if (nativeTarget && probeNvenc(0).available) {
-    try {
-      nvenc = NvencEncoder.open({ width, height, fpsNum: Number(targetRate.num), fpsDen: Number(targetRate.den), codec: nativeTarget.codec, preset: "p5", cq: options.quality ?? 20 });
-      progress(0, `encode: NVENC ${nativeTarget.codec} (GPU, mux-only pipe)`);
-    } catch (error) {
-      nvenc = null;
-      progress(0, `encode: NVENC direct path unavailable (${(error as Error).message}); using rawvideo pipe`);
-    }
+  // Encoding runs on its own thread: NvencEncoder.encode is a synchronous FFI
+  // call that would otherwise block the coordinator for milliseconds per output
+  // frame. The worker owns the ffmpeg child, tries NVENC itself (so no CUDA
+  // context is created here) and reports which path it took.
+  // NVENC emits Annex-B; the mp4 muxer converts it to length-prefixed. No
+  // -shortest: the writer emits exactly ceil(duration * rate) frames, so the
+  // video already spans the source duration and the audio track is kept whole.
+  // -video_track_timescale = rate numerator: one frame = `den` ticks, so the mp4
+  // timeline is exact and ffprobe's base-rate guess equals the target.
+  let sink: EncodeSink;
+  try {
+    sink = await EncodeSink.open({
+      type: "open",
+      ffmpeg,
+      nvencArgs: nativeTarget
+        ? ["-v", "error", "-y", "-f", nativeTarget.demux, "-framerate", outputRate, "-i", "pipe:0", ...(wantAudio ? ["-i", options.input] : []), "-map", "0:v:0", "-c:v", "copy", ...audioArgs, "-video_track_timescale", String(targetRate.num), "-movflags", "+faststart", output]
+        : [],
+      rawArgs: ["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-framerate", outputRate, "-i", "pipe:0", ...(wantAudio ? ["-i", options.input] : []), "-map", "0:v:0", ...audioArgs, ...encoderArgs({ codec: resolvedCodec.codec, quality: options.quality ?? 20, container: "mp4", copyAudio: true }), "-video_track_timescale", String(targetRate.num), "-movflags", "+faststart", output],
+      nvenc: nativeTarget ? { width, height, fpsNum: Number(targetRate.num), fpsDen: Number(targetRate.den), codec: nativeTarget.codec, cq: options.quality ?? 20 } : null,
+    });
+  } catch (error) {
+    try { decoder.kill(); } catch {}
+    await Promise.allSettled([decoder.exited]);
+    throw error;
   }
+  if (sink.note) progress(0, sink.note);
 
-  const encoder = nvenc
-    ? Bun.spawn(
-        // NVENC emits Annex-B; the mp4 muxer converts it to length-prefixed. No
-        // -shortest: the writer emits exactly ceil(duration * rate) frames, so the
-        // video already spans the source duration and the audio track is kept whole.
-        // -video_track_timescale = rate numerator: one frame = `den` ticks, so the
-        // mp4 timeline is exact and ffprobe's base-rate guess equals the target.
-        [ffmpeg, "-v", "error", "-y", "-f", nativeTarget!.demux, "-framerate", outputRate, "-i", "pipe:0", ...(wantAudio ? ["-i", options.input] : []), "-map", "0:v:0", "-c:v", "copy", ...audioArgs, "-video_track_timescale", String(targetRate.num), "-movflags", "+faststart", output],
-        { stdin: "pipe", stdout: "ignore", stderr: "pipe" },
-      )
-    : Bun.spawn(
-        [ffmpeg, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-framerate", outputRate, "-i", "pipe:0", ...(wantAudio ? ["-i", options.input] : []), "-map", "0:v:0", ...audioArgs, ...encoderArgs({ codec: resolvedCodec.codec, quality: options.quality ?? 20, container: "mp4", copyAudio: true }), "-video_track_timescale", String(targetRate.num), "-movflags", "+faststart", output],
-        { stdin: "pipe", stdout: "ignore", stderr: "pipe" },
-      );
-
-  // Drain both ffmpeg stderr streams concurrently for the whole run so neither
-  // process can fill its stderr pipe, block, and stall the frame loop.
+  // Drain the decoder's stderr for the whole run so it can never fill its pipe,
+  // block, and stall the frame loop (the encode worker drains its own).
   let decodeErrText = "";
-  let encodeErrText = "";
   const decodeErrDrained = new Response(decoder.stderr as ReadableStream<Uint8Array>).text().then((t) => { decodeErrText = t; }).catch(() => {});
-  const encodeErrDrained = new Response(encoder.stderr as ReadableStream<Uint8Array>).text().then((t) => { encodeErrText = t; }).catch(() => {});
 
-  // Decoded and generated frames live in SharedArrayBuffers so the guide threads read them without copies.
+  // Decoded and generated frames live in SharedArrayBuffers so the guide and
+  // encode threads read them without copies.
   const reader = new FrameReader(decoder.stdout as ReadableStream<Uint8Array>, true);
-  const stdin = encoder.stdin as { write(b: Uint8Array): unknown; flush(): number | Promise<number>; end(): unknown };
-  // Write with backpressure only; the final stdin.end() flushes the remainder.
-  const write = async (frame: Uint8Array): Promise<void> => {
-    const payload = nvenc ? nvenc.encode(frame) : frame;
-    const w = stdin.write(payload);
-    if (w instanceof Promise) await w;
-  };
-  const writer = new NearestTimestampWriter(write, targetRate, outputCount);
+  const writer = new NearestTimestampWriter((frame) => sink.write(frame), targetRate, outputCount);
   const zeros = new Uint16Array(width * height * 2);
   const stages: Stage[] = [];
   const capacity = Math.floor((options.bufferLimitBytes ?? DEFAULT_BUFFER_LIMIT) / frameBytes);
@@ -579,25 +750,31 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     const openStage = async (index: number, generatedCount: number): Promise<Stage> => {
       // Stage k sees (frames-1)*2^k + 1 frames: a size hint for the worker's history.
       const frameCount = plan.path === "Cascade" ? Math.max(1, (frames - 1) * (1 << index) + 1) : frames;
-      const [sessionResult, guideResult] = await Promise.allSettled([
+      // Only the last stage — 2^(stages-1) evaluations per source frame, the
+      // bottleneck — gets a packer thread; the others pack inline so the machine
+      // is not oversubscribed.
+      const packInline = index !== generatedCounts.length - 1;
+      const results = await Promise.allSettled([
         DlssgSession.open(workerDir, { width, height, frameCount, generatedCount, sharedFrames: true }),
-        openGuideWorker(width, height, index === 0),
+        openGuideWorker({ type: "open", width, height, detectSourceCuts: index === 0, packInline }),
+        packInline ? Promise.resolve(null) : openGuideWorker({ type: "open-packer", width, height }),
       ]);
-      if (sessionResult.status === "rejected" || guideResult.status === "rejected") {
-        // Release whichever half came up so a partial failure leaks nothing.
+      const [sessionResult, guideResult, packerResult] = results;
+      if (sessionResult.status === "rejected" || guideResult.status === "rejected" || packerResult.status === "rejected") {
+        // Release whatever came up so a partial failure leaks nothing.
         if (sessionResult.status === "fulfilled") await sessionResult.value.close();
-        if (guideResult.status === "fulfilled") try { guideResult.value.worker.terminate(); } catch {}
-        throw sessionResult.status === "rejected" ? sessionResult.reason : (guideResult as PromiseRejectedResult).reason;
+        for (const r of [guideResult, packerResult]) if (r.status === "fulfilled" && r.value) try { r.value.worker.terminate(); } catch {}
+        throw results.find((r): r is PromiseRejectedResult => r.status === "rejected")!.reason;
       }
-      const stage = new Stage(sessionResult.value, guideResult.value.worker, generatedCount, zeros);
-      stage.flow = guideResult.value.flow;
+      const stage = new Stage(sessionResult.value, guideResult.value.worker, packerResult.value ? packerResult.value.worker : null, generatedCount, zeros);
+      stage.flow = guideResult.value.flow === "pack" ? "cpu" : guideResult.value.flow;
       return stage;
     };
     const opened = await Promise.allSettled(generatedCounts.map((generatedCount, index) => openStage(index, generatedCount)));
     for (const result of opened) if (result.status === "fulfilled") stages.push(result.value); // so `finally` closes them
     const failed = opened.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failed) throw failed.reason;
-    if (stages.length) progress(0, `guide threads: ${stages.length} (optical flow ${stages.map((s) => (s.flow === "nvof" ? "NVOFA" : "CPU")).join(", ")})`);
+    if (stages.length) progress(0, `guide threads: ${stages.length} + ${stages.filter((s) => s.packer).length} packer, 1 encode (optical flow ${stages.map((s) => (s.flow === "nvof" ? "NVOFA" : "CPU")).join(", ")})`);
 
     const noneGenerated = () => stages.every((stage) => stage.generatedTotal === 0);
     const check = (): void => {
@@ -634,25 +811,24 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     if (inputFrames === 0) throw new Error("No frames were decoded from the input. The file may be empty, corrupt, or not a video ffmpeg can read.");
     // Clips shorter than the probe window still must not pass off a duplicate-frame resample as generation.
     if (expectsGeneration && stages[0]!.intervals >= 1 && noneGenerated()) throw frameGenDisabledError(plan, stages[0]?.session.disabledFrames ?? 0, caps.hagsEnabled);
-    if (nvenc) nvenc.finish();
-    stdin.end();
+    await sink.finish();
   } catch (error) {
-    // Tear down both ffmpeg children and remove the partial output so a failed
-    // job never leaves a misleading file behind.
+    // Tear down the decoder and the encode worker (which kills its own ffmpeg and
+    // releases the output file), then remove the partial output so a failed job
+    // never leaves a misleading file behind.
     try { decoder.kill(); } catch {}
-    try { encoder.kill(); } catch {}
-    await Promise.allSettled([decoder.exited, encoder.exited, decodeErrDrained, encodeErrDrained]);
+    await sink.abort();
+    await Promise.allSettled([decoder.exited, decodeErrDrained]);
     try { if (existsSync(output)) unlinkSync(output); } catch {}
     throw error;
   } finally {
-    nvenc?.close();
+    sink.close();
     for (const stage of stages) await stage.close();
   }
 
-  const [decodeExit, encodeExit] = await Promise.all([decoder.exited, encoder.exited]);
-  await Promise.all([decodeErrDrained, encodeErrDrained]);
+  const decodeExit = await decoder.exited;
+  await decodeErrDrained;
   if (decodeExit !== 0) throw new Error(`ffmpeg decode failed (${decodeExit}): ${decodeErrText.trim()}`);
-  if (encodeExit !== 0) throw new Error(`ffmpeg encode failed (${encodeExit}): ${encodeErrText.trim()}`);
 
   // Verify the muxed file really carries the planned timeline before calling it done.
   progress(0.98, "verifying output");
