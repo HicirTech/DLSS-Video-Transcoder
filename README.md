@@ -10,14 +10,16 @@ with a **React + Material UI** web front end. DLSS runtimes are version-switchab
 
 <sub>DLSS Neural Rendering (NGX feature 18) on a real photo — 100% crop, left original / right enhanced.</sub>
 
-The look is tunable. This matrix sweeps **intensity** (rows — the 0–1 enhancement blend) against
-**local structure** (columns — fine-detail strength) on the same crop:
+The look is tunable — the reference project's controls (model preset, style, intensity and the
+strength sliders) are all exposed. This matrix sweeps **style** (rows) against **intensity** (columns)
+on the same crop:
 
-![DLSS Neural Rendering parameter matrix — intensity vs. local structure](docs/images/nr-matrix.png)
+![DLSS Neural Rendering parameter matrix — style vs. intensity](docs/images/nr-matrix.png)
 
-<sub>Rows top→bottom: intensity 0.0 / 0.5 / 1.0 (0.0 = original). Columns left→right: local-structure
-0.5 / 1.0 / 2.0. Model preset was tested and has no visible effect on the current driver, so it is
-omitted here.</sub>
+<sub>Rows top→bottom: style Default / Natural / Cinematic. Columns left→right: intensity 0.0 / 0.5 /
+1.0 (0.0 = original). NR model preset (0–3) is also adjustable, but it is an experimental,
+content-dependent hint (per the reference) — Default is recommended and it showed no visible change on
+this photo.</sub>
 
 > **Status (2026-09-09).** Runs on the project's RTX 5090. The **web UI** now covers the whole
 > pipeline — DLSS Super Resolution upscaling, Neural Rendering (feature 18), Frame Generation, DLSS
@@ -124,10 +126,10 @@ size and the look controls:
 
 **Notes / honest caveats:**
 
-- The `nr` engine applies the feature-18 controls this runtime actually honours — **intensity**
-  (a 0–1 blend), **style**, **local tone**, **local structure** and **skin structure** (skin only).
-  Model **preset** and **global tone** had no measurable effect on the current driver, so the UI
-  does not show them.
+- The `nr` engine exposes the reference project's controls — **model preset**, **style**, **intensity**
+  (0–2), **local tone**, **local structure** and **skin structure** (skin only). Style and the strength
+  sliders have a strong, visible effect; **model preset** (0–3) is an experimental, content-dependent
+  hint (Default recommended); **global tone** is not applied by the current runtime.
 - **DLSS version selection**: the picker defaults to the bundled DLL. Loading an alternate (not
   driver-matched) DLSS DLL can intermittently fail to initialise on newer drivers (a known
   DLSS-Swapper behaviour); the job then reports a clear error and you can retry or pick another.
@@ -207,7 +209,7 @@ Verified against the source on 2026-09-09.
 | DLSS version enumeration | ✅ `versions` | ✅ (`/api/catalog`) | shown in the version picker |
 | DLSS version selection | ✅ SR (`sr --dlss-version`) | ✅ (sr/nr) | alternate DLLs may fail to init on newer drivers |
 | Browser file upload | n/a | ✅ | POST /api/upload; stored under logs/uploads/ |
-| NR look controls | ✅ (`nr`) | ✅ working ones | intensity(0–1)/style/tone/structure apply; preset & global tone inert on this driver |
+| NR look controls | ✅ (`nr`) | ✅ | style / intensity(0–2) / tone / structure apply strongly; preset exposed (experimental); global tone not applied |
 | NVENC (GPU) video encode | ✅ if requested | ✅ if selected | frame-gen GPU-encodes by default |
 | RTX Video Super Resolution / TrueHDR | ❌ | ❌ | DLLs present but no code path uses them |
 
@@ -219,8 +221,9 @@ Verified against the source on 2026-09-09.
   pipelining, and optical flow is single-threaded TypeScript — planned: keep frames GPU-resident,
   pipeline the GPU, and add a native optical-flow backend.
 - **feature 18 in the pipeline — _done_.** The `nr` engine (image and video) now runs DLSS Neural
-  Rendering and applies the look controls this runtime honours. Model preset and global tone have no
-  effect on the current driver; feature 18 also does not consume motion vectors.
+  Rendering and exposes the reference's controls (model preset, style, intensity, tone/structure).
+  Model preset is an experimental, content-dependent hint; global tone is not applied; feature 18 does
+  not consume motion vectors.
 - **UI feature exposure — _done_.** SR upscaling, frame generation, DLSS version selection and
   browser upload are now in the web UI (see the table above).
 - **RTX Video Super Resolution** is not implemented (the DLLs under `runtime/rtx_video` are unused).
