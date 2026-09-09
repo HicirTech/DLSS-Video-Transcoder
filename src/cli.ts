@@ -29,6 +29,36 @@ function option(args: string[], name: string): string | undefined {
   return i >= 0 ? args[i + 1] : undefined;
 }
 
+/** Flag names that consume a following value token, derived from a command spec ("--factor N" does, "--json" does not). */
+function valueFlagNames(spec: CommandSpec): Set<string> {
+  const s = new Set<string>();
+  for (const o of spec.options) {
+    const [name, ...rest] = o.flag.split(/\s+/);
+    if (rest.length && name) s.add(name);
+  }
+  return s;
+}
+
+/**
+ * Positional arguments only: skip every `--flag` and, for value-bearing flags,
+ * the value token that follows it. Without this a value like `3` in
+ * `sr in.png --factor 3` (which does not start with `--`) would be mistaken for
+ * the optional output path.
+ */
+function positionalArgs(args: string[], spec: CommandSpec): string[] {
+  const valued = valueFlagNames(spec);
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a.startsWith("--")) {
+      if (valued.has(a)) i++; // skip this flag's value token
+      continue;
+    }
+    out.push(a);
+  }
+  return out;
+}
+
 interface OptionSpec {
   /** As typed on the command line, e.g. "--factor N" or "--json". */
   readonly flag: string;
@@ -284,7 +314,7 @@ async function main(): Promise<void> {
       return;
     }
     case "sr": {
-      const positional = args.filter((a) => !a.startsWith("--"));
+      const positional = positionalArgs(args, COMMANDS.find((c) => c.name === command)!);
       const input = positional[0];
       if (!input) {
         console.error("error: missing <input.png>\n");
@@ -303,10 +333,22 @@ async function main(): Promise<void> {
         Object.entries(DLSS_RATIO).reduce((best, [q, ratio]) =>
           Math.abs(ratio - factor) < Math.abs(DLSS_RATIO[Number(best)]! - factor) ? q : best, "0"),
       );
-      const presetName = (option(args, "--preset") ?? "L").toUpperCase() as keyof typeof DlssRenderPreset;
-      const preset = DlssRenderPreset[presetName] ?? DlssRenderPreset.L;
-      const outputWidth = evenSize(image.width * factor);
-      const outputHeight = evenSize(image.height * factor);
+      // Case-insensitive preset lookup so documented values like "Default" work
+      // (the key is mixed-case "Default", not "DEFAULT"); reject unknown presets
+      // instead of silently falling back to L.
+      const presetInput = option(args, "--preset") ?? "L";
+      const presetKey = (Object.keys(DlssRenderPreset) as (keyof typeof DlssRenderPreset)[]).find((k) => k.toLowerCase() === presetInput.toLowerCase());
+      if (!presetKey) {
+        console.error(`error: unknown --preset '${presetInput}'. Valid: ${Object.keys(DlssRenderPreset).join(", ")}`);
+        process.exit(1);
+      }
+      const preset = DlssRenderPreset[presetKey];
+      // Snap the output size to the chosen DLSS mode's fixed ratio (help documents
+      // --factor as snapping to a mode); feeding DLSS a render/output ratio that
+      // does not match its PerfQuality mode risks CreateFeature failure/artifacts.
+      const snappedRatio = DLSS_RATIO[quality] ?? factor;
+      const outputWidth = evenSize(image.width * snappedRatio);
+      const outputHeight = evenSize(image.height * snappedRatio);
       const output = positional[1] ?? join(dirname(input), `${basename(input, extname(input))}.dlss.png`);
 
       const runtimeDir = option(args, "--runtime") ?? join(ROOT, "runtime");
@@ -338,13 +380,13 @@ async function main(): Promise<void> {
       const rgba = sr.evaluate(image.rgba, true);
       await Bun.write(output, encodePng({ width: outputWidth, height: outputHeight, rgba }, { level: 6 }));
       sr.close();
-      console.log(`DLSS SR: ${image.width}x${image.height} -> ${outputWidth}x${outputHeight} (quality ${quality}, preset ${presetName}) in ${(performance.now() - started).toFixed(1)} ms`);
+      console.log(`DLSS SR: ${image.width}x${image.height} -> ${outputWidth}x${outputHeight} (quality ${quality}, preset ${presetKey}) in ${(performance.now() - started).toFixed(1)} ms`);
       console.log(`wrote ${output}`);
       // The driver core's Shutdown1 is skipped; exit the process to reclaim NGX.
       process.exit(0);
     }
     case "nr": {
-      const positional = args.filter((a) => !a.startsWith("--"));
+      const positional = positionalArgs(args, COMMANDS.find((c) => c.name === command)!);
       const input = positional[0];
       if (!input) {
         console.error("error: missing <input.png>\n");
@@ -385,7 +427,7 @@ async function main(): Promise<void> {
       process.exit(0);
     }
     case "fg": {
-      const positional = args.filter((a) => !a.startsWith("--"));
+      const positional = positionalArgs(args, COMMANDS.find((c) => c.name === command)!);
       const input = positional[0];
       if (!input) {
         console.error("error: missing <input.mp4>\n");
