@@ -50,6 +50,9 @@ export class PngError extends Error {
   }
 }
 
+/** zlib refuses a `maxOutputLength` above 2^32, so an image needing more filtered data than this cannot be decoded here. */
+const MAX_INFLATE_BYTES = 4294967296;
+
 /** The 8-byte PNG file signature. Treat as read-only. */
 export const PNG_SIGNATURE: Uint8Array = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -383,17 +386,9 @@ export function decodePng(bytes: Uint8Array): RgbaImage {
     compressed.set(bytes.subarray(start, end), cp);
     cp += end - start;
   }
-  let data: Uint8Array;
-  try {
-    // node:zlib, not Bun.inflateSync: Bun 1.4.2's inflate rejects valid multi-block streams
-    // ("invalid stored block lengths") that real encoders (e.g. libpng) emit.
-    data = new Uint8Array(nodeInflate(compressed));
-  } catch (err) {
-    throw new PngError(`zlib inflate failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
-  // Size every pass before allocating anything, so a corrupt header cannot make us reserve a huge
-  // output raster for a file whose image data could never fill it.
+  // Size every pass BEFORE inflating: the geometry the header declares is the only
+  // legitimate amount of filtered data, so it doubles as the decompression limit and
+  // stops a small file from expanding into an arbitrarily large buffer.
   const bitsPerPixel = channelsFor(colorType) * bitDepth;
   const bpp = bitsPerPixel < 8 ? 1 : bitsPerPixel >> 3; // filter unit: bytes per pixel, rounded up to one
   const passes = interlaceMethod === 1 ? ADAM7 : NO_INTERLACE;
@@ -408,6 +403,29 @@ export function decodePng(bytes: Uint8Array): RgbaImage {
     passHeights[p] = passHeight;
     // An empty pass contributes no bytes at all, not even filter bytes.
     if (passWidth > 0 && passHeight > 0) expectedBytes += (Math.ceil((passWidth * bitsPerPixel) / 8) + 1) * passHeight;
+  }
+
+  // Past this the filtered data alone would exceed what zlib will produce, so the
+  // image cannot be decoded at all — say so now instead of inflating gigabytes first.
+  if (expectedBytes > MAX_INFLATE_BYTES) {
+    throw new PngError(`image ${width}x${height} is too large to decode: its scanlines alone would need ${expectedBytes} bytes`);
+  }
+
+  let data: Uint8Array;
+  try {
+    // node:zlib, not Bun.inflateSync: Bun 1.4.2's inflate rejects valid multi-block streams
+    // ("invalid stored block lengths") that real encoders (e.g. libpng) emit.
+    // maxOutputLength aborts inside zlib rather than after the memory is already gone.
+    data = new Uint8Array(nodeInflate(compressed, { maxOutputLength: expectedBytes }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // zlib reports the cap as a Buffer-size error; say what actually happened.
+    if (/larger than/i.test(message)) {
+      throw new PngError(
+        `IDAT expands past what a ${width}x${height} image can hold (${expectedBytes} bytes); the file declares a small image but carries a much larger compressed stream`,
+      );
+    }
+    throw new PngError(`zlib inflate failed: ${message}`);
   }
   if (data.length < expectedBytes) {
     throw new PngError(`IDAT data is too short: got ${data.length} bytes, need ${expectedBytes}`);

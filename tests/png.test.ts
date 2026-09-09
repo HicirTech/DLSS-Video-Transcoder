@@ -763,8 +763,27 @@ describe("errors", () => {
   test("IDAT data too short for the image", () => {
     expect(() => decodePng(png(ihdr(4, 4, 8, 6), idat(new Uint8Array(2 * 17)), IEND))).toThrow(/too short/);
     expect(() => decodePng(png(ihdr(4, 4, 8, 6, 1), idat(new Uint8Array(10)), IEND))).toThrow(/too short/);
-    // A header claiming a gigantic image with almost no data must fail on the data check, not on allocation.
-    expect(() => decodePng(png(ihdr(60000, 60000, 8, 6), idat(new Uint8Array(64)), IEND))).toThrow(/too short/);
+  });
+
+  test("a header claiming a gigantic image is refused before anything is allocated", () => {
+    // 60000x60000 RGBA needs ~14.4 GB of filtered scanlines, past what zlib will
+    // produce, so it must fail on the declared geometry rather than by inflating
+    // or allocating first.
+    expect(() => decodePng(png(ihdr(60000, 60000, 8, 6), idat(new Uint8Array(64)), IEND))).toThrow(/too large to decode/);
+  });
+
+  test("IDAT that expands past the declared geometry is refused (decompression bomb)", () => {
+    // Filtered bytes an 8-bit RGBA image of this size holds: one filter byte + 4 bytes per pixel, per row.
+    const holds = (w: number, h: number): number => (w * 4 + 1) * h;
+    // ~8 MB of zeros, which deflate to a few kB: a small file that expands enormously.
+    const bomb = idat(new Uint8Array(holds(1024, 2048)));
+
+    // A 1x1 image holds 5 bytes, so this must be refused rather than inflated.
+    expect(() => decodePng(png(ihdr(1, 1, 8, 6), bomb, IEND))).toThrow(/expands past what a 1x1 image can hold/);
+    // The bound is exact: one row short is still refused...
+    expect(() => decodePng(png(ihdr(1024, 2047, 8, 6), bomb, IEND))).toThrow(/expands past what a 1024x2047 image can hold/);
+    // ...and the geometry that holds exactly this payload decodes.
+    expect(() => decodePng(png(ihdr(1024, 2048, 8, 6), bomb, IEND))).not.toThrow();
   });
 
   test("no IDAT at all", () => {
