@@ -310,6 +310,7 @@ export class D3D12Device extends ComObject {
     if (isFailure(hr) || out.value === 0) return false;
     const debug = new ComObject(out.value, "ID3D12Debug");
     (debug as unknown as { call: ComObject["call"] }).call.call(debug, 3, { args: [], returns: FFIType.void });
+    debug.release();
     return true;
   }
 
@@ -454,7 +455,10 @@ export class GpuContext {
   readonly fence: D3D12Fence;
   private readonly event = new Win32Event();
   private fenceValue = 0n;
-  private uploadBuffer: D3D12Resource | null = null;
+  // A ring of upload staging buffers, one per uploadTexture recorded since the
+  // last submit, so several uploads batched before one submit do not alias.
+  private readonly uploadRing: D3D12Resource[] = [];
+  private uploadCursor = 0;
   private readbackBuffer: D3D12Resource | null = null;
   private closed = false;
 
@@ -482,14 +486,19 @@ export class GpuContext {
     if (isFailure(removed)) throw new Error(`D3D12 device removed: ${hex32(removed)}`);
     this.allocator.reset();
     this.list.reset(this.allocator);
+    // The recorded copies have executed; staging buffers can be reused.
+    this.uploadCursor = 0;
   }
 
   private ensureUpload(size: number): D3D12Resource {
-    if (!this.uploadBuffer || this.uploadBuffer.sizeInBytes < size) {
-      this.uploadBuffer?.release();
-      this.uploadBuffer = this.device.createBuffer(size, D3D12_HEAP_TYPE_UPLOAD, "upload staging");
+    let buf = this.uploadRing[this.uploadCursor];
+    if (!buf || buf.sizeInBytes < size) {
+      buf?.release();
+      buf = this.device.createBuffer(size, D3D12_HEAP_TYPE_UPLOAD, `upload staging ${this.uploadCursor}`);
+      this.uploadRing[this.uploadCursor] = buf;
     }
-    return this.uploadBuffer;
+    this.uploadCursor++;
+    return buf;
   }
 
   private ensureReadback(size: number): D3D12Resource {
@@ -556,7 +565,7 @@ export class GpuContext {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    this.uploadBuffer?.release();
+    for (const b of this.uploadRing) b.release();
     this.readbackBuffer?.release();
     this.list.release();
     this.allocator.release();

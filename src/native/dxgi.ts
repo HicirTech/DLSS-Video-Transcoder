@@ -56,49 +56,60 @@ export class DxgiFactory extends ComObject {
   enumerate(): DxgiAdapter[] {
     const adapters: DxgiAdapter[] = [];
     const out = new OutPointer();
-    for (let index = 0; index < 32; index++) {
-      out.reset();
-      const hr = this.call(12, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.i32 }, index, out.ptr) as number;
-      if (hr === DXGI_ERROR_NOT_FOUND) break;
-      checkHresult(hr, `IDXGIFactory1.EnumAdapters1(${index})`);
-      const adapterPtr = out.value;
-      const desc = new NativeStruct(312);
-      const raw = new ComObject(adapterPtr, `IDXGIAdapter1[${index}]`);
-      const hrDesc = (raw as unknown as { call: ComObject["call"] }).call.call(
-        raw,
-        10,
-        { args: [FFIType.ptr], returns: FFIType.i32 },
-        desc.ptr,
-      ) as number;
-      checkHresult(hrDesc, `IDXGIAdapter1.GetDesc1(${index})`);
-      const nameChars: number[] = [];
-      for (let i = 0; i < 128; i++) {
-        const code = desc.getU16(i * 2);
-        if (code === 0) break;
-        nameChars.push(code);
+    try {
+      for (let index = 0; index < 32; index++) {
+        out.reset();
+        const hr = this.call(12, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.i32 }, index, out.ptr) as number;
+        if (hr === DXGI_ERROR_NOT_FOUND) break;
+        checkHresult(hr, `IDXGIFactory1.EnumAdapters1(${index})`);
+        const adapterPtr = out.value;
+        const raw = new ComObject(adapterPtr, `IDXGIAdapter1[${index}]`);
+        let info: AdapterInfo;
+        try {
+          const desc = new NativeStruct(312);
+          const hrDesc = (raw as unknown as { call: ComObject["call"] }).call.call(
+            raw,
+            10,
+            { args: [FFIType.ptr], returns: FFIType.i32 },
+            desc.ptr,
+          ) as number;
+          checkHresult(hrDesc, `IDXGIAdapter1.GetDesc1(${index})`);
+          const nameChars: number[] = [];
+          for (let i = 0; i < 128; i++) {
+            const code = desc.getU16(i * 2);
+            if (code === 0) break;
+            nameChars.push(code);
+          }
+          const vendorId = desc.getU32(256);
+          const flags = desc.getU32(304);
+          const dedicated = desc.getU64(272);
+          const luidLow = desc.getU32(296);
+          const luidHigh = desc.getI32(300);
+          info = {
+            index,
+            name: String.fromCharCode(...nameChars),
+            vendorId,
+            deviceId: desc.getU32(260),
+            subSysId: desc.getU32(264),
+            revision: desc.getU32(268),
+            dedicatedVideoMemory: dedicated,
+            dedicatedVideoMemoryMB: Number(dedicated / 1048576n),
+            luidLow,
+            luidHigh,
+            luid: `${hex32(luidHigh).slice(2)}-${hex32(luidLow).slice(2)}`,
+            flags,
+            software: (flags & DXGI_ADAPTER_FLAG_SOFTWARE) !== 0,
+            isNvidia: vendorId === VENDOR_NVIDIA,
+          };
+        } catch (error) {
+          raw.release(); // this adapter's COM ref never made it into `adapters`
+          throw error;
+        }
+        adapters.push(new DxgiAdapter(adapterPtr, info));
       }
-      const vendorId = desc.getU32(256);
-      const flags = desc.getU32(304);
-      const dedicated = desc.getU64(272);
-      const luidLow = desc.getU32(296);
-      const luidHigh = desc.getI32(300);
-      const info: AdapterInfo = {
-        index,
-        name: String.fromCharCode(...nameChars),
-        vendorId,
-        deviceId: desc.getU32(260),
-        subSysId: desc.getU32(264),
-        revision: desc.getU32(268),
-        dedicatedVideoMemory: dedicated,
-        dedicatedVideoMemoryMB: Number(dedicated / 1048576n),
-        luidLow,
-        luidHigh,
-        luid: `${hex32(luidHigh).slice(2)}-${hex32(luidLow).slice(2)}`,
-        flags,
-        software: (flags & DXGI_ADAPTER_FLAG_SOFTWARE) !== 0,
-        isNvidia: vendorId === VENDOR_NVIDIA,
-      };
-      adapters.push(new DxgiAdapter(adapterPtr, info));
+    } catch (error) {
+      for (const a of adapters) a.release(); // don't leak already-enumerated adapters on a mid-loop failure
+      throw error;
     }
     return adapters;
   }
