@@ -1,17 +1,9 @@
 /**
- * Dependency-free PNG codec for Bun.
+ * Dependency-free PNG codec written from the PNG specification (ISO/IEC 15948 / W3C PNG, 3rd edition).
+ * It interprets IHDR, PLTE, tRNS, IDAT and IEND and skips every other chunk.
  *
- * Written from the PNG specification (ISO/IEC 15948 / W3C PNG, 3rd edition):
- *   - 8-byte signature and chunk framing (length, type, data, CRC-32 over type + data)
- *   - IHDR, PLTE, tRNS, IDAT and IEND are interpreted; every other chunk (gAMA, iCCP, sRGB, tEXt, ...) is skipped
- *   - all colour types (0 greyscale, 2 RGB, 3 indexed, 4 grey+alpha, 6 RGBA) at every bit depth the
- *     specification allows for them (1, 2, 4, 8, 16)
- *   - the five scanline filters (None, Sub, Up, Average, Paeth) and Adam7 interlacing
- *   - the zlib stream itself is handled by node:zlib's inflateSync / deflateSync (not Bun's own,
- *     whose 1.4.2 build mishandles some valid streams — see decodePng / encodePng for details)
- *
- * Decoded images are always 8-bit RGBA; 16-bit samples are reduced by keeping their high byte.
- * Encoded images are always 8-bit RGBA (colour type 6), filter type 0 on every scanline, a single IDAT chunk.
+ * Decoded output is always 8-bit RGBA (16-bit samples keep their high byte); encoded output is always
+ * colour type 6 at depth 8. The zlib layer is node:zlib, not Bun's — see decodePng / encodePng for why.
  */
 import { deflateSync as nodeDeflate, inflateSync as nodeInflate } from "node:zlib";
 
@@ -21,11 +13,8 @@ import { deflateSync as nodeDeflate, inflateSync as nodeInflate } from "node:zli
 
 /** An 8-bit RGBA raster: `rgba` holds exactly `width * height * 4` bytes, row-major, top row first, no padding. */
 export interface RgbaImage {
-  /** Width in pixels (>= 1). */
   width: number;
-  /** Height in pixels (>= 1). */
   height: number;
-  /** R, G, B, A for each pixel, left to right, top to bottom. */
   rgba: Uint8Array;
 }
 
@@ -36,10 +25,10 @@ export type PngColorType = 0 | 2 | 3 | 4 | 6;
 export interface PngHeader {
   width: number;
   height: number;
-  /** Bits per sample (per palette index for colour type 3): 1, 2, 4, 8 or 16. */
+  /** Bits per sample, or per palette index for colour type 3: 1, 2, 4, 8 or 16. */
   bitDepth: number;
   colorType: PngColorType;
-  /** Always 0 (deflate/inflate) in a valid file. */
+  /** Always 0 (deflate) in a valid file. */
   compressionMethod: number;
   /** Always 0 (adaptive filtering with the five basic filters) in a valid file. */
   filterMethod: number;
@@ -69,9 +58,9 @@ export const PNG_SIGNATURE: Uint8Array = new Uint8Array([0x89, 0x50, 0x4e, 0x47,
 // ---------------------------------------------------------------------------
 
 /**
- * Lookup tables for the reflected CRC-32 polynomial 0xEDB88320 (the one used by PNG, zlib and gzip).
+ * Lookup tables for the reflected CRC-32 polynomial 0xEDB88320 (the one PNG, zlib and gzip use).
  * Table 0 is the classic byte-at-a-time table; table k is table 0 advanced by k more zero bytes, which
- * lets the main loop consume 8 input bytes per iteration ("slicing-by-8").
+ * is what lets the main loop consume 8 input bytes per iteration ("slicing-by-8").
  */
 const CRC_TABLES: Uint32Array = buildCrcTables();
 
@@ -93,10 +82,10 @@ function buildCrcTables(): Uint32Array {
 }
 
 /**
- * CRC-32 (IEEE 802.3, as used by PNG chunks) of `bytes`.
+ * CRC-32 (IEEE 802.3, as used by PNG chunks) of `bytes`, as an unsigned 32-bit integer.
  *
- * `seed` is the CRC of the data that logically precedes `bytes`, so a stream can be checksummed in pieces:
- * `crc32(b, crc32(a)) === crc32(concat(a, b))`. The result is an unsigned 32-bit integer.
+ * `seed` is the CRC of the data that logically precedes `bytes`, so a stream can be checksummed in
+ * pieces: `crc32(b, crc32(a)) === crc32(concat(a, b))`.
  */
 export function crc32(bytes: Uint8Array, seed = 0): number {
   const t = CRC_TABLES;
@@ -172,10 +161,7 @@ function writeChunkInto(out: Uint8Array, pos: number, typeCode: number, data: Ui
   return pos + 12 + len;
 }
 
-/**
- * Builds one complete PNG chunk (4-byte length, 4-byte type, data, 4-byte CRC) for hand-assembling files.
- * `type` must be four ASCII letters, e.g. `"tEXt"`.
- */
+/** Builds one complete PNG chunk for hand-assembling files. `type` must be four ASCII letters, e.g. `"tEXt"`. */
 export function encodePngChunk(type: string, data: Uint8Array = new Uint8Array(0)): Uint8Array {
   const out = new Uint8Array(12 + data.length);
   writeChunkInto(out, 0, chunkTypeCode(type), data);
@@ -379,11 +365,9 @@ interface PixelFormat {
 }
 
 /**
- * Decodes a PNG file into 8-bit RGBA.
- *
- * Supports every colour type / bit depth combination in the specification, tRNS transparency for
- * colour types 0, 2 and 3, Adam7 interlacing, all five filter types and multiple IDAT chunks.
- * 16-bit samples keep their high byte. Gamma, colour profiles and other ancillary data are ignored.
+ * Decodes a PNG file into 8-bit RGBA. Handles every colour type / bit depth combination the
+ * specification allows, tRNS transparency for colour types 0, 2 and 3, Adam7, all five filter types and
+ * multiple IDAT chunks. Gamma, colour profiles and other ancillary data are ignored.
  *
  * @throws {PngError} on truncated, corrupt (bad CRC, bad zlib stream, bad filter byte, ...) or unsupported input.
  */
@@ -408,8 +392,8 @@ export function decodePng(bytes: Uint8Array): RgbaImage {
     throw new PngError(`zlib inflate failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // Work out the geometry of every pass before allocating anything, so a corrupt header cannot make us
-  // reserve a huge output raster for a file whose image data could never fill it.
+  // Size every pass before allocating anything, so a corrupt header cannot make us reserve a huge
+  // output raster for a file whose image data could never fill it.
   const bitsPerPixel = channelsFor(colorType) * bitDepth;
   const bpp = bitsPerPixel < 8 ? 1 : bitsPerPixel >> 3; // filter unit: bytes per pixel, rounded up to one
   const passes = interlaceMethod === 1 ? ADAM7 : NO_INTERLACE;
@@ -719,7 +703,7 @@ function convertRow(
     case 6: {
       if (depth === 8) {
         if (dstStride === 4) {
-          dst.set(src.subarray(s, s + n * 4), d); // the common case: a straight copy
+          dst.set(src.subarray(s, s + n * 4), d);
         } else {
           for (let x = 0; x < n; x++) {
             dst[d] = src[s];
@@ -752,10 +736,8 @@ function convertRow(
 type ZlibLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 /**
- * Encodes an 8-bit RGBA image as a PNG (colour type 6, bit depth 8, no interlace).
- *
- * Every scanline uses filter type 0 and the whole zlib stream goes into one IDAT chunk, so the cost is
- * essentially one memcpy plus node:zlib's `deflateSync` at the requested level (default 6).
+ * Encodes an 8-bit RGBA image as a PNG: colour type 6, bit depth 8, no interlace, filter type 0 on
+ * every scanline, the whole zlib stream in one IDAT chunk.
  *
  * @throws {PngError} when the dimensions, buffer length or compression level are invalid.
  */
@@ -776,7 +758,7 @@ export function encodePng(img: RgbaImage, options: PngEncodeOptions = {}): Uint8
     throw new PngError(`compression level must be an integer from 0 to 9, got ${String(level)}`);
   }
 
-  // Filtered image data: one filter-type byte (0 = None) followed by the raw RGBA bytes of each row.
+  // The extra byte per row is the filter-type byte, left at 0 (None).
   const stride = rowBytes + 1;
   const raw = new Uint8Array(stride * height);
   for (let y = 0, src = 0, dst = 1; y < height; y++, src += rowBytes, dst += stride) {
