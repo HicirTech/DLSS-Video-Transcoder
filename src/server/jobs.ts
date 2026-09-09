@@ -6,6 +6,7 @@ import type { JobRequest, JobStatus, WsEvent } from "./api-types.ts";
 import type { RunMessage, WorkerMessage } from "../pipeline/worker.ts";
 
 const LOG_LIMIT = 400;
+const MAX_JOBS = 200; // retain at most this many jobs; evict the oldest finished ones beyond it
 
 export interface JobManagerOptions {
   runtimeDir: string;
@@ -58,9 +59,23 @@ export class JobManager {
     };
     this.entries.set(id, { status, request, worker: null, startedAtMs: 0, lastFrameAtMs: 0 });
     this.order.push(id);
+    this.evict();
     this.publish(status);
     this.pump();
     return status;
+  }
+
+  /** Keep history (and memory) bounded: drop the oldest finished jobs beyond MAX_JOBS. */
+  private evict(): void {
+    while (this.order.length > MAX_JOBS) {
+      const idx = this.order.findIndex((id) => {
+        const s = this.entries.get(id)!.status.state;
+        return s === "done" || s === "failed" || s === "cancelled";
+      });
+      if (idx < 0) break; // nothing evictable (only queued/running remain)
+      const [removed] = this.order.splice(idx, 1);
+      this.entries.delete(removed!);
+    }
   }
 
   cancel(id: string): JobStatus | null {

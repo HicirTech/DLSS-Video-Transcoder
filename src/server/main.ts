@@ -4,7 +4,7 @@
  * 3080 is inside a Windows reserved port range on some machines).
  */
 import { existsSync, mkdirSync, statSync } from "node:fs";
-import { extname, isAbsolute, join } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import index from "../../web/index.html";
 import { runProbe } from "../ngx/probe.ts";
 import { buildRuntimeCatalog } from "../ngx/runtime-catalog.ts";
@@ -41,25 +41,40 @@ const MIME: Record<string, string> = {
   ".json": "application/json",
 };
 
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
 function isJobRequest(value: unknown): value is JobRequest {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
+  if (!isObject(value)) return false;
+  const v = value;
   return (
     (v.kind === "image" || v.kind === "video") &&
     typeof v.input === "string" &&
+    (v.output === undefined || typeof v.output === "string") &&
     (v.engine === "bypass" || v.engine === "nr" || v.engine === "sr") &&
     (v.motion === "none" || v.motion === "flow") &&
-    typeof v.settings === "object" &&
-    v.settings !== null &&
-    typeof v.scale === "object" &&
-    v.scale !== null &&
+    isObject(v.settings) &&
+    isObject(v.scale) &&
     (v.frameGen === undefined ||
-      (typeof v.frameGen === "object" && v.frameGen !== null && typeof (v.frameGen as { multiplier?: unknown }).multiplier === "number"))
+      (isObject(v.frameGen) && typeof v.frameGen.multiplier === "number"))
   );
 }
 
+/** True if `child` resolves to a path inside `root` (used to confine job output paths). */
+function isWithin(child: string, root: string): boolean {
+  const rel = relative(resolve(root), resolve(child));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+// Bind to loopback by default: this API has no auth and exposes file read
+// (/api/file) and job output paths, so it must not be network-reachable unless
+// the operator explicitly opts in with NR_HOST.
+const HOST = process.env.NR_HOST ?? "127.0.0.1";
+
 const server = Bun.serve({
   port: PORT,
+  hostname: HOST,
   development: process.env.NODE_ENV !== "production",
   routes: {
     "/": index,
@@ -83,6 +98,12 @@ const server = Bun.serve({
           );
         if (!isAbsolute(body.input) || !existsSync(body.input))
           return fail(`Input file not found: ${body.input}. Provide an absolute path to a file that exists.`);
+        // Confine the output path so a request cannot write anywhere on the host.
+        if (body.output !== undefined) {
+          const roots = [APP_DATA, RUNTIME_DIR, dirname(resolve(body.input))];
+          if (!isAbsolute(body.output) || !roots.some((r) => isWithin(body.output!, r)))
+            return fail("The output path must be absolute and inside the app-data folder or the input's own directory.");
+        }
         return json(jobs.submit(body), 201);
       },
     },
@@ -97,6 +118,10 @@ const server = Bun.serve({
       },
     },
     "/api/file": (req) => {
+      // Serves an arbitrary local file for preview: user-selected inputs and job
+      // outputs live wherever the user chose. This is only safe because the
+      // server binds loopback by default (see HOST) — never set NR_HOST to a
+      // public interface without adding authentication in front.
       const path = new URL(req.url).searchParams.get("path") ?? "";
       if (!isAbsolute(path) || !existsSync(path) || !statSync(path).isFile())
         return fail("File not found. The 'path' query parameter must be an absolute path to an existing file.", 404);
