@@ -88,7 +88,11 @@ export class DlssSrSession {
     params.setU32(NgxParam.Height, opts.renderHeight);
     params.setU32(NgxParam.OutWidth, opts.outputWidth);
     params.setU32(NgxParam.OutHeight, opts.outputHeight);
-    params.setU32(NgxParam.DlssCreateFlags, DlssCreateFlag.AutoExposure | (opts.hdr ? DlssCreateFlag.IsHDR : 0));
+    // MVLowRes: our motion vectors live in the render-resolution texture with
+    // MV.Scale = 1 (render pixels). Without this flag DLSS treats them as
+    // display-resolution and mis-scales temporal reconstruction (ghosting on
+    // upscaled video). Correct at DLAA too, where render == output.
+    params.setU32(NgxParam.DlssCreateFlags, DlssCreateFlag.AutoExposure | DlssCreateFlag.MVLowRes | (opts.hdr ? DlssCreateFlag.IsHDR : 0));
     params.setU32(DLSS_PRESET_PARAM[quality] ?? DLSS_PRESET_PARAM[0]!, opts.preset ?? DlssRenderPreset.L);
     params.setU32(NgxParam.CreationNodeMask, 1);
     params.setU32(NgxParam.VisibilityNodeMask, 1);

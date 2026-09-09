@@ -24,7 +24,8 @@
  * enough to keep ASLR happy.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
+import { rename } from "node:fs/promises";
 
 const IMAGE_DOS_SIGNATURE = 0x5a4d;
 const IMAGE_NT_SIGNATURE = 0x00004550;
@@ -305,8 +306,25 @@ export function buildForwarderDll(options: { imageBase?: bigint } = {}): Forward
   };
 }
 
-/** Write the shim to `path` unless an identical file is already there. */
-export async function writeForwarder(path: string): Promise<{ path: string; wrote: boolean; size: number }> {
+const inflightWrites = new Map<string, Promise<{ path: string; wrote: boolean; size: number }>>();
+let tmpSeq = 0;
+
+/**
+ * Write the shim to `path` unless an identical file is already there.
+ * Concurrent writes to the same path within this process are coalesced (two
+ * first-run `/api/probe` requests would otherwise both write the file), and the
+ * write is atomic (temp file + rename) so a concurrent loader never reads a
+ * half-written DLL.
+ */
+export function writeForwarder(path: string): Promise<{ path: string; wrote: boolean; size: number }> {
+  const existing = inflightWrites.get(path);
+  if (existing) return existing;
+  const p = doWriteForwarder(path).finally(() => inflightWrites.delete(path));
+  inflightWrites.set(path, p);
+  return p;
+}
+
+async function doWriteForwarder(path: string): Promise<{ path: string; wrote: boolean; size: number }> {
   const built = buildForwarderDll();
   const existing = Bun.file(path);
   if (await existing.exists()) {
@@ -315,7 +333,14 @@ export async function writeForwarder(path: string): Promise<{ path: string; wrot
       return { path, wrote: false, size: built.bytes.length };
     }
   }
-  await Bun.write(path, built.bytes);
+  const tmp = `${path}.tmp.${process.pid}.${tmpSeq++}`;
+  await Bun.write(tmp, built.bytes);
+  try {
+    await rename(tmp, path); // atomic on the first run (destination absent)
+  } catch {
+    await Bun.write(path, built.bytes); // rename can fail on Windows if the dest exists/locked
+    try { unlinkSync(tmp); } catch { /* ignore */ }
+  }
   return { path, wrote: true, size: built.bytes.length };
 }
 
@@ -328,6 +353,13 @@ export function writeForwarderSync(path: string): { path: string; wrote: boolean
       return { path, wrote: false, size: built.bytes.length };
     }
   }
-  writeFileSync(path, built.bytes);
+  const tmp = `${path}.tmp.${process.pid}.${tmpSeq++}`;
+  writeFileSync(tmp, built.bytes);
+  try {
+    renameSync(tmp, path); // atomic on the first run (destination absent)
+  } catch {
+    writeFileSync(path, built.bytes); // rename can fail on Windows if the dest exists/locked
+    try { unlinkSync(tmp); } catch { /* ignore */ }
+  }
   return { path, wrote: true, size: built.bytes.length };
 }

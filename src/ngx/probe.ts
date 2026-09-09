@@ -218,6 +218,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
         result = core.initExtRaw(device.ptr, PROBE_APP_ID, appDataPath, spy.ptr);
         say(`Init_Ext(spy) -> ${ngxName(result)}; spy saw: ${spy.summary()}`);
         report.capabilities["spy.calls"] = spy.summary();
+        spy.close(); // release the 32 JSCallback trampolines the spy vtable allocated
       } else {
         const featureInfo = options.nullFeatureInfo ? null : new FeatureCommonInfo([runtimeDir]);
         trace(`NVSDK_NGX_D3D12_Init_Ext (featureInfo=${featureInfo ? "struct with 1 search path" : "NULL"})`);
@@ -322,10 +323,13 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   // and a D3D12 device was created. Actual CreateFeature(18) is exercised by the
   // nr command / pipeline, not here (running it in-process can destabilise a
   // long-lived server).
+  // The forwarder must not only load but PASS its self-test: a loaded-but-broken
+  // shim means calls cannot reach the driver, so NR is not actually ready.
+  const forwarderOk = report.forwarder.loaded && Boolean(report.forwarder.selfTest?.startsWith("ok"));
   report.verdict.neuralRenderingReady =
-    Boolean(dlssnr?.present) && report.forwarder.loaded && report.device.created && core !== null;
-  if (!report.verdict.neuralRenderingReady && report.device.created && core !== null && dlssnr?.present && !report.forwarder.loaded)
-    reasons.push("The DLSS runtime caller shim could not be loaded.");
+    Boolean(dlssnr?.present) && forwarderOk && report.device.created && core !== null;
+  if (!report.verdict.neuralRenderingReady && report.device.created && core !== null && dlssnr?.present && !forwarderOk)
+    reasons.push("The DLSS runtime caller shim could not be loaded or failed its self-test.");
   report.ok = report.device.created && core !== null;
 
   // --- teardown ---
