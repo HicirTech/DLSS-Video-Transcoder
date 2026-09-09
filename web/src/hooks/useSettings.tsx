@@ -4,6 +4,13 @@ import {
   DEFAULT_ENCODE_SETTINGS,
   DEFAULT_NR_SETTINGS,
   DEFAULT_SCALE_SETTINGS,
+  ENCODE_CODECS,
+  ENCODE_CONTAINERS,
+  NR_PATHS,
+  NR_PRESETS,
+  NR_STYLES,
+  SCALE_MODES,
+  SETTING_RANGES,
 } from "../../../src/server/api-types";
 
 /** Everything the UI persists between sessions. */
@@ -46,18 +53,17 @@ function pick<T>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback;
 }
 
-/** Confines a numeric field to [min, max], falling back to the default when it is not finite. */
-function clamp(value: number, min: number, max: number, fallback: number): number {
+/**
+ * Confines a numeric field to the shared range for that setting, falling back to
+ * the default when the stored value is not a number at all. The ranges come from
+ * api-types.ts, which the server validates against, so the UI never stores a
+ * value the API would reject.
+ */
+function clamp(value: number, field: keyof typeof SETTING_RANGES, fallback: number): number {
+  const { min, max, integer } = SETTING_RANGES[field];
   if (!Number.isFinite(value)) return fallback;
-  return Math.min(max, Math.max(min, value));
+  return Math.min(max, Math.max(min, integer ? Math.round(value) : value));
 }
-
-const PRESETS = [0, 1, 2, 3] as const;
-const STYLES = [0, 1, 2] as const;
-const NR_PATHS = ["auto", "core", "snippet"] as const;
-const SCALE_MODES = ["none", "factor", "size"] as const;
-const CODECS = ["h264", "hevc", "av1", "h264_nvenc", "hevc_nvenc", "av1_nvenc"] as const;
-const CONTAINERS = ["mp4", "mkv", "mov"] as const;
 
 /** Parses the persisted JSON, repairing anything missing, malformed or out of range. */
 export function loadSettings(raw: string | null): StoredSettings {
@@ -76,27 +82,27 @@ export function loadSettings(raw: string | null): StoredSettings {
   return {
     nr: {
       ...nr,
-      preset: pick(nr.preset, PRESETS, defaults.nr.preset),
-      style: pick(nr.style, STYLES, defaults.nr.style),
+      preset: pick(nr.preset, NR_PRESETS, defaults.nr.preset),
+      style: pick(nr.style, NR_STYLES, defaults.nr.style),
       nrPath: pick(nr.nrPath, NR_PATHS, defaults.nr.nrPath),
-      intensity: clamp(nr.intensity, 0, 2, defaults.nr.intensity),
-      localTone: clamp(nr.localTone, 0, 2, defaults.nr.localTone),
-      localStructure: clamp(nr.localStructure, 0, 2, defaults.nr.localStructure),
-      skinStructure: clamp(nr.skinStructure, -1, 2, defaults.nr.skinStructure),
-      warmupFrames: clamp(Math.round(nr.warmupFrames), 0, 64, defaults.nr.warmupFrames),
+      intensity: clamp(nr.intensity, "intensity", defaults.nr.intensity),
+      localTone: clamp(nr.localTone, "localTone", defaults.nr.localTone),
+      localStructure: clamp(nr.localStructure, "localStructure", defaults.nr.localStructure),
+      skinStructure: clamp(nr.skinStructure, "skinStructure", defaults.nr.skinStructure),
+      warmupFrames: clamp(nr.warmupFrames, "warmupFrames", defaults.nr.warmupFrames),
     },
     scale: {
       ...scale,
       mode: pick(scale.mode, SCALE_MODES, defaults.scale.mode),
-      factor: clamp(scale.factor, 0.25, 8, defaults.scale.factor),
-      width: clamp(Math.round(scale.width), 16, 16384, defaults.scale.width),
-      height: clamp(Math.round(scale.height), 16, 16384, defaults.scale.height),
+      factor: clamp(scale.factor, "factor", defaults.scale.factor),
+      width: clamp(scale.width, "width", defaults.scale.width),
+      height: clamp(scale.height, "height", defaults.scale.height),
     },
     encode: {
       ...encode,
-      codec: pick(encode.codec, CODECS, defaults.encode.codec),
-      container: pick(encode.container, CONTAINERS, defaults.encode.container),
-      quality: clamp(Math.round(encode.quality), 0, 51, defaults.encode.quality),
+      codec: pick(encode.codec, ENCODE_CODECS, defaults.encode.codec),
+      container: pick(encode.container, ENCODE_CONTAINERS, defaults.encode.container),
+      quality: clamp(encode.quality, "quality", defaults.encode.quality),
     },
   };
 }
