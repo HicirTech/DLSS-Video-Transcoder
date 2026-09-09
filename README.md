@@ -43,7 +43,7 @@ Open **http://localhost:4080/**. Other scripts:
 
 ```bash
 bun run typecheck   # tsc --noEmit
-bun test            # 96 unit-test cases (pure logic, no GPU needed)
+bun test            # 110 unit-test cases (pure logic, no GPU needed)
 bun run cli <command> [options]   # the DLSS command line (see below)
 ```
 
@@ -77,10 +77,12 @@ Key per-command options (defaults in parentheses):
   `1.5`=Quality, `1.72`=Balanced, `2.0`=Performance, `3.0`=Ultra Performance), `--preset NAME` (L;
   `A`–`F` are older CNN models, `J`–`O` are transformer models), `--dlss-version VER` (bundled DLL;
   prefix match against `versions`).
-- **`nr`** — `--intensity F` (1; typical 0–2, 1 = neutral), `--preset ID` (0 = runtime default, or
-  `10`/`11`/`12`/`13` = transformer models J/K/L/M), `--local-tone F` (1), `--local-structure F` (1).
+- **`nr`** — `--intensity F` (1; a 0–1 blend, 0 = original, 1 = full — values above 1 are clamped),
+  `--local-tone F` (1; 0–2, 1 = neutral), `--local-structure F` (1; 0–2, 1 = neutral). (`--preset`
+  exists but has no visible effect on the current driver.)
 - **`fg`** — `--multiplier N` (2; reliable at 2×, up to the GPU/runtime maximum, e.g. 3×/4× on
-  RTX 50), `--quality N` (libx264 CRF 0–51, lower = better, 20).
+  RTX 50), `--codec NAME` (default: GPU NVENC when available, else libx264), `--quality N` (encoder
+  quality, CRF for CPU / CQ for NVENC, 0–51, lower = better, 20).
 
 ## Web UI
 
