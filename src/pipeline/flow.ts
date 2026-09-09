@@ -387,11 +387,11 @@ export function blockMatchFlow(current: Float32Array, previous: Float32Array, w:
               cost += 255 * (bxEnd - bx); // off-frame penalty, whole row
               continue;
             }
-            let cRow = y * w + bx;
-            let qRow = qy * w + bx;
-            for (let x = bx; x < bxEnd; x++, cRow++, qRow++) {
+            const cRow = y * w;
+            const qRow = qy * w;
+            for (let x = bx; x < bxEnd; x++) {
               const qx = x + dx;
-              cost += qx < 0 || qx >= w ? 255 : Math.abs(current[cRow]! - previous[qy * w + qx]!);
+              cost += qx < 0 || qx >= w ? 255 : Math.abs(current[cRow + x]! - previous[qRow + qx]!);
             }
           }
           // Prefer the smaller displacement on ties for a stable, low-noise field.
