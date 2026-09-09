@@ -99,7 +99,10 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
   progress(0, `source ${width}x${height} ${info.codec} ${info.fpsText} fps, ${info.frames ?? "?"} frames; ${multiplier}x -> ${outputFps.toFixed(2)} fps`);
 
   const decoder = Bun.spawn([ffmpeg, "-v", "error", "-nostdin", "-i", options.input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
-  const audioArgs = info.hasAudio ? ["-map", "1:a:0", "-c:a", "aac", "-b:a", "192k"] : ["-an"];
+  // Only re-open the source as a second input when it actually has audio to carry;
+  // otherwise ffmpeg needlessly demuxes/decodes the whole source again.
+  const wantAudio = info.hasAudio;
+  const audioArgs = wantAudio ? ["-map", "1:a:0", "-c:a", "aac", "-b:a", "192k"] : ["-an"];
   // Exact rational output rate (source rate x multiplier) so 29.97 -> 59.94 etc.
   // never drifts from a rounded float over a long clip.
   const outputRate = formatRational(ratMul(parseRational(info.fpsText), rational(multiplier)));
@@ -108,7 +111,7 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
   const codecArgs = encoderArgs({ codec: resolvedCodec.codec, quality: options.quality ?? 20, container: "mp4", copyAudio: true });
   const encoder = Bun.spawn(
-    [ffmpeg, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-framerate", outputRate, "-i", "pipe:0", "-i", options.input, "-map", "0:v:0", ...audioArgs, ...codecArgs, "-movflags", "+faststart", "-shortest", output],
+    [ffmpeg, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-framerate", outputRate, "-i", "pipe:0", ...(wantAudio ? ["-i", options.input] : []), "-map", "0:v:0", ...audioArgs, ...codecArgs, "-movflags", "+faststart", ...(wantAudio ? ["-shortest"] : []), output],
     { stdin: "pipe", stdout: "ignore", stderr: "pipe" },
   );
 
