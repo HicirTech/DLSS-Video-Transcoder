@@ -1,18 +1,15 @@
 /**
- * GPU-resident async pipeline for DLSS Neural Rendering + NVENC.
+ * GPU-resident async pipeline for DLSS Neural Rendering + NVENC: a decode
+ * worker, DLSS on the main thread and an encode worker, with no CPU copy of a
+ * frame between DLSS and NVENC.
  *
- * Three threads with no CPU frame copies on the hot path between DLSS and NVENC:
- *   - decode worker : ffmpeg rawvideo read -> RGBA (transferred to main)
- *   - main thread    : DLSS eval + GPU copy of the output into a shared-buffer
- *                      pool slot, submitted ASYNC (no wait) with a fence signal
- *   - encode worker  : waits the fence via a CUDA external semaphore, then NVENC
- *                      encodes that slot straight from GPU memory, muxes via ffmpeg
- *
- * DLSS (D3D12 compute) and NVENC (independent encoder units) overlap on the GPU
- * (measured near-parallel on the 5090). A shared D3D12 buffer pool + fence bridge
- * the D3D12<->CUDA boundary with zero readback/upload. Slots are recycled via a
- * credit from the encode worker, bounding memory to `poolSize` frames.
- * Measured ~212 fps at 1080p vs 163 fps for the CPU-frame threaded pipeline.
+ * The main thread records DLSS eval plus a copy of the result into a shared
+ * D3D12 buffer slot, submits it without waiting and signals a shared fence; the
+ * encode worker imports pool and fence into CUDA, waits that fence value and
+ * encodes the slot straight from GPU memory. DLSS runs on D3D12 compute and
+ * NVENC on the separate encoder units, so frame i+1's DLSS overlaps frame i's
+ * encode. A slot only becomes free again when the encode worker acks it, which
+ * bounds memory to `poolSize` frames.
  */
 import { AsyncSubmit } from "../native/async-submit.ts";
 import { D3D12_HEAP_TYPE_UPLOAD, type D3D12Resource } from "../native/d3d12.ts";
@@ -28,7 +25,7 @@ export interface AsyncNrEncodeParams {
   sinkArgs: string[]; // ffmpeg mux argv (reads the elementary stream on pipe:0)
   width: number;
   height: number;
-  rowPitch: number; // row pitch of the shared buffers (>= width*4, 256-aligned)
+  rowPitch: number; // row pitch of the shared buffers: >= width*4, aligned to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256)
   totalBytes: number; // size of each shared buffer
   enc: { fpsNum: number; fpsDen: number; codec: NvencCodec; cq: number; ordinal: number };
   totalFrames: number | null;
@@ -44,7 +41,9 @@ export function runAsyncNrEncode(p: AsyncNrEncodeParams): Promise<{ frames: numb
   const { device, gpu } = p.session;
   const frameBytes = p.width * p.height * 4;
 
-  // Shared buffer pool (CUDA-importable) + per-slot upload staging + shared fence.
+  // Buffers and fence are created shared, and their Win32 handles sent to the
+  // encode worker, so CUDA can import the same allocations the queue writes.
+  // Everything allocated here is owned here and released in cleanup().
   const buffers: D3D12Resource[] = [];
   const stagings: D3D12Resource[] = [];
   const bufHandles: number[] = [];

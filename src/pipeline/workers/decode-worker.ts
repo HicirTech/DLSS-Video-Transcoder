@@ -1,15 +1,13 @@
 /**
- * Decode-stage worker for the threaded video pipeline.
+ * Decode-stage worker for the threaded video pipeline: runs the ffmpeg rawvideo
+ * decode on its own OS thread and hands whole RGBA frames to the main thread as
+ * transferred ArrayBuffers.
  *
- * Runs the ffmpeg rawvideo decode on its own OS thread and hands whole RGBA
- * frames to the main thread as transferable ArrayBuffers (zero-copy). Reading
- * happens here so it overlaps with the main thread's (synchronous, blocking)
- * DLSS work — on a single thread the decode pipe cannot drain while an FFI call
- * blocks, which is what serialised the old loop.
- *
- * Flow control is credit-based: the main thread grants credits (one per frame it
- * can accept); this worker only reads and posts a frame when it holds a credit,
- * bounding how far decode may run ahead and thus total memory use.
+ * Reading happens on this thread so it overlaps the main thread's synchronous,
+ * blocking DLSS calls, which would otherwise stop the decode pipe from draining.
+ * Flow control is credit-based: the main thread grants one credit per frame it
+ * can accept and a frame is only read and posted while a credit is held, which
+ * bounds how far decode runs ahead and so the memory it ties up.
  */
 import { FrameReader } from "../frame-reader.ts";
 

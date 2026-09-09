@@ -1,7 +1,9 @@
 /**
  * Video job: ffmpeg decodes to raw RGBA frames on a pipe, every frame goes
- * through the engine, and a second ffmpeg encodes the result while copying
- * the original audio. ffmpeg / ffprobe are external tools found via tools.ts.
+ * through the engine, and the result is encoded with the original audio copied
+ * across. Owns the choice between the three encode paths (GPU-resident async,
+ * threaded NVENC, single-thread rawvideo) and the GPU session's lifetime.
+ * ffmpeg / ffprobe are external tools found via tools.ts.
  */
 import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings, EngineKind, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
@@ -133,12 +135,14 @@ export function encoderArgs(encode: EncodeSettings): string[] {
 }
 
 /**
- * Decide whether frames can be encoded directly on the GPU with NVENC (this
- * process, via nvenc.ts) and the compressed elementary stream just muxed by
- * ffmpeg — removing the 8 MB/frame rawvideo pipe + swscale. Returns the NVENC
- * codec and the ffmpeg raw-stream demuxer format, or null to use the rawvideo
- * path. NVENC needs even dimensions and stays within the hardware size caps
- * (H.264 up to 4096, HEVC up to 8192 on current GPUs).
+ * Whether frames can be encoded in-process on the GPU (nvenc.ts) so ffmpeg only
+ * muxes the compressed elementary stream, instead of an uncompressed rawvideo
+ * pipe plus swscale. Null means take the rawvideo path.
+ *
+ * The gates are NVENC's own limits: 4:2:0 needs even dimensions, and the
+ * hardware caps the frame size per codec — H.264 at 4096 and HEVC at 8192 on
+ * current GPUs. av1_nvenc falls through to null: nvenc.ts's CODEC_GUID only
+ * carries the H.264 and HEVC GUIDs, so there is no in-process AV1 encoder.
  */
 export function nvencNativeTarget(codec: EncodeSettings["codec"], width: number, height: number): { codec: NvencCodec; demux: string } | null {
   if (width % 2 !== 0 || height % 2 !== 0) return null;
@@ -147,7 +151,7 @@ export function nvencNativeTarget(codec: EncodeSettings["codec"], width: number,
   return null;
 }
 
-/** Parse an ffmpeg rate string ("30000/1001", "25") into integer num/den. */
+/** Parse an ffmpeg rate string ("30000/1001", "25") into integer num/den; 30/1 if unparseable. */
 function rateParts(text: string): { num: number; den: number } {
   const [n, d] = text.split("/");
   const num = Number(n);
@@ -156,7 +160,11 @@ function rateParts(text: string): { num: number; den: number } {
   return { num: Math.round(num), den: Math.round(den) };
 }
 
-/** Cheap scene-cut detector: mean absolute luma difference on a sparse grid. */
+/**
+ * Cheap scene-cut detector: mean absolute luma difference over a ~48x27 grid of
+ * samples, so cost is independent of resolution. A mean above `threshold`
+ * (default 40, in 0-255 luma units) counts as a cut and resets DLSS history.
+ */
 class SceneCutDetector {
   private previous: Float32Array | null = null;
   private readonly samples: Int32Array;
@@ -199,18 +207,16 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   if (!ffmpeg || !ffprobe) {
     throw new Error("ffmpeg and ffprobe are required for video jobs (install with `winget install Gyan.FFmpeg` or set FFMPEG_PATH / FFPROBE_PATH)");
   }
-  // motion="flow" derives per-frame motion vectors from an optical-flow
-  // estimator wired into the frame loop below; motion="none" feeds zero motion.
   const requestedEncode = options.encode ?? DEFAULT_ENCODE_SETTINGS;
-  // Fall back from an NVENC codec to its CPU sibling if NVENC will not run here.
+  // Resolve the codec before anything else: an NVENC request that cannot run
+  // here degrades to its CPU sibling, and every path below branches on the result.
   const resolvedCodec = resolveEncodeCodec(requestedEncode.codec, ffmpeg, options.adapterIndex);
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
   const encode: EncodeSettings = { ...requestedEncode, codec: resolvedCodec.codec };
   const info = probeVideo(ffprobe, options.input);
-  // Force even dimensions: every video codec here encodes 4:2:0 (yuv420p / NVENC
-  // NV12), which requires even width/height. resolveTargetSize leaves 'none'
-  // (the default) at the raw source size, so an odd-dimension source would fail
-  // at encode without this.
+  // Every codec here encodes 4:2:0 (yuv420p / NVENC NV12), which requires even
+  // width and height. resolveTargetSize leaves scale 'none' (the default) at the
+  // raw source size, so an odd-sized source would only fail at encode time.
   const rawTarget = resolveTargetSize(info.width, info.height, options.scale);
   const target = { width: evenSize(rawTarget.width), height: evenSize(rawTarget.height) };
   const output = options.output ?? defaultVideoOutput(options.input, options.engine, encode.container);
@@ -223,12 +229,12 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
 
   const session = openGpu({ adapterIndex: options.adapterIndex, debugLayer: options.debugLayer });
 
-  // GPU-resident async zero-copy path: DLSS Neural Rendering + NVENC with no CPU
-  // frame copies between DLSS and NVENC (the DLSS output stays on the GPU and
-  // NVENC reads it via a shared buffer). DLSS and NVENC overlap on the GPU — ~30%
-  // faster than the CPU-frame threaded pipeline (measured ~212 vs 163 fps at
-  // 1080p). Applies to NR at 1:1 with an NVENC codec at even, in-cap dimensions.
-  // (feature 18 consumes no motion, so motion="flow" would only waste work here.)
+  // Fastest path, tried first: DLSS output stays on the GPU and NVENC reads it
+  // through a shared buffer, so the two overlap with no CPU frame copy between
+  // them — measured ~212 fps vs ~163 fps for the threaded pipeline at 1080p.
+  // Only NR at 1:1 qualifies (no upscale) with an NVENC codec at even, in-cap
+  // dimensions. motion is ignored: feature 18 consumes no motion vectors, so
+  // motion="flow" would only burn optical-flow time here.
   const nrNative = options.engine === "nr" && !upscaling && options.runtimeDir ? nvencNativeTarget(encode.codec, target.width, target.height) : null;
   if (nrNative && probeNvenc(options.adapterIndex ?? 0).available) {
     try {
@@ -250,7 +256,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
       const cuts = new SceneCutDetector(target.width, target.height);
       const guide = (rgba: Uint8Array, index: number): { reset: boolean; sceneCut: boolean } => {
         const cut = index > 0 && cuts.isCut(rgba);
-        if (index === 0) cuts.isCut(rgba);
+        if (index === 0) cuts.isCut(rgba); // discarded result; the call is what primes the history
         return { reset: index === 0 || cut, sceneCut: cut };
       };
       progress(0, `encode: NVENC ${nrNative.codec} (GPU-resident async zero-copy pipeline)`);
@@ -287,34 +293,33 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
       appDataPath: options.appDataPath,
     });
   } catch (error) {
-    session.close(); // engine setup failed before the main try/finally; don't leak the GPU session
+    session.close(); // setup failed before the main try/finally owns it, so close here or leak the GPU session
     throw error;
   }
   const outWidth = engine.outputWidth;
   const outHeight = engine.outputHeight;
 
-  // ffmpeg decode argv (after the binary): emit rawvideo rgba at the render size.
+  // Decode argv without the binary; both encode paths below spawn it themselves.
   const decodeArgv = [
     "-v", "error", "-nostdin", "-i", options.input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba",
     ...(renderWidth !== info.width || renderHeight !== info.height ? ["-vf", `scale=${renderWidth}:${renderHeight}:flags=lanczos`] : []),
     "pipe:1",
   ];
 
-  // Only open the source as a second input when we actually copy its audio —
-  // otherwise ffmpeg would needlessly demux/decode the whole source again,
-  // which dominated the per-frame time (the raw video pipe is the real cost).
+  // Only open the source as a second input when its audio is actually copied:
+  // otherwise the encoder demuxes and decodes the whole source a second time,
+  // which cost more per frame than the raw video pipe it was competing with.
   const wantAudio = info.hasAudio && encode.copyAudio;
   // Video is always input 0 (the pipe); audio, when copied, is input 1 (source).
   const audioArgs = wantAudio ? ["-map", "1:a:0", ...(encode.container === "mkv" ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"])] : ["-an"];
   const faststart = encode.container === "mp4" || encode.container === "mov" ? ["-movflags", "+faststart"] : [];
 
-  // Scene-cut / motion guide, run on this thread (it feeds the DLSS engine's
-  // input). Called exactly once per frame, in order.
+  // Scene-cut / motion guide. Both backends keep a one-frame history, so `guide`
+  // must be called exactly once per frame and in decode order.
   const cuts = new SceneCutDetector(renderWidth, renderHeight);
   let estimator: ReturnType<typeof createMotionEstimator> | null = null;
   if (options.motion === "flow") {
     try {
-      // Prefer the GPU optical-flow engine (NVOFA); fall back to the CPU matcher.
       const nvof = tryCreateNvofBackend(renderWidth, renderHeight);
       estimator = createMotionEstimator(renderWidth, renderHeight, nvof ? { backend: nvof } : {});
       progress(0, nvof ? "optical flow: NVIDIA hardware (NVOFA)" : "optical flow: CPU block matching (NVOFA unavailable)");
@@ -330,19 +335,16 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
       return { reset: index === 0 || g.reset, motion: g.motion, sceneCut: g.reset && index > 0 };
     }
     const cut = index > 0 && cuts.isCut(rgba);
-    if (index === 0) cuts.isCut(rgba); // prime history on the first frame
+    if (index === 0) cuts.isCut(rgba); // discarded result; the call is what primes the history
     return { reset: index === 0 || cut, motion: null, sceneCut: cut };
   };
 
-  // Decoded frames arrive at the render size (source for SR, target otherwise).
   const frameBytes = renderWidth * renderHeight * 4;
-  // Prefer the threaded GPU pipeline: decode, DLSS and NVENC each on their own
-  // thread, encoding on the GPU here (nvenc.ts) and handing ffmpeg only the
-  // compressed elementary stream to mux (-c:v copy). This removes the
-  // uncompressed rawvideo output pipe + ffmpeg swscale AND overlaps the stages
-  // (each is ~4-5 ms at 1080p, serial ran at their sum). Falls back to the
-  // single-thread rawvideo path for CPU/AV1 codecs, oversized frames, or when
-  // NVENC cannot be brought up here.
+  // Second choice: decode, DLSS and NVENC each on their own thread, encoding on
+  // the GPU here (nvenc.ts) so ffmpeg only muxes the elementary stream
+  // (-c:v copy). The stages are ~4-5 ms each at 1080p and ran at their sum when
+  // serial. CPU/AV1 codecs, oversized frames, or an NVENC that will not come up
+  // here fall through to the single-thread rawvideo path.
   const nativeTarget = nvencNativeTarget(encode.codec, outWidth, outHeight);
   const useThreaded = nativeTarget !== null && probeNvenc(options.adapterIndex ?? 0).available;
 
@@ -353,16 +355,16 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
       const { num, den } = rateParts(info.fpsText);
       const sinkArgs = [
         "-v", "error", "-y",
-        // Compressed Annex-B elementary stream from NVENC on stdin; give it the
-        // frame rate so the muxer stamps correct timestamps, then just copy it.
-        // (The mp4/mov muxer converts Annex-B to length-prefixed internally.)
+        // Annex-B elementary stream from NVENC on stdin: it carries no timing at
+        // all, so -framerate is the only thing that lets the muxer stamp
+        // timestamps. (mp4/mov converts Annex-B to length-prefixed internally.)
         "-f", nativeTarget.demux, "-framerate", info.fpsText, "-i", "pipe:0",
         ...(wantAudio ? ["-i", options.input] : []),
         "-map", "0:v:0", "-c:v", "copy",
         ...audioArgs, ...faststart,
-        // No -shortest here: with -c:v copy from a raw elementary stream it drops
-        // the audio track. The transcode emits one frame per source frame, so
-        // audio and video already share the source duration.
+        // No -shortest here: with -c:v copy from a raw elementary stream it
+        // drops the audio track outright. Safe to omit, because this path emits
+        // one frame per source frame, so audio and video share the duration.
         output,
       ];
       progress(0, `encode: NVENC ${nativeTarget.codec} (threaded GPU pipeline, mux-only)`);
@@ -374,7 +376,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
       frames = result.frames;
       sceneCuts = result.sceneCuts;
     } else {
-      // Single-thread rawvideo path: ffmpeg does the encode.
+      // Fallback: raw RGBA out to ffmpeg, which does the encode.
       const decoder = Bun.spawn([ffmpeg, ...decodeArgv], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
       const encoder = Bun.spawn(
         [
@@ -388,7 +390,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
         { stdin: "pipe", stdout: "ignore", stderr: "pipe" },
       );
       const reader = new FrameReader(decoder.stdout);
-      // Prefetch the next frame's decode so it overlaps the current GPU pass.
+      // Kept one frame ahead: the decode of frame n+1 overlaps the GPU pass on n.
       let pending = reader.next(frameBytes);
       for (;;) {
         const rgba = await pending;

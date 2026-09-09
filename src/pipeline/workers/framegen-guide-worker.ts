@@ -1,21 +1,20 @@
 /**
- * Guide-side workers for frame generation, in two roles:
+ * Guide-side worker for frame generation, in one of two roles:
  *
  *   - guide ("open"): owns one stage's motion-guide history — the optical-flow
- *     estimator (with its own NVOFA session on this thread), the previous
- *     frame's segment/timestamp and the scene-cut / duplicate decisions — so
- *     that CPU work runs off the main thread and in parallel across stages.
+ *     estimator with its own NVOFA session on this thread, the previous frame's
+ *     segment/timestamp, and the scene-cut / duplicate counters.
  *   - packer ("open-packer"): upsamples a stage's grid flow to render
  *     resolution, scales it and packs it as R16G16_FLOAT halves.
  *
- * The last cascade stage runs 2^(stages-1) evaluations per source frame and is
- * the pipeline's bottleneck, so it gets a packer thread and its analysis and
- * packing pipeline across frames; earlier stages pack inline (packInline),
- * because more threads than the machine has cores only adds contention.
+ * Only the last cascade stage — 2^(stages-1) evaluations per source frame, the
+ * bottleneck — is given a separate packer worker so its analysis and packing
+ * overlap; earlier stages pack inline (packInline), because more busy threads
+ * than the machine has cores only adds contention.
  *
  * Frames arrive as SharedArrayBuffer-backed RGBA (no copy); flow and packed
- * fields go back as transferred ArrayBuffers. The coordinator sends one request
- * at a time per worker, in stream order, which is what keeps the history correct.
+ * fields go back as transferred ArrayBuffers. The history is only correct
+ * because the coordinator sends one request at a time, in stream order.
  */
 import { createMotionEstimator, flowGridSize, packFlowResizedR16G16, type MotionEstimator } from "../flow.ts";
 import { tryCreateNvofBackend } from "../nvof.ts";

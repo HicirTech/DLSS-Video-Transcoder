@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ToolsReport } from "../server/api-types.ts";
 
+/** Searched after PATH, because the common Windows installers do not always extend it. */
 const EXTRA_DIRS = [
   join(import.meta.dir, "..", "..", "runtime", "ffmpeg", "bin"), // ffmpeg bundled under the project runtime
   join(process.env.LOCALAPPDATA ?? "", "Microsoft", "WinGet", "Links"),
@@ -15,6 +16,11 @@ const EXTRA_DIRS = [
   "C:\\ProgramData\\chocolatey\\bin",
 ];
 
+/**
+ * Locate a tool, in order: the `<NAME>_PATH` environment variable (FFMPEG_PATH,
+ * FFPROBE_PATH — the documented override, and the only way to pin a specific
+ * build), then PATH, then EXTRA_DIRS. Null when none of them has it.
+ */
 export function findTool(name: string): string | null {
   const env = process.env[`${name.toUpperCase()}_PATH`];
   if (env && existsSync(env)) return env;
@@ -39,6 +45,11 @@ function versionOf(path: string | null): string | null {
   }
 }
 
+/**
+ * Whether this ffmpeg build was compiled with NVENC — not whether NVENC will
+ * run: only encode-select.ts's one-frame probe proves that. Null means no
+ * ffmpeg to ask, which is a different report than a build without NVENC.
+ */
 function hasNvenc(ffmpeg: string | null): boolean | null {
   if (!ffmpeg) return null;
   try {

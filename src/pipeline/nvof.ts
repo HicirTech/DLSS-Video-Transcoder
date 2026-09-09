@@ -1,12 +1,8 @@
 /**
- * NVIDIA hardware Optical Flow (NVOFA) via the CUDA interface of nvofapi64.dll.
- *
- * Turing+ GPUs have a dedicated optical-flow engine, independent of the CUDA and
- * graphics cores, that computes dense flow between two frames far faster than the
- * CPU block-matcher in flow.ts. This module drives it through the CUDA API
- * (nvOpticalFlowCuda.h): create an instance (which fills a function-pointer
- * table), create the OF session on a CUDA context, allocate NVOFA GPU buffers,
- * upload two frames, execute, and read back the flow field (S10.5 fixed point).
+ * NVIDIA hardware Optical Flow (NVOFA) via the CUDA interface of nvofapi64.dll:
+ * the flow session, its GPU buffers, and the flow.ts FlowBackend that wraps them.
+ * Turing and later run this on a dedicated engine, separate from the CUDA and
+ * graphics cores, so it costs neither shader nor CPU time.
  *
  * ABI is from github.com/NVIDIA/NVIDIAOpticalFlowSDK (nvOpticalFlowCommon.h +
  * nvOpticalFlowCuda.h); API version 2.0. NV_OF_STATUS 0 = NV_OF_SUCCESS.
@@ -62,7 +58,8 @@ export interface NvofCaps {
 
 /**
  * Bring up NVOFA on GPU `ordinal` and read back its capabilities — proves the
- * whole CUDA + NVOFA FFI chain works without running a full flow computation.
+ * whole CUDA + NVOFA FFI chain works without running a flow computation. Never
+ * throws: a missing DLL or an unsupported GPU comes back as available: false.
  */
 export function probeNvof(ordinal = 0): NvofCaps {
   try {
@@ -74,6 +71,7 @@ export function probeNvof(ordinal = 0): NvofCaps {
     const hOf = hOut.value;
 
     const getCaps = fn(FN.getCaps, { args: [FFIType.u64, FFIType.i32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 });
+    // nvOFGetCaps is a two-call API: a NULL value buffer only reports the count.
     const cap = (param: number): number[] => {
       const size = new Uint32Array(1);
       let r = getCaps(hOf, param, null, ptr(size)) as number;
@@ -116,7 +114,11 @@ interface NvofBuffer {
   pitch: number;
 }
 
-/** A live NVOFA optical-flow session sized to one grid resolution. */
+/**
+ * A live NVOFA session, fixed at the width/height passed to open(): the input,
+ * reference and output GPU buffers are allocated for that size and owned here
+ * until close(). Feed a different resolution and you need a new session.
+ */
 export class NvofSession {
   private constructor(
     private readonly hOf: bigint,
@@ -137,19 +139,21 @@ export class NvofSession {
     ckof(create(ctx, hOut.ptr), "nvCreateOpticalFlowCuda");
     const hOf = hOut.value;
 
+    // NV_OF_INIT_PARAMS (48B); offsets below name its fields.
     const initParams = new Uint8Array(48);
     const idv = new DataView(initParams.buffer);
-    idv.setUint32(0, width, true);
-    idv.setUint32(4, height, true);
-    idv.setUint32(8, 1, true); // outGridSize = 1 (flow at full grid resolution)
-    idv.setUint32(16, MODE_OPTICALFLOW, true);
-    idv.setUint32(20, perf, true);
+    idv.setUint32(0, width, true); // width
+    idv.setUint32(4, height, true); // height
+    idv.setUint32(8, 1, true); // outGridSize = 1: one flow vector per input pixel
+    idv.setUint32(16, MODE_OPTICALFLOW, true); // mode
+    idv.setUint32(20, perf, true); // perfLevel
     ckof(fn(FN.init, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(hOf, ptr(initParams)), "nvOFInit");
 
     const getDev = fn(FN.getDevPtr, { args: [FFIType.u64], returns: FFIType.u64 });
     const getStride = fn(FN.getStride, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 });
     const createBuf = fn(FN.createBuf, { args: [FFIType.u64, FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 });
     const mkBuf = (w: number, h: number, usage: number, format: number): NvofBuffer => {
+      // NV_OF_BUFFER_DESCRIPTOR: width@0, height@4, bufferUsage@8, bufferFormat@12.
       const desc = new Uint8Array(16);
       const d = new DataView(desc.buffer);
       d.setUint32(0, w, true);
@@ -160,6 +164,7 @@ export class NvofSession {
       ckof(createBuf(hOf, ptr(desc), CUDA_BUF_DEVPTR, bOut.ptr), "nvOFCreateGPUBufferCuda");
       const handle = bOut.value;
       const device = getDev(handle) as bigint;
+      // The driver picks the pitch; every copy below must use it, not w * bpp.
       const stride = new Uint8Array(28);
       ckof(getStride(handle, ptr(stride)), "nvOFGPUBufferGetStrideInfo");
       const pitch = new DataView(stride.buffer).getUint32(0, true);
@@ -182,6 +187,7 @@ export class NvofSession {
    * Compute optical flow from `currentGray` to `previousGray` (GRAYSCALE8, tightly
    * packed width*height). Returns the raw flow field as interleaved int16 (x, y)
    * in S10.5 fixed point (divide by 32 for pixels), length width*height*2.
+   * Synchronous: it blocks on cudaSynchronize before reading the result back.
    */
   computeFlow(currentGray: Uint8Array, previousGray: Uint8Array, disableTemporalHints: boolean): Int16Array {
     const w = this.width;
@@ -189,11 +195,16 @@ export class NvofSession {
     cudaMemcpy2DHtoD({ src: currentGray, srcPitch: w, dstDevice: this.input.device, dstPitch: this.input.pitch, widthBytes: w, height: h });
     cudaMemcpy2DHtoD({ src: previousGray, srcPitch: w, dstDevice: this.reference.device, dstPitch: this.reference.pitch, widthBytes: w, height: h });
 
+    // NV_OF_EXECUTE_INPUT_PARAMS: inputFrame@0, referenceFrame@8,
+    // disableTemporalHints@24. With hints left on, the driver seeds from the
+    // previous execute's vectors, which only helps if the calls really are
+    // consecutive frames of one sequence.
     const inParams = new Uint8Array(56);
     const iv = new DataView(inParams.buffer);
     iv.setBigUint64(0, this.input.handle, true);
     iv.setBigUint64(8, this.reference.handle, true);
     iv.setUint32(24, disableTemporalHints ? 1 : 0, true);
+    // NV_OF_EXECUTE_OUTPUT_PARAMS: outputBuffer@0.
     const outParams = new Uint8Array(24);
     new DataView(outParams.buffer).setBigUint64(0, this.output.handle, true);
     ckof(this.execute(this.hOf, ptr(inParams), ptr(outParams)), "nvOFExecute");
@@ -225,6 +236,9 @@ function toByte(v: number): number {
  * downscaled Float32 grayscale grids, runs hardware optical flow, and returns the
  * grid-resolution (dx, dy) field in grid pixels (current -> previous, matching
  * the block-match sign convention).
+ *
+ * The two u8 scratch buffers are reused across calls, so one backend serves one
+ * caller at a time — calc() must not be re-entered concurrently.
  */
 function nvofBackend(session: NvofSession): FlowBackend {
   const n = session.width * session.height;

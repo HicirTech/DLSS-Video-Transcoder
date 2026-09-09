@@ -1,7 +1,7 @@
 /**
  * Reassembles exact-size frames from a byte stream that arrives in arbitrary
- * chunks (an ffmpeg rawvideo pipe hands us whatever the OS buffered). Pure: no
- * FFI, so it is safe to import from a Worker thread.
+ * chunks — an ffmpeg rawvideo pipe hands over whatever the OS buffered, with no
+ * relation to frame boundaries. No FFI here, so a Worker can import it.
  */
 export class FrameReader {
   private pending: Uint8Array[] = [];
@@ -17,7 +17,11 @@ export class FrameReader {
     this.reader = stream.getReader();
   }
 
-  /** Next `frameBytes`-sized frame (a freshly allocated buffer), or null at EOF. */
+  /**
+   * Next `frameBytes`-sized frame in a freshly allocated buffer, or null once
+   * the stream ends. A trailing partial frame is dropped rather than padded, so
+   * a truncated pipe ends the loop instead of emitting a torn frame.
+   */
   async next(frameBytes: number): Promise<Uint8Array | null> {
     while (this.pendingBytes < frameBytes) {
       const { value, done } = await this.reader.read();

@@ -2,27 +2,16 @@
  * Optical-flow motion vectors for the DLSS / DLSSG / DLSSNR motion-vector
  * contract, ported from the reference DIS generator (dref guides.py).
  *
- * The estimator consumes two consecutive tightly-packed RGBA8 frames and yields
- * a per-pixel backward motion field in RENDER-RESOLUTION PIXELS, interleaved
- * (x, y), origin top-left, +x right, +y down, no y flip. This is the exact unit
- * and convention `FrameInput.motion` (engine.ts) already expects, so the engine
- * only has to pack it to R16G16_FLOAT and set MV.Scale = 1.0.
+ * Output unit and convention, which `FrameInput.motion` (engine.ts) already
+ * expects so the engine only packs to R16G16_FLOAT with MV.Scale = 1.0: a
+ * backward per-pixel field in RENDER-RESOLUTION PIXELS, interleaved (x, y),
+ * origin top-left, +x right, +y down, no y flip. DIS sign convention:
+ * `calc(current, previous)` maps current -> previous, `MV[p] = prevPos - curPos`.
  *
- * DIS convention: `flow.calc(current, previous)` maps current -> previous, i.e.
- * `MV[p] = prevPos - curPos`: add MV to a current pixel coord to reach where
- * that pixel was in the previous frame.
- *
- * OpenCV is unavailable in Bun, so the primary dependency-free path here is a
- * simple block-matching flow computed in pure TS on a downscaled grayscale
- * grid (long side ~flowWidth, default 640), then bilinearly resized to full
- * resolution and scaled to render pixels — matching guides.py:24-55. A
- * ffmpeg-based path is provided behind a clear function boundary (arg builder +
- * stub) but is not the producer: ffmpeg only exposes block-granular codec
- * vectors, not dense flow, so it stays a boundary the GPU/native backends can
- * later replace (NVOFA / native DIS).
- *
- * All the math (float16 packing, scene score, gray downscale, block match,
- * bilinear resize) is pure and GPU-free so it is unit-testable without a GPU.
+ * OpenCV is unavailable in Bun, so the producer is a pure-TS block matcher on a
+ * downscaled gray grid (guides.py:24-55). The ffmpeg path is a seam, not a
+ * producer: ffmpeg only exposes block-granular codec vectors, never dense flow.
+ * Everything here is GPU-free, so it is unit-testable without a GPU.
  */
 
 // -- Reference reset/duplicate thresholds (guides.py DLSSGGuideGenerator) ------
@@ -42,9 +31,9 @@ const f32 = new Float32Array(1);
 const u32 = new Uint32Array(f32.buffer);
 
 /**
- * Encode one float32 as an IEEE-754 half (Uint16). Handles normals,
- * subnormals, signed zero, overflow -> Inf, and NaN, with round-to-nearest-even
- * on the mantissa. Suitable for packing motion vectors into R16G16_FLOAT.
+ * Encode one float32 as an IEEE-754 half (Uint16): normals, subnormals, signed
+ * zero, overflow -> Inf and NaN, rounding the mantissa to nearest-even as
+ * R16G16_FLOAT does.
  */
 export function floatToHalf(value: number): number {
   f32[0] = value;
@@ -52,9 +41,9 @@ export function floatToHalf(value: number): number {
 }
 
 /**
- * floatToHalf on the raw IEEE-754 bits of a float32. Lets a whole buffer be
- * converted through a Uint32Array view with integer ops only, instead of a
- * scalar store/load per element (13 ms per 720p motion field before).
+ * floatToHalf on the raw IEEE-754 bits of a float32, so a whole buffer can be
+ * converted through a Uint32Array view with integer ops only instead of one
+ * scalar store/load per element.
  */
 export function bitsToHalf(x: number): number {
   const sign = (x >>> 16) & 0x8000;
@@ -86,10 +75,7 @@ export function bitsToHalf(x: number): number {
   return sign | half;
 }
 
-/**
- * Decode an IEEE-754 half (Uint16) back to a JS number. Provided for tests and
- * GPU-readback debugging; not used on the hot path.
- */
+/** Decode an IEEE-754 half (Uint16) back to a JS number; for tests and GPU-readback debugging only. */
 export function halfToFloat(half: number): number {
   const sign = half & 0x8000 ? -1 : 1;
   const exp = (half >>> 10) & 0x1f;
@@ -100,9 +86,8 @@ export function halfToFloat(half: number): number {
 }
 
 /**
- * Pack an interleaved (x, y) Float32 motion buffer into R16G16_FLOAT halves.
- * `motion.length` must be width*height*2; the returned Uint16Array aliases the
- * same interleaving (R=x, G=y) ready to upload as DXGI_FORMAT_R16G16_FLOAT.
+ * Pack an interleaved (x, y) Float32 motion buffer into halves, keeping the
+ * interleaving (R=x, G=y) so it uploads as DXGI_FORMAT_R16G16_FLOAT unchanged.
  */
 export function encodeMotionR16G16(motion: Float32Array): Uint16Array {
   const out = new Uint16Array(motion.length);
@@ -113,13 +98,12 @@ export function encodeMotionR16G16(motion: Float32Array): Uint16Array {
 }
 
 /**
- * Bilinearly upsample an interleaved (dx, dy) grid flow to (outW, outH), scale
- * x by outW/inW and y by outH/inH (grid pixels -> render pixels) and pack the
- * result as R16G16_FLOAT halves in ONE pass, one row at a time. Bit-identical
- * to `encodeMotionR16G16` applied to the estimator's scaled
- * `resizeFlowBilinear` output (the same float32 rounding happens at the same
- * two points), but without the two full-resolution float32 passes and the
- * 14.7 MB intermediate a 720p field needs. Every grid sample must be finite.
+ * Fused upsample + scale (grid pixels -> render pixels, x by outW/inW, y by
+ * outH/inH) + half packing, one row at a time. Bit-identical to
+ * `encodeMotionR16G16` of the scaled `resizeFlowBilinear` output — the same
+ * float32 rounding happens at the same two points — but without its two
+ * full-resolution float32 passes and intermediate. Every grid sample must be
+ * finite; the caller checks that with `allFinite`.
  */
 export function packFlowResizedR16G16(flow: Float32Array, inW: number, inH: number, outW: number, outH: number): Uint16Array {
   const out = new Uint16Array(outW * outH * 2);
@@ -127,8 +111,8 @@ export function packFlowResizedR16G16(flow: Float32Array, inW: number, inH: numb
   const ky = outH / inH;
   const sx = inW > 1 && outW > 1 ? (inW - 1) / (outW - 1) : 0;
   const sy = inH > 1 && outH > 1 ? (inH - 1) / (outH - 1) : 0;
-  // Column sample positions and weights are the same for every row; keep the
-  // weights in float64 exactly as resizeFlowBilinear computes them.
+  // Column positions and weights repeat for every row. The weights stay float64,
+  // exactly as resizeFlowBilinear computes them, to keep the results identical.
   const x0s = new Int32Array(outW);
   const x1s = new Int32Array(outW);
   const wxs = new Float64Array(outW);
@@ -141,15 +125,14 @@ export function packFlowResizedR16G16(flow: Float32Array, inW: number, inH: numb
   }
   const row = new Float32Array(outW * 2);
   const rowBits = new Uint32Array(row.buffer);
-  // Native float16 conversion where the runtime has Float16Array (ES2025;
-  // round-to-nearest-even, identical to bitsToHalf on finite values and ~5x
-  // faster); the scalar loop stays as the fallback.
+  // Float16Array (ES2025) rounds to nearest-even, so it matches bitsToHalf on
+  // finite values while converting ~5x faster; the scalar loop is the fallback
+  // for runtimes without it.
   const outHalf = HALF_ARRAY ? new HALF_ARRAY(out.buffer) : null;
-  // Each output row blends the horizontal interpolation of input rows y0 and
-  // y0+1, and consecutive output rows reuse them (sy < 1), so keep the last two
-  // in a two-slot cache: the horizontal pass then runs about inH times instead
-  // of 2*outH. The arithmetic is unchanged (still float64 until the fround), so
-  // the result stays bit-identical.
+  // Upsampling means sy < 1, so consecutive output rows keep reusing the same
+  // two horizontally-interpolated input rows: a two-slot cache drops the
+  // horizontal pass from 2*outH runs to about inH. Still float64 until the
+  // fround, so the result is unchanged.
   const cachedRow = [new Float64Array(outW * 2), new Float64Array(outW * 2)];
   const cachedIndex = [-1, -1];
   let nextSlot = 0;
@@ -180,8 +163,8 @@ export function packFlowResizedR16G16(flow: Float32Array, inW: number, inH: numb
     const bottom = y1 === y0 ? top : horizontal(y1);
     const wt = 1 - wy;
     for (let i = 0; i < outW * 2; i += 2) {
-      // Math.fround reproduces the float32 store of the interpolated value that
-      // precedes the scale multiply in the reference path.
+      // Math.fround stands in for the float32 store the reference path makes
+      // before the scale multiply; without it the two paths would diverge.
       row[i] = Math.fround(top[i]! * wt + bottom[i]! * wy) * kx;
       row[i + 1] = Math.fround(top[i + 1]! * wt + bottom[i + 1]! * wy) * ky;
     }
@@ -192,7 +175,7 @@ export function packFlowResizedR16G16(flow: Float32Array, inW: number, inH: numb
   return out;
 }
 
-/** Float16Array constructor when the runtime provides it (Bun 1.4 does); null otherwise. */
+/** Float16Array when the runtime provides it — Bun 1.4 does — otherwise null. */
 interface HalfArray {
   set(values: ArrayLike<number>, offset?: number): void;
 }
@@ -212,9 +195,9 @@ function luma(r: number, g: number, b: number): number {
 }
 
 /**
- * Byte offsets of a sparse ~48x27 sample grid over an RGBA8 frame — the same
- * sampling SceneCutDetector uses in video.ts, so the scene score here carries
- * identical grid semantics.
+ * Byte offsets of a sparse ~48x27 sample grid over an RGBA8 frame. Kept
+ * identical to SceneCutDetector's sampling in video.ts so both produce the same
+ * scene score for a frame.
  */
 export function buildSampleOffsets(width: number, height: number): Int32Array {
   const stepX = Math.max(1, Math.floor(width / 48));
@@ -245,8 +228,8 @@ export function meanAbsLumaDiff(a: Float32Array, b: Float32Array): number {
 
 /**
  * Normalized [0,1] scene score between two RGBA8 frames: sparse-grid mean abs
- * luma diff / 255. Reset threshold 0.24, duplicate threshold 0.0005 apply to
- * this value (reference guides.py:43-45).
+ * luma diff / 255. RESET_SCENE_SCORE and DUPLICATE_SCENE_SCORE are thresholds
+ * on this value.
  */
 export function sparseSceneScore(current: Uint8Array, previous: Uint8Array, width: number, height: number): number {
   const offsets = buildSampleOffsets(width, height);
@@ -256,10 +239,9 @@ export function sparseSceneScore(current: Uint8Array, previous: Uint8Array, widt
 // -- Grayscale box-average downscale ------------------------------------------
 
 /**
- * Compute the flow-grid dimensions for a render size: scale so the LONG side is
- * ~flowWidth (matching the documented "long-side resolution"); dims rounded to
- * even and clamped to >= 64. Scaling by the long side keeps portrait frames from
- * running the flow at a much larger grid than intended.
+ * Flow-grid dimensions for a render size: the LONG side becomes ~flowWidth, both
+ * dims even and >= 64. Scaling by the long side rather than the width keeps a
+ * portrait frame from running the flow on a far larger grid than intended.
  */
 export function flowGridSize(width: number, height: number, flowWidth = DEFAULT_FLOW_WIDTH): { flowW: number; flowH: number } {
   const scale = Math.min(1, flowWidth / Math.max(1, width, height));
@@ -270,15 +252,14 @@ export function flowGridSize(width: number, height: number, flowWidth = DEFAULT_
 
 /**
  * Box-average downscale RGBA8 -> Float32 luma at (flowW, flowH), reproducing
- * cvtColor(RGBA2GRAY) + resize(INTER_AREA). When the grid matches the source
- * this degrades to a plain per-pixel luma pass.
+ * cvtColor(RGBA2GRAY) + resize(INTER_AREA).
  */
 export function smallGray(rgba: Uint8Array, width: number, height: number, flowW: number, flowH: number): Float32Array {
   const out = new Float32Array(flowW * flowH);
   // Exact integer downscale — the usual case, e.g. 1280x720 -> 640x360. Every
-  // output pixel then averages the same sx*sy block, so the per-output-pixel
-  // divisions, ceilings and bounds checks of the general path below can go. The
-  // same source pixels are summed in the same order, so the result is identical.
+  // output pixel averages the same sx*sy block, so the general path's
+  // per-pixel divisions and bounds checks fall away. It sums the same source
+  // pixels in the same order, so the two paths agree bit for bit.
   if (width % flowW === 0 && height % flowH === 0) {
     const sx = width / flowW;
     const sy = height / flowH;
@@ -322,8 +303,8 @@ export function smallGray(rgba: Uint8Array, width: number, height: number, flowW
 
 /**
  * Bilinearly resize an interleaved (dx, dy) flow field from (inW, inH) to
- * (outW, outH). Magnitudes are NOT rescaled here — that is the caller's job
- * (guides.py multiplies channels by outW/inW and outH/inH afterward).
+ * (outW, outH). Magnitudes are NOT rescaled here: the caller multiplies the
+ * channels by outW/inW and outH/inH afterward, as guides.py does.
  */
 export function resizeFlowBilinear(flow: Float32Array, inW: number, inH: number, outW: number, outH: number): Float32Array {
   const out = new Float32Array(outW * outH * 2);
@@ -361,10 +342,9 @@ export function resizeFlowBilinear(flow: Float32Array, inW: number, inH: number,
 // -- Flow backends -------------------------------------------------------------
 
 /**
- * A flow backend computes dense per-pixel flow on the (small) gray grid. It
- * returns an interleaved (dx, dy) Float32 field of length w*h*2 in GRID pixels,
- * with `calc(current, previous)` mapping current -> previous (DIS convention).
- * This is the seam a native DIS or NVOFA backend later slots into.
+ * Dense per-pixel flow on the small gray grid: an interleaved (dx, dy) field of
+ * length w*h*2 in GRID pixels, `calc(current, previous)` mapping current ->
+ * previous (DIS convention). The seam a native DIS or NVOFA backend slots into.
  */
 export interface FlowBackend {
   readonly name: string;
@@ -381,14 +361,11 @@ export interface BlockMatchOptions {
 }
 
 /**
- * Dependency-free block-matching flow: for each block in `current`, find the
- * integer displacement into `previous` that minimizes SAD, and assign it to
- * every pixel of the block. The displacement IS the current->previous flow
- * (a block sitting at p in current best matches previous at p+d, so
- * prevPos - curPos = d), matching cv2 calc(current, previous) sign.
- *
- * Coarse (block-constant, integer) but pure and adequate as a CPU fallback and
- * for unit testing; a native DIS/NVOFA backend supersedes it for quality.
+ * Dependency-free block-matching flow: per block of `current`, the integer
+ * displacement into `previous` that minimizes SAD, assigned to every pixel of
+ * the block. That displacement is already the current->previous flow — a block
+ * at p in current best matches previous at p+d, so prevPos - curPos = d — so it
+ * carries the cv2 calc(current, previous) sign with no negation.
  */
 export function blockMatchFlow(current: Float32Array, previous: Float32Array, w: number, h: number, opts: BlockMatchOptions = {}): Float32Array {
   const block = Math.max(1, opts.block ?? 8);
@@ -446,10 +423,9 @@ export function createBlockMatchBackend(opts: BlockMatchOptions = {}): FlowBacke
 }
 
 /**
- * Build the ffmpeg args that would extract per-frame codec motion vectors from
- * `input`. Pure/testable; kept for the ffmpeg path boundary only. NOTE: these
- * are block-granular compression vectors (mestimate + export_mvs), NOT dense
- * optical flow, so this is a stub the ts/native backends stand in for.
+ * ffmpeg args that extract per-frame codec motion vectors from `input`. These
+ * are block-granular compression vectors (mestimate + export_mvs), NOT the dense
+ * optical flow DLSS needs, which is why the ffmpeg backend below never produces.
  */
 export function buildMvExtractArgs(ffmpeg: string, input: string): string[] {
   return [
@@ -468,11 +444,7 @@ export function buildMvExtractArgs(ffmpeg: string, input: string): string[] {
   ];
 }
 
-/**
- * ffmpeg-based backend boundary. ffmpeg cannot produce the dense per-pixel flow
- * DLSS needs, so `calc` throws: this exists as an explicit seam (and to keep
- * arg construction unit-testable) rather than a working producer.
- */
+/** ffmpeg backend seam; `calc` throws because ffmpeg cannot produce dense flow. */
 export function createFfmpegBackend(): FlowBackend {
   return {
     name: "ffmpeg-stub",
@@ -486,24 +458,24 @@ export function createFfmpegBackend(): FlowBackend {
 
 export interface MotionResult {
   /**
-   * Interleaved (x, y) motion in RENDER-RESOLUTION pixels, length width*height*2,
-   * or null when there is no usable motion (first frame, scene cut, duplicate,
-   * or low confidence) — the engine treats null as zero/reset.
+   * Interleaved (x, y) motion in RENDER-RESOLUTION pixels, length width*height*2.
+   * Null whenever there is no usable motion — first frame, scene cut, duplicate
+   * or low confidence — which the engine treats as zero motion plus reset.
    */
   motion: Float32Array | null;
-  /** True on first frame, scene cut, or low flow confidence: clears history. */
+  /** First frame, scene cut, or confidence below RESET_CONFIDENCE: drop temporal history. */
   reset: boolean;
   /** Normalized [0,1] scene score (mean abs luma diff / 255). */
   sceneScore: number;
-  /** True when the frame is a near-duplicate (sceneScore < 0.0005). */
+  /** Near-duplicate frame (sceneScore below DUPLICATE_SCENE_SCORE); not a reset. */
   duplicate: boolean;
-  /** Fraction of finite motion vectors in [0,1] (1.0 on duplicate). */
+  /** Fraction of finite motion vectors in [0,1]; 1.0 on a duplicate. */
   confidence: number;
 }
 
-/** MotionResult with the field already packed as R16G16_FLOAT (what the DLSSG worker consumes). */
+/** MotionResult with the field already packed as R16G16_FLOAT, the form the DLSSG worker consumes. */
 export interface PackedMotionResult {
-  /** Interleaved (x, y) halves in render pixels, length width*height*2, or null when there is no usable motion. */
+  /** Interleaved (x, y) halves in render pixels, length width*height*2; null as in MotionResult.motion. */
   half: Uint16Array | null;
   reset: boolean;
   sceneScore: number;
@@ -513,10 +485,10 @@ export interface PackedMotionResult {
 
 /**
  * The analysis half of processPacked(): scene decisions plus the grid-resolution
- * flow, leaving the (expensive) upsample + pack to another thread. At most one
- * of `small` / `half` is set: `small` on the fast path (every grid sample
- * finite — the caller packs it with packFlowResizedR16G16), `half` when the
- * slow exact path already had to build the full field.
+ * flow, so the expensive upsample + pack can run on another thread. At most one
+ * of `small` / `half` is ever set — `small` on the fast path, for the caller to
+ * finish with packFlowResizedR16G16; `half` when a non-finite grid sample forced
+ * the exact path to build the full field here.
  */
 export interface AnalyzedMotion {
   small: Float32Array | null;
@@ -529,18 +501,17 @@ export interface AnalyzedMotion {
 
 export interface MotionEstimator {
   /**
-   * Feed the next RGBA8 frame; returns its motion field and reset state.
-   * `forceReset` marks a known discontinuity (timestamp gap, new segment) so
-   * the frame is treated as a scene cut regardless of its score.
+   * Feed the next RGBA8 frame. `forceReset` marks a discontinuity only the
+   * caller can see (timestamp gap, new segment) and makes the frame a scene cut
+   * whatever its score.
    */
   process(rgba: Uint8Array, forceReset?: boolean): MotionResult;
   /**
-   * Same decisions as process(), but the motion comes back packed as halves
-   * via one fused resize+scale+pack pass — skipping the full-resolution
-   * float32 field that frame generation would only convert anyway.
+   * process() with the motion already packed as halves, skipping the
+   * full-resolution float32 field frame generation would only convert anyway.
    */
   processPacked(rgba: Uint8Array, forceReset?: boolean): PackedMotionResult;
-  /** processPacked() split in two: decisions + grid flow now, packing left to the caller (see AnalyzedMotion). */
+  /** processPacked() split in two: decisions + grid flow here, packing left to the caller (see AnalyzedMotion). */
   analyzePacked(rgba: Uint8Array, forceReset?: boolean): AnalyzedMotion;
   close(): void;
 }
@@ -550,7 +521,7 @@ export type FlowBackendKind = "auto" | "ts" | "ffmpeg" | "nvof" | "dis";
 export interface MotionEstimatorOptions {
   /** Long-side resolution to run flow at (default 640, rounded even, >= 64). */
   flowWidth?: number;
-  /** Backend selection (default 'auto' -> pure-TS block matching), or a ready-made backend instance (e.g. NVOFA). */
+  /** Backend kind (default 'auto' -> pure-TS block matching), or a ready-made instance such as the NVOFA backend. */
   backend?: FlowBackendKind | FlowBackend;
   /** Override the block-match backend tuning (ts backend only). */
   blockMatch?: BlockMatchOptions;
@@ -565,8 +536,8 @@ function selectBackend(kind: FlowBackendKind, opts: MotionEstimatorOptions): Flo
       return createFfmpegBackend();
     case "nvof":
     case "dis":
-      // Native GPU/DIS backends live behind bun:ffi and are not part of this
-      // pure module; wire them here once the DLLs are vendored.
+      // Native GPU/DIS backends live behind bun:ffi, which this GPU-free module
+      // cannot pull in; callers pass such a backend in as an instance instead.
       throw new Error(`optical-flow backend '${kind}' is not available in this build; use 'ts'`);
     default:
       throw new Error(`unknown optical-flow backend '${String(kind)}'`);
@@ -593,10 +564,11 @@ class DisMotionEstimator implements MotionEstimator {
   }
 
   /**
-   * Scene analysis shared by process() and processPacked(): updates the
-   * history and returns the grid flow when there is one to upsample. A null
-   * `small` means the frame already has its final verdict (first frame, cut,
-   * duplicate); confidence is then settled, otherwise the caller decides it.
+   * Scene analysis shared by process() and processPacked(): advances the history
+   * and returns the grid flow when there is one to upsample. A null `small`
+   * means the frame already has its final verdict (first frame, cut, duplicate)
+   * and its confidence; otherwise confidence comes back -1 for the caller to
+   * settle once it knows how much of the field is finite.
    */
   private analyze(rgba: Uint8Array, forceReset: boolean): { small: Float32Array | null; reset: boolean; sceneScore: number; duplicate: boolean; confidence: number } {
     if (rgba.length < this.width * this.height * 4) {
@@ -605,7 +577,7 @@ class DisMotionEstimator implements MotionEstimator {
     const samples = sparseLuma(rgba, this.offsets);
     const gray = smallGray(rgba, this.width, this.height, this.flowW, this.flowH);
 
-    // First frame: nothing to compare against -> forced reset, zero motion.
+    // Nothing to compare the first frame against, so it is a forced reset.
     if (!this.prevGray || !this.prevSamples) {
       this.prevGray = gray;
       this.prevSamples = samples;
@@ -614,26 +586,29 @@ class DisMotionEstimator implements MotionEstimator {
 
     const sceneScore = meanAbsLumaDiff(samples, this.prevSamples) / 255;
     const duplicate = sceneScore < DUPLICATE_SCENE_SCORE;
-    // A caller-known discontinuity resets exactly like a detected cut (guides.py: force_reset or score > 0.24).
+    // A caller-known discontinuity resets exactly like a detected cut (guides.py: force_reset or score above threshold).
     const sceneReset = forceReset || sceneScore > RESET_SCENE_SCORE;
     if (duplicate || sceneReset) {
       this.prevGray = gray;
       this.prevSamples = samples;
-      // Duplicate does not force reset (confidence 1); a scene cut does.
+      // A duplicate holds the temporal history (confidence 1); a cut discards it.
       return { small: null, reset: sceneReset, sceneScore, duplicate, confidence: duplicate ? 1 : 0 };
     }
 
-    // Dense flow on the small grid, current -> previous, in grid pixels.
+    // Grid pixels, current -> previous; the caller scales to render pixels.
     const small = this.backend.calc(gray, this.prevGray, this.flowW, this.flowH);
     this.prevGray = gray;
     this.prevSamples = samples;
     return { small, reset: false, sceneScore, duplicate: false, confidence: -1 };
   }
 
-  /** Full-resolution render-pixel float32 field plus the finite fraction (guides.py:52-63). */
+  /**
+   * Exact path: full-resolution render-pixel field plus the finite fraction,
+   * with non-finite vectors zeroed (guides.py:52-63).
+   */
   private toFull(small: Float32Array): { full: Float32Array; confidence: number } {
     const full = resizeFlowBilinear(small, this.flowW, this.flowH, this.width, this.height);
-    // Convert grid displacement to render-res pixels.
+    // resizeFlowBilinear leaves magnitudes in grid pixels.
     const kx = this.width / this.flowW;
     const ky = this.height / this.flowH;
     let finite = 0;
@@ -674,9 +649,9 @@ class DisMotionEstimator implements MotionEstimator {
   processPacked(rgba: Uint8Array, forceReset = false): PackedMotionResult {
     const a = this.analyze(rgba, forceReset);
     if (a.small === null) return { half: null, reset: a.reset, sceneScore: a.sceneScore, duplicate: a.duplicate, confidence: a.confidence };
-    // Fast path: every grid sample finite (always, for NVOFA and block matching)
-    // means the interpolated field is finite too, so confidence is exactly 1 and
-    // one fused pass replaces resize + scale + count + pack.
+    // A finite grid — always so for block matching and NVOFA — interpolates to a
+    // finite field, so confidence is exactly 1 and one fused pass can replace
+    // resize + scale + count + pack.
     if (allFinite(a.small)) {
       return { half: packFlowResizedR16G16(a.small, this.flowW, this.flowH, this.width, this.height), reset: false, sceneScore: a.sceneScore, duplicate: false, confidence: 1 };
     }
@@ -693,15 +668,14 @@ class DisMotionEstimator implements MotionEstimator {
 }
 
 /**
- * Create a motion estimator that turns consecutive RGBA8 frames into the DLSS
- * motion-vector field. `backend: 'auto'` (default) uses the dependency-free
- * pure-TS block matcher; 'ffmpeg' selects the (non-producing) ffmpeg boundary;
- * 'nvof'/'dis' are reserved for native backends.
+ * Motion estimator turning consecutive RGBA8 frames of the given render size
+ * into the DLSS motion-vector field. It keeps the previous frame's gray grid and
+ * samples, so one estimator serves one stream and must not be shared.
  */
 export function createMotionEstimator(width: number, height: number, opts: MotionEstimatorOptions = {}): MotionEstimator {
   if (width <= 0 || height <= 0) throw new Error(`flow: invalid size ${width}x${height}`);
-  // A ready-made backend instance (e.g. the NVOFA GPU backend) is used directly;
-  // otherwise select one of the pure/built-in backends by kind.
+  // A ready-made instance (e.g. the NVOFA GPU backend) is used as given; its
+  // close() then runs through the estimator's close(), not the caller's.
   const chosen = opts.backend;
   const backend = chosen && typeof chosen === "object" ? chosen : selectBackend(chosen ?? "auto", opts);
   return new DisMotionEstimator(width, height, backend, opts.flowWidth ?? DEFAULT_FLOW_WIDTH);

@@ -1,12 +1,6 @@
 /**
  * Job worker: runs one image or video job off the server's main thread.
  * bun:ffi works inside workers, so the GPU session lives entirely here.
- *
- * Messages in:  { type: "run", id, request: JobRequest, runtimeDir, appDataPath }
- * Messages out: { type: "progress", id, fraction, message }
- *               { type: "log", id, line }
- *               { type: "done", id, output, detail }
- *               { type: "failed", id, error }
  */
 import type { JobRequest } from "../server/api-types.ts";
 import { processImage } from "./image.ts";
@@ -36,8 +30,8 @@ async function run(message: RunMessage): Promise<void> {
   const log = (line: string) => post({ type: "log", id, line });
   try {
     if (request.engine === "nr") {
-      // Registers the neural engine with the engine factory (kept out of the
-      // bypass path so a missing runtime never blocks plumbing checks).
+      // Side-effect import: registers the engine with createEngine's factory.
+      // Imported lazily so a missing NVIDIA runtime cannot break a bypass job.
       await import("../ngx/nr.ts");
     } else if (request.engine === "sr") {
       await import("../ngx/sr-engine.ts");

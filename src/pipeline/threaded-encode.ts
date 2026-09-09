@@ -1,24 +1,17 @@
 /**
- * Threaded video encode pipeline.
+ * Threaded video encode pipeline: an ffmpeg decode worker, `engine.process` on
+ * the main thread and a CUDA/NVENC encode worker, with frames moving between
+ * them as transferred ArrayBuffers.
  *
- * The single-threaded loop ran decode, DLSS and NVENC in series because the
- * synchronous FFI calls (DLSS eval, NVENC encode) never yield — so the decode
- * pipe could not drain and the encoder could not run while DLSS was working.
- * Measured at 1080p/NR each stage is ~4-5 ms, so serial wall time is their sum
- * (~12.6 ms, ~79 fps) even though each alone is far faster.
+ * The stages need separate threads because the synchronous FFI calls (DLSS eval,
+ * NVENC encode) never yield: on one thread the decode pipe cannot drain and the
+ * encoder cannot run while DLSS is working, so wall time is the sum of the three
+ * stages instead of the slowest one. The engine stays on the main thread because
+ * D3D12/NGX objects may only be used from the thread that created them.
  *
- * This runs the three stages on three threads:
- *   - decode worker  : ffmpeg rawvideo read (own thread, own OS pipe)
- *   - main thread     : DLSS engine.process (kept here; D3D12/NGX stay on the
- *                       thread that created them)
- *   - encode worker  : CUDA upload + NVENC encode + mux ffmpeg
- * Frames move as transferred ArrayBuffers (zero-copy). Wall time approaches the
- * slowest single stage instead of their sum.
- *
- * Order and backpressure: one decode worker and one encode worker, both FIFO,
- * so frames stay in display order (matching NVENC's no-B-frame config). A credit
- * window bounds how many frames may be in flight (decode->main->encode), keeping
- * memory use to ~window frames.
+ * One decode and one encode worker, both FIFO, keep frames in display order,
+ * which is what NVENC's no-B-frame config expects. A credit window bounds frames
+ * in flight (decode->main->encode) and so memory use to ~`window` frames.
  */
 import type { Engine } from "./engine.ts";
 
@@ -73,7 +66,6 @@ export function runThreadedEncode(p: ThreadedEncodeParams): Promise<{ frames: nu
     encodeW.onmessage = (event: MessageEvent) => {
       const msg = event.data as { type: string; message?: string };
       if (msg.type === "opened") {
-        // Encoder + mux are up; start decoding and prime the credit window.
         decodeW.postMessage({ type: "start", ffmpeg: p.ffmpeg, args: p.decodeArgs, frameBytes: p.frameBytes });
         decodeW.postMessage({ type: "credit", n: window });
       } else if (msg.type === "encoded") {

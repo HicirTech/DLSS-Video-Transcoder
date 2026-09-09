@@ -1,21 +1,15 @@
 /**
- * NVENC hardware H.264/HEVC encode via nvEncodeAPI64.dll on a CUDA context.
+ * NVENC hardware H.264/HEVC encode via nvEncodeAPI64.dll, driven through the
+ * function-pointer table NvEncodeAPICreateInstance fills
+ * (NV_ENCODE_API_FUNCTION_LIST). Sessions run on the CUDA context shared with
+ * NVOFA (src/native/cuda.ts), so input frames live in CUDA device memory
+ * (NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR) and the output is an Annex-B
+ * elementary stream the caller only has to mux.
  *
- * The video pipeline (video.ts / framegen.ts) currently pushes uncompressed RGBA
- * through an ffmpeg pipe, which is the throughput ceiling (8 MB/frame + two
- * swscale conversions). NVENC lets us encode on the GPU and hand ffmpeg only the
- * compressed elementary stream to mux, removing that ceiling.
- *
- * This module drives NVENC through its function-pointer table
- * (NvEncodeAPICreateInstance fills NV_ENCODE_API_FUNCTION_LIST). It reuses the
- * CUDA context created for NVOFA (src/native/cuda.ts), so encode input lives in
- * CUDA device memory (NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR).
- *
- * ABI is from the NVIDIA Video Codec SDK 13.1.15 header (nvEncodeAPI.h),
- * verified field-by-field. Natural alignment, no #pragma pack; NVENCAPI
- * (__stdcall) is a no-op on x64 so the default bun:ffi convention applies.
- * NVENCSTATUS 0 = NV_ENC_SUCCESS. 16-byte GUIDs are passed by value, which on
- * Win64 means a hidden pointer to the 16 bytes, so GUID params bind as "ptr".
+ * ABI from the NVIDIA Video Codec SDK 13.1.15 header (nvEncodeAPI.h): natural
+ * alignment, no #pragma pack; NVENCAPI (__stdcall) is a no-op on x64, so the
+ * default bun:ffi convention applies. NVENCSTATUS 0 = NV_ENC_SUCCESS. A 16-byte
+ * GUID passed by value is a hidden pointer on Win64, so GUID params bind as "ptr".
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import { callableAt, type Signature } from "../native/com.ts";
@@ -24,24 +18,25 @@ import { copyFromNative, guid, OutU64, readCString } from "../native/memory.ts";
 
 const OK = 0;
 
-// -- Version macros (nvEncodeAPI.h) -----------------------------------------
-// NVENCAPI_VERSION      = 13 | (1 << 24)                      = 0x0100000D
-// STRUCT_VERSION(ver)   = NVENCAPI_VERSION | (ver<<16) | (7<<28)
-const NVENCAPI_VERSION = 13 | (1 << 24); // 0x0100000D
+// -- Version macros --------------------------------------------------------
+// Transcribed from nvEncodeAPI.h: NVENCAPI_VERSION = 13 | (1 << 24), and
+// NVENCAPI_STRUCT_VERSION(ver) = NVENCAPI_VERSION | (ver << 16) | (0x7 << 28).
+// `extra` carries the `| (1u << 31)` that some *_VER macros append.
+const NVENCAPI_VERSION = 13 | (1 << 24);
 const STRUCT_VERSION = (ver: number, extra = 0): number =>
   ((NVENCAPI_VERSION | (ver << 16) | (0x7 << 28)) >>> 0) | (extra >>> 0);
 const V = {
-  OPEN_SESSION_EX: STRUCT_VERSION(1), // 0x7101000D
-  FUNCTION_LIST: STRUCT_VERSION(2), // 0x7102000D
-  INITIALIZE_PARAMS: STRUCT_VERSION(7, 1 << 31), // 0xF107000D
-  CONFIG: STRUCT_VERSION(9, 1 << 31), // 0xF109000D
-  PRESET_CONFIG: STRUCT_VERSION(5, 1 << 31), // 0xF105000D
-  PIC_PARAMS: STRUCT_VERSION(7, 1 << 31), // 0xF107000D
-  LOCK_BITSTREAM: STRUCT_VERSION(2, 1 << 31), // 0xF102000D
-  REGISTER_RESOURCE: STRUCT_VERSION(5), // 0x7105000D
-  MAP_INPUT_RESOURCE: STRUCT_VERSION(4), // 0x7104000D
-  CREATE_BITSTREAM_BUFFER: STRUCT_VERSION(1), // 0x7101000D
-  CAPS_PARAM: STRUCT_VERSION(1), // 0x7101000D
+  OPEN_SESSION_EX: STRUCT_VERSION(1),
+  FUNCTION_LIST: STRUCT_VERSION(2),
+  INITIALIZE_PARAMS: STRUCT_VERSION(7, 1 << 31),
+  CONFIG: STRUCT_VERSION(9, 1 << 31),
+  PRESET_CONFIG: STRUCT_VERSION(5, 1 << 31),
+  PIC_PARAMS: STRUCT_VERSION(7, 1 << 31),
+  LOCK_BITSTREAM: STRUCT_VERSION(2, 1 << 31),
+  REGISTER_RESOURCE: STRUCT_VERSION(5),
+  MAP_INPUT_RESOURCE: STRUCT_VERSION(4),
+  CREATE_BITSTREAM_BUFFER: STRUCT_VERSION(1),
+  CAPS_PARAM: STRUCT_VERSION(1),
 } as const;
 
 // -- GUIDs (16-byte little-endian; guid() matches the SDK's raw layout) -------
@@ -76,7 +71,7 @@ const CAPS = {
   WIDTH_MAX: 16,
   HEIGHT_MAX: 17,
   NUM_ENCODER_ENGINES: 49,
-  SUPPORT_YUV444: 33, // NV_ENC_CAPS_SUPPORT_YUV444_ENCODE
+  SUPPORT_YUV444: 33,
 } as const;
 
 /** Function-pointer indices in NV_ENCODE_API_FUNCTION_LIST (declaration order). */
@@ -140,14 +135,17 @@ function statusName(st: number): string {
   return `${NVENC_STATUS[st] ?? "error"} (${st})`;
 }
 
-/** Driver's max supported NVENC API version, encoded (major*16 + minor)? SDK: (major<<4)|minor style via return. */
+/**
+ * Highest NVENC API version the installed driver supports, or null if the driver
+ * refuses the query. The DLL returns it packed as (major << 4) | minor, so 13.1
+ * comes back as 209.
+ */
 export function nvencMaxSupportedVersion(): { major: number; minor: number; raw: number } | null {
   try {
     const out = new Uint32Array(1);
     const st = lib.symbols.NvEncodeAPIGetMaxSupportedVersion(ptr(out)) as number;
     if (st !== OK) return null;
     const raw = out[0]!;
-    // SDK encodes as (major<<4) | minor  (e.g. 13.1 -> (13<<4)|1 = 209).
     return { major: raw >> 4, minor: raw & 0xf, raw };
   } catch {
     return null;
@@ -237,21 +235,19 @@ export interface NvencEncoderOptions {
   cq?: number;
   ordinal?: number;
   /**
-   * Zero-copy input pool: register these external CUDA device pointers (e.g.
-   * D3D12 shared buffers imported via cuda-interop) as ABGR inputs, each with
-   * `pitch` bytes per row. When set, encode() is not used — a producer writes a
-   * frame into pool slot `i` and calls encodeGpuResident(i). The encoder does not
-   * own/free these pointers. A pool of >1 lets the producer stay ahead of encode.
+   * Zero-copy input pool: external CUDA device pointers (e.g. D3D12 shared
+   * buffers imported via cuda-interop) registered as ABGR inputs, `pitch` bytes
+   * per row. The caller owns and frees them; the encoder only registers them.
+   * When set, callers use encodeGpuResident(i) instead of encode(); a pool
+   * larger than one lets the producer run ahead of the encoder.
    */
   inputs?: { devPtr: bigint; pitch: number }[];
 }
 
 /**
- * A live NVENC encoder producing an Annex-B elementary stream. Input is one
- * tightly-packed RGBA frame per call (uploaded to a CUDA buffer registered as an
- * ABGR input resource). B-frames and lookahead are disabled so encode is strictly
- * one-in-one-out in display order — each `encode()` returns exactly one frame's
- * bytes and no reordering is needed downstream.
+ * A live NVENC encoder producing an Annex-B elementary stream, one RGBA frame in
+ * and one frame's bytes out. B-frames and lookahead are disabled in open(), so
+ * output stays in display order and nothing downstream has to reorder.
  */
 export class NvencEncoder {
   private closed = false;
@@ -290,13 +286,13 @@ export class NvencEncoder {
     const cq = Math.max(0, Math.min(51, opts.cq ?? 20));
     const codecGuid = CODEC_GUID[codec];
     const presetGuid = PRESET_GUID[preset];
-    // Zero-copy: register the caller's external pointer pool + pitch; else own a packed buffer.
+    // An external pool dictates its own pitch; an owned buffer is tightly packed.
     const pitch = opts.inputs?.[0]?.pitch ?? width * 4;
     const ownsDevice = !opts.inputs;
 
     const ctx = cudaCreateContext(opts.ordinal ?? 0);
 
-    // 1. Open the encode session on the CUDA context.
+    // NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS, laid out as in probeNvenc().
     const open = new Uint8Array(1552);
     const odv = new DataView(open.buffer);
     odv.setUint32(0, V.OPEN_SESSION_EX, true);
@@ -311,7 +307,8 @@ export class NvencEncoder {
     const check = (st: unknown, what: string): void => ckenc(st, what, enc, lastError);
 
     try {
-      // 2. Fetch the preset config (fills a NV_ENC_CONFIG we can tweak + pass back).
+      // NV_ENC_PRESET_CONFIG (5128B): version@0, then the NV_ENC_CONFIG the
+      // driver fills at +8, which we tweak below and hand back to init.
       const presetConfig = new Uint8Array(5128);
       const pdv = new DataView(presetConfig.buffer);
       pdv.setUint32(0, V.PRESET_CONFIG, true);
@@ -319,46 +316,46 @@ export class NvencEncoder {
       const getPreset = fn(FN.getEncodePresetConfigEx, { args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.ptr], returns: FFIType.i32 });
       check(getPreset(enc, ptr(codecGuid), ptr(presetGuid), TUNING_HIGH_QUALITY, ptr(presetConfig)), "nvEncGetEncodePresetConfigEx");
 
-      // Force strictly one-in-one-out: no B-frames, no lookahead, zero reorder delay.
-      // Offsets are within the PRESET_CONFIG buffer (presetCfg starts at +8).
+      // Force strictly one-in-one-out, which the class contract depends on.
+      // Offsets are into the NV_ENC_CONFIG at presetConfig+8.
       pdv.setInt32(8 + 24, 1, true); // NV_ENC_CONFIG.frameIntervalP = 1 (IPP, no B)
-      const RC_BITFIELD = 8 + 40 + 36; // presetCfg + rcParams(+40) + bitfield word(+36)
+      const RC_BITFIELD = 8 + 40 + 36; // config + rcParams(+40) + its bitfield word(+36)
       let bits = pdv.getUint32(RC_BITFIELD, true);
       bits &= ~(1 << 5); // clear enableLookahead
       bits |= 1 << 9; // set zeroReorderDelay
       pdv.setUint32(RC_BITFIELD, bits, true);
-      // Constant-quality target: targetQuality is a u8 at rcParams+88
-      // (after version,rcMode,constQP,avg/max/vbv*,bitfield,min/max/initialQP,
-      // temporallayerIdxMask,temporalLayerQP[8]). Rate-control mode comes from
-      // the preset; targetQuality steers CQ within it.
-      pdv.setUint8(8 + 40 + 88, cq); // rcParams.targetQuality
+      // targetQuality is a u8 at rcParams+88 (after version, rcMode, constQP,
+      // avg/max/vbv*, bitfield, min/max/initialQP, temporallayerIdxMask,
+      // temporalLayerQP[8]). The preset picks the rate-control mode; this only
+      // steers the CQ target within it.
+      pdv.setUint8(8 + 40 + 88, cq);
 
-      // 3. Initialize the encoder.
+      // NV_ENC_INITIALIZE_PARAMS (1800B); offsets below name its fields.
       const init = new Uint8Array(1800);
       const idv = new DataView(init.buffer);
       idv.setUint32(0, V.INITIALIZE_PARAMS, true);
       init.set(codecGuid, 4); // encodeGUID
       init.set(presetGuid, 20); // presetGUID
-      idv.setUint32(36, width, true);
-      idv.setUint32(40, height, true);
+      idv.setUint32(36, width, true); // encodeWidth
+      idv.setUint32(40, height, true); // encodeHeight
       idv.setUint32(44, width, true); // darWidth
       idv.setUint32(48, height, true); // darHeight
-      idv.setUint32(52, opts.fpsNum, true);
-      idv.setUint32(56, opts.fpsDen, true);
-      idv.setUint32(60, 0, true); // enableEncodeAsync = 0 (sync)
-      idv.setUint32(64, 1, true); // enablePTD = 1
-      idv.setBigUint64(88, BigInt(ptr(presetConfig) + 8), true); // encodeConfig = &presetCfg
-      idv.setUint32(136, TUNING_HIGH_QUALITY, true);
+      idv.setUint32(52, opts.fpsNum, true); // frameRateNum
+      idv.setUint32(56, opts.fpsDen, true); // frameRateDen
+      idv.setUint32(60, 0, true); // enableEncodeAsync = 0: blocking encodePicture, no event handles
+      idv.setUint32(64, 1, true); // enablePTD = 1: driver decides picture type
+      idv.setBigUint64(88, BigInt(ptr(presetConfig) + 8), true); // encodeConfig -> the tweaked NV_ENC_CONFIG
+      idv.setUint32(136, TUNING_HIGH_QUALITY, true); // tuningInfo
       check(fn(FN.initializeEncoder, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(enc, ptr(init)), "nvEncInitializeEncoder");
 
-      // 4. Output bitstream buffer.
+      // NV_ENC_CREATE_BITSTREAM_BUFFER: the handle lands at +16.
       const cbb = new Uint8Array(776);
       new DataView(cbb.buffer).setUint32(0, V.CREATE_BITSTREAM_BUFFER, true);
       check(fn(FN.createBitstreamBuffer, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(enc, ptr(cbb)), "nvEncCreateBitstreamBuffer");
       const bitstream = new DataView(cbb.buffer).getBigUint64(16, true);
 
-      // 5. Input(s): own one packed CUDA buffer, or use the caller's external
-      // shared pointer pool. Register each as an ABGR input resource.
+      // Either one CUDA buffer this encoder owns, or the caller's shared pool;
+      // every pointer is registered as an ABGR input resource either way.
       const device = opts.inputs ? 0n : cudaMalloc(pitch * height);
       const devPtrs = opts.inputs ? opts.inputs.map((x) => x.devPtr) : [device];
       const registerFn = fn(FN.registerResource, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 });
@@ -374,7 +371,7 @@ export class NvencEncoder {
         rdv.setUint32(40, BUFFER_FORMAT_ABGR, true);
         rdv.setUint32(44, BUFFER_USAGE_INPUT_IMAGE, true);
         check(registerFn(enc, ptr(reg)), "nvEncRegisterResource");
-        return rdv.getBigUint64(32, true);
+        return rdv.getBigUint64(32, true); // registeredResource, written by the driver
       });
 
       return new NvencEncoder(enc, width, height, codec, device, pitch, ownsDevice, registeredList, bitstream, {
@@ -400,16 +397,14 @@ export class NvencEncoder {
     if (!this.ownsDevice) throw new Error("NvencEncoder: this encoder uses an external input pointer; call encodeGpuResident() instead of encode()");
     const expected = this.width * this.height * 4;
     if (rgba.byteLength !== expected) throw new Error(`NVENC encode: expected ${expected} RGBA bytes, got ${rgba.byteLength}`);
-    // Upload to the owned CUDA buffer (pitch = width*4, tightly packed), then encode.
     cudaMemcpyHtoD(this.device, rgba, expected);
     return this.encodeMapped(this.registeredList[0]!);
   }
 
   /**
-   * Encode the frame already resident in input pool slot `slot` — used by the
-   * zero-copy path, where a D3D12 producer has written RGBA straight into that
-   * shared CUDA buffer (ordering guaranteed by the caller, e.g. a completed
-   * submit or a fence wait). No CPU upload.
+   * Encode the frame already sitting in input pool slot `slot`, with no CPU
+   * upload. The caller must have made the producer's write visible first (a
+   * completed D3D12 submit or a fence wait); this does not synchronise.
    */
   encodeGpuResident(slot = 0): Uint8Array {
     if (this.closed) throw new Error("NvencEncoder.encodeGpuResident after close");
@@ -418,8 +413,8 @@ export class NvencEncoder {
     return this.encodeMapped(registered);
   }
 
-  /** Map the given registered input, encode one picture, and read back its Annex-B bytes. */
   private encodeMapped(registered: bigint): Uint8Array {
+    // NV_ENC_MAP_INPUT_RESOURCE: registeredResource in at +16, mappedResource out at +24.
     const map = new Uint8Array(1544);
     const mdv = new DataView(map.buffer);
     mdv.setUint32(0, V.MAP_INPUT_RESOURCE, true);
@@ -428,11 +423,12 @@ export class NvencEncoder {
     const mapped = mdv.getBigUint64(24, true);
 
     try {
+      // NV_ENC_PIC_PARAMS (3360B); offsets below name its fields.
       const pic = new Uint8Array(3360);
       const cdv = new DataView(pic.buffer);
       cdv.setUint32(0, V.PIC_PARAMS, true);
-      cdv.setUint32(4, this.width, true);
-      cdv.setUint32(8, this.height, true);
+      cdv.setUint32(4, this.width, true); // inputWidth
+      cdv.setUint32(8, this.height, true); // inputHeight
       cdv.setUint32(12, this.pitch, true); // inputPitch
       cdv.setUint32(20, this.frameIdx, true); // frameIdx
       cdv.setBigUint64(24, BigInt(this.frameIdx), true); // inputTimeStamp
@@ -450,7 +446,7 @@ export class NvencEncoder {
     }
   }
 
-  /** Lock the output bitstream, copy the encoded bytes out, and unlock. */
+  /** Copies out of the driver's mapping: the returned bytes outlive the unlock. */
   private lockAndRead(): Uint8Array {
     const lock = new Uint8Array(1544);
     const ldv = new DataView(lock.buffer);
@@ -464,7 +460,10 @@ export class NvencEncoder {
     return bytes;
   }
 
-  /** Flush the encoder (end of stream). No pending output with zero reorder delay. */
+  /**
+   * Signal end of stream. Always returns empty: with zeroReorderDelay set in
+   * open() the encoder never holds a frame back, so there is nothing to drain.
+   */
   finish(): Uint8Array {
     if (this.closed) return new Uint8Array(0);
     const pic = new Uint8Array(3360);

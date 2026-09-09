@@ -1,35 +1,22 @@
 /**
- * Video frame generation to an exact target frame rate.
+ * Video frame generation to an exact target frame rate: ffmpeg decode -> one or
+ * more DLSSG stages -> a nearest-timestamp writer -> encode, coordinated here.
  *
- * ffmpeg decodes the source to raw RGBA; every frame gets an exact rational
- * timestamp (index / source rate) and flows through one or more DLSSG stages.
- * A stage pairs a dlssg-worker session with its own optical-flow guide
- * estimator and returns the synthesised in-between frames (timestamped at
- * prev + interval * k/(n+1)) followed by the real frame:
+ * Two paths (chosen in framegen-plan.ts):
  *
- *   - Native DLSSG: one session generating m-1 frames per interval (m = target
- *     / source, an exact integer the runtime supports; multi-frame needs HAGS).
+ *   - Native DLSSG: one session generating m-1 frames per interval, m = target
+ *     / source an exact integer the runtime supports. m >= 3 needs HAGS.
  *   - Cascade: 2x stages chained IN MEMORY — stage k interpolates between the
- *     frames stage k-1 produced — reaching a 2^stages grid without any
- *     intermediate encode. Reaches 4x/8x on runtimes that only do 2x, and any
- *     non-integer ratio (30 -> 144) via the grid.
+ *     frames stage k-1 produced, so no intermediate encode — reaching a
+ *     2^stages grid. This is what reaches 4x/8x on runtimes that only do 2x,
+ *     and any non-integer ratio (30 -> 144).
  *
- * A NearestTimestampWriter then places exactly ceil(duration * target) frames
- * on the target clock, choosing the nearest available frame for each instant.
- * Because the output count comes from the source DURATION, the result is the
- * same length as the source whatever the worker synthesised (scene cuts, or
- * generation disabled by the runtime), so audio stays in sync and the video
- * can never play too fast. The muxed file is verified (frame count + rate)
- * before it is reported as done.
+ * The output frame count comes from the source DURATION, never from how many
+ * frames the worker returned, so the result matches the source length whatever
+ * was synthesised. The muxed file is verified (frame count + rate) before the
+ * job reports success.
  *
- * Throughput: the guide work (~12 ms of CPU per evaluation at 720p) runs on
- * one Worker thread per stage, the dlssg-worker processes of all stages evaluate
- * concurrently, and decode / encode overlap with both — a credit-bounded
- * coordinator (reference pipeline.py) keeps memory bounded and frames ordered.
- * A 240 fps cascade (7 evaluations per source frame) was 4.8 source fps when
- * everything ran in series on the main thread.
- *
- * Design ported from the reference project's frame_interpolation package.
+ * Ported from the reference project's frame_interpolation package.
  */
 import { existsSync, unlinkSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
@@ -127,9 +114,9 @@ export class FrameGenDisabledError extends Error {
 }
 
 /**
- * The worker produced no in-between frames. The writer would still emit a
- * correctly timed file, but it would be a plain duplicate-frame resample sold
- * as frame generation, so the job fails with the actual cause instead.
+ * The writer would still emit a correctly timed file with nothing synthesised,
+ * but it would be a duplicate-frame resample sold as frame generation, so the
+ * job fails with the actual cause instead.
  */
 function frameGenDisabledError(plan: InterpolationPlan, disabledFrames: number, hagsEnabled: boolean): FrameGenDisabledError {
   const wanted = `${formatRate(plan.sourceRate)} -> ${formatRate(plan.targetRate)} fps via ${plan.path}`;
@@ -143,18 +130,14 @@ function frameGenDisabledError(plan: InterpolationPlan, disabledFrames: number, 
   return new FrameGenDisabledError(`DLSS Frame Generation produced no interpolated frames (${wanted})${reported}.${hint} No output was written.`, plan);
 }
 
-/**
- * Once the runtime has refused a native multi-frame session in this process,
- * "auto" goes straight to the cascade for later jobs instead of paying the
- * fail-fast probe again.
- */
+/** Once the runtime has refused a native multi-frame session in this process, "auto" skips the fail-fast probe for later jobs. */
 let nativeMultiFrameRefused = false;
 
 /**
- * Frame generation with automatic recovery: an "auto" plan that chose native
- * multi-frame and got nothing back (the worker reports generation disabled,
- * seen on this dlssg-worker build even with HAGS on) is re-run as a cascade
- * of 2x stages, which only needs the 2x generation that always works.
+ * An "auto" plan that chose native multi-frame and got nothing back is re-run
+ * as a cascade of 2x stages, which only needs the 2x generation that always
+ * works. This dlssg-worker build reports generation disabled for 3x and above
+ * even with HAGS on, so the retry is the normal path, not an edge case.
  */
 export async function processFrameGen(options: FrameGenOptions): Promise<FrameGenResult> {
   const engine = options.engine ?? "auto";
@@ -199,7 +182,7 @@ interface PackReply {
   half: ArrayBuffer;
 }
 
-/** A frame the guide thread has analysed; its grid flow still needs packing unless the slow path already did it. */
+/** A frame the guide thread has analysed; its grid flow still needs packing unless the guide packed inline. */
 interface AnalyzedFrame {
   frame: TimedFrame;
   previousTimestamp: Rational | null;
@@ -473,12 +456,14 @@ interface RunParams {
 
 /**
  * Credit-bounded coordinator (reference pipeline.py, overlapped mode). Owners:
- * decode (this thread, async pipe), one guide Worker per stage, one native
- * evaluation per stage (its own dlssg-worker process, so stages overlap on the
- * GPU), and encode (this thread). One credit = one frame-sized buffer. Every
- * possible native output is reserved before an evaluation, and motion storage
- * before a guide, so no owner ever blocks on a queue put; the last stage is
- * served first so the pipeline drains.
+ * decode (this thread, async pipe), one guide Worker per stage (guide analysis
+ * costs ~12 ms of CPU per frame at 720p, far too much for this thread), one
+ * native evaluation per stage (its own dlssg-worker process, so stages overlap
+ * on the GPU), and encode (its own Worker).
+ *
+ * One credit = one frame-sized buffer. Every possible native output is reserved
+ * before an evaluation, and motion storage before a guide, so no owner ever
+ * blocks on a queue put; the last stage is served first so the pipeline drains.
  */
 async function runOverlapped(p: RunParams): Promise<{ decoded: number; peak: number; busy?: Record<string, number> }> {
   const { stages, writer, capacity } = p;
@@ -688,24 +673,19 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   const wantAudio = info.hasAudio;
   const audioArgs = wantAudio ? ["-map", "1:a:0", "-c:a", "aac", "-b:a", "192k"] : ["-an"];
   const outputRate = formatRational(targetRate);
-  // GPU encode by default; falls back to CPU libx264 if NVENC will not run.
   const resolvedCodec = resolveEncodeCodec(options.codec ?? "h264_nvenc", ffmpeg);
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
 
-  // Prefer in-process NVENC encode (mux-only ffmpeg, -c:v copy): frames are
-  // encoded on the GPU here, so ffmpeg only muxes the compressed stream instead
-  // of ingesting an 8 MB/frame rawvideo pipe. Falls back to the rawvideo pipe
-  // for CPU/AV1 codecs or when NVENC will not run.
+  // Prefer in-process NVENC (mux-only ffmpeg, -c:v copy): ffmpeg then muxes a
+  // compressed elementary stream instead of ingesting an 8 MB/frame rawvideo
+  // pipe. Null for CPU/AV1 codecs, and the worker falls back to the rawvideo
+  // args when NVENC will not open. NVENC emits Annex-B and the mp4 muxer
+  // converts it to length-prefixed, so `copy` needs no bitstream filter.
   const nativeTarget = nvencNativeTarget(resolvedCodec.codec, width, height);
-  // Encoding runs on its own thread: NvencEncoder.encode is a synchronous FFI
-  // call that would otherwise block the coordinator for milliseconds per output
-  // frame. The worker owns the ffmpeg child, tries NVENC itself (so no CUDA
-  // context is created here) and reports which path it took.
-  // NVENC emits Annex-B; the mp4 muxer converts it to length-prefixed. No
-  // -shortest: the writer emits exactly ceil(duration * rate) frames, so the
+  // No -shortest: the writer emits exactly ceil(duration * rate) frames, so the
   // video already spans the source duration and the audio track is kept whole.
-  // -video_track_timescale = rate numerator: one frame = `den` ticks, so the mp4
-  // timeline is exact and ffprobe's base-rate guess equals the target.
+  // -video_track_timescale = rate numerator makes one frame exactly `den` ticks,
+  // so the mp4 timeline is exact and ffprobe's base-rate guess equals the target.
   let sink: EncodeSink;
   try {
     sink = await EncodeSink.open({
@@ -745,8 +725,8 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     if (plan.path === "Native DLSSG") generatedCounts.push(plan.generatedPerInterval);
     else if (plan.path === "Cascade") for (let stage = 0; stage < plan.cascadeStages; stage++) generatedCounts.push(1);
     // Open every stage's worker process and guide thread concurrently: each
-    // brings up its own D3D12/NGX or CUDA/NVOFA context (~1 s), which added up
-    // to seconds of fixed cost per job when done one after another.
+    // brings up its own D3D12/NGX or CUDA/NVOFA context, ~1 s of fixed cost
+    // that would otherwise be paid stage by stage.
     const openStage = async (index: number, generatedCount: number): Promise<Stage> => {
       // Stage k sees (frames-1)*2^k + 1 frames: a size hint for the worker's history.
       const frameCount = plan.path === "Cascade" ? Math.max(1, (frames - 1) * (1 << index) + 1) : frames;
@@ -813,9 +793,9 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     if (expectsGeneration && stages[0]!.intervals >= 1 && noneGenerated()) throw frameGenDisabledError(plan, stages[0]?.session.disabledFrames ?? 0, caps.hagsEnabled);
     await sink.finish();
   } catch (error) {
-    // Tear down the decoder and the encode worker (which kills its own ffmpeg and
-    // releases the output file), then remove the partial output so a failed job
-    // never leaves a misleading file behind.
+    // abort() kills the worker's ffmpeg and waits for it to release the output
+    // file, so the partial file can be deleted here and a failed job never
+    // leaves a misleading one behind.
     try { decoder.kill(); } catch {}
     await sink.abort();
     await Promise.allSettled([decoder.exited, decodeErrDrained]);
@@ -830,11 +810,10 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   await decodeErrDrained;
   if (decodeExit !== 0) throw new Error(`ffmpeg decode failed (${decodeExit}): ${decodeErrText.trim()}`);
 
-  // Verify the muxed file really carries the planned timeline before calling it done.
   progress(0.98, "verifying output");
   const verified = probeOutputVideo(ffprobe, output);
-  // Exact packet count and exact base rate (reliable now that the track
-  // timescale is explicit). The average rate is frames / container duration,
+  // Packet count and base rate are exact (the track timescale is set above), so
+  // they are compared strictly. The average rate is frames / container duration,
   // whose final-frame rounding can be a few ticks off (59.94 lands at
   // 14520000/242237), so it only guards against a grossly wrong timeline.
   const averageOff = Math.abs(ratToNumber(verified.avgRate) / ratToNumber(targetRate) - 1);

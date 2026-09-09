@@ -2,12 +2,12 @@
  * DLSS Frame Generation (NGX feature 11 / DLSSG) driven through NVIDIA's small
  * native worker, `dlssg-worker.exe`, over its binary stdin/stdout protocol.
  *
- * Frame generation binds many D3D12 resources and expects a Streamline-style
- * init that is impractical to reproduce from bun:ffi, so — like the reference
- * project — we run it out of process. The worker owns the NGX device and the
- * DLSSG history; we stream it colour + motion and read back the synthesised
- * in-between frames. The worker image (and the `nvngx_dlssg.dll` beside it) is
- * third-party; run it only from a trusted, user-supplied runtime folder.
+ * Out of process because DLSSG binds many D3D12 resources and expects a
+ * Streamline-style init that bun:ffi cannot reproduce. The worker owns the NGX
+ * device and the DLSSG history; this side streams colour + motion in and reads
+ * the synthesised in-between frames back. The worker image and the
+ * `nvngx_dlssg.dll` beside it are third-party: run them only from a trusted,
+ * user-supplied runtime folder.
  */
 import { join } from "node:path";
 
@@ -33,8 +33,8 @@ export interface DlssgProbe {
 
 /**
  * True when HAGS is on: HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers
- * HwSchMode == 2 (the same check the reference project makes). An absent value
- * means the user never enabled it, which the runtime treats as off.
+ * HwSchMode == 2. An absent value means it was never enabled, which the runtime
+ * treats as off.
  */
 export function probeHags(): boolean {
   if (process.platform !== "win32") return false;
@@ -54,9 +54,9 @@ export function probeHags(): boolean {
 const probeCache = new Map<string, { at: number; probe: Promise<DlssgProbe> }>();
 
 /**
- * probeDlssg memoised per worker folder for `ttlMs` (default 60 s): the
- * `--probe` run costs about a second and capabilities do not change between
- * back-to-back jobs. A failed probe is not cached.
+ * probeDlssg memoised per worker folder for `ttlMs`: spawning `--probe` costs
+ * roughly a second and capabilities do not change between back-to-back jobs.
+ * A failed probe is not cached.
  */
 export function probeDlssgCached(workerDir: string, ttlMs = 60_000): Promise<DlssgProbe> {
   const now = Date.now();
@@ -162,7 +162,8 @@ export class DlssgSession {
       stderr: "pipe",
       windowsHide: true,
     });
-    // Drain stderr so the worker never blocks on a full pipe; keep the tail for errors.
+    // Drain stderr so the worker never blocks on a full pipe. The text is discarded:
+    // failures surface as a status code or a short read in ExactReader.
     void new Response(proc.stderr).text().catch(() => "");
 
     const reader = new ExactReader(proc.stdout as ReadableStream<Uint8Array>, opts.sharedFrames ?? false);

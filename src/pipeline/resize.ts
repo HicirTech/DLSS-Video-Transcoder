@@ -1,12 +1,15 @@
 /**
- * CPU bilinear resize for tightly packed RGBA8 frames. Used to bring a frame
- * to the engine's working size when no GPU upscaler is in the chain.
+ * CPU bilinear resize for tightly packed RGBA8 frames, plus the even-dimension
+ * rounding every target size goes through. Used by the still-image path to
+ * reach the engine's working size; video pre-scales in ffmpeg instead.
  */
 
+/** Nearest even value, at least 2: 4:2:0 chroma subsampling cannot encode an odd dimension. */
 export function evenSize(value: number): number {
   return Math.max(2, Math.round(value / 2) * 2);
 }
 
+/** Returns `src` itself when the size already matches — the result is not always a fresh buffer. */
 export function resizeRgba(src: Uint8Array, srcWidth: number, srcHeight: number, dstWidth: number, dstHeight: number): Uint8Array {
   if (srcWidth === dstWidth && srcHeight === dstHeight) return src;
   if (src.byteLength !== srcWidth * srcHeight * 4) {
@@ -18,7 +21,8 @@ export function resizeRgba(src: Uint8Array, srcWidth: number, srcHeight: number,
   const maxX = srcWidth - 1;
   const maxY = srcHeight - 1;
 
-  // Precompute horizontal sample positions and weights.
+  // Column taps and weights are identical for every row, so they are hoisted
+  // out of the row loop; the 0.5 offsets sample pixel centres, not corners.
   const x0 = new Int32Array(dstWidth);
   const x1 = new Int32Array(dstWidth);
   const wx = new Float32Array(dstWidth);

@@ -1,17 +1,14 @@
 /**
- * Encode-stage worker for frame generation.
+ * Encode-stage worker for frame generation: owns the NVENC encoder and the
+ * mux/encode ffmpeg child, encoding each finished output frame on the GPU (or
+ * passing the raw RGBA through for the CPU codecs) into ffmpeg's stdin.
  *
- * Owns the NVENC encoder and the mux/encode ffmpeg child: it receives finished
- * output frames in display order, encodes each on the GPU (or passes the raw
- * RGBA through for the CPU codecs) and writes the result to ffmpeg's stdin.
- *
- * This runs off the main thread because `NvencEncoder.encode` is a synchronous
- * FFI call — at 240 fps it was ~3.2 ms per output frame on the coordinator
- * thread (97 s of a 180 s run), blocking the loop that feeds the guide threads
- * and the DLSSG worker processes. NVENC opens its own CUDA context here, on the
- * thread that uses it. Frames arrive as SharedArrayBuffer-backed RGBA, so
- * posting them costs nothing; ordering is preserved because every request is
- * appended to a single promise chain.
+ * It is a worker because `NvencEncoder.encode` is a synchronous FFI call
+ * costing ~3.2 ms per output frame, which on the coordinator thread stalls the
+ * loop feeding the guide threads and the DLSSG worker processes. NVENC's CUDA
+ * context is therefore created here, on the thread that uses it. Frames arrive
+ * as SharedArrayBuffer-backed RGBA, so posting them costs nothing; display
+ * order holds because every request is appended to a single promise chain.
  */
 import { NvencEncoder, probeNvenc, type NvencCodec } from "../nvenc.ts";
 

@@ -1,20 +1,18 @@
 /**
- * Frame-generation planning: which path reaches a target output frame rate
- * (native multi-frame DLSSG, or a cascade of 2x stages), how many output frames
- * a clip yields, and the nearest-timestamp resampler that places generated and
- * real frames onto the exact target clock.
- *
- * Ported from the reference project's frame_interpolation/scheduler.py,
- * models.py (FPS table) and the NearestTimestampWriter in processor.py. Pure
+ * Frame-generation planning: which path reaches a target output frame rate,
+ * how many output frames a clip yields, and the nearest-timestamp resampler
+ * that places generated and real frames onto the exact target clock. Pure
  * rational math, no GPU, so every rule here is unit-testable.
  *
- * Why a nearest-timestamp writer instead of "multiply the frame rate": the
- * worker legitimately emits no in-between frames across scene cuts / resets,
- * and returns none at all when the runtime disables generation. Deciding the
- * output frame count from the source DURATION (not from how many frames came
- * back) and filling each output instant with the nearest available frame keeps
- * the output the same length as the source no matter what was synthesised, so
- * audio never drifts and the video can never play too fast.
+ * Why a nearest-timestamp writer rather than "multiply the frame rate": the
+ * worker legitimately emits no in-between frames across scene cuts and resets,
+ * and none at all when the runtime disables generation. Taking the output frame
+ * count from the source DURATION and filling each instant with the nearest
+ * available frame keeps the output the same length as the source whatever came
+ * back, so audio never drifts and the video can never play too fast.
+ *
+ * Ported from the reference project's frame_interpolation/scheduler.py,
+ * models.py (FPS table) and the NearestTimestampWriter in processor.py.
  */
 import { parseRational, type Rational, ratAbs, ratAdd, ratCeil, ratCmp, ratDiv, ratMul, ratSub, rational } from "./nut.ts";
 
@@ -126,12 +124,9 @@ export interface PlanOptions {
  * Decide how to reach targetRate from sourceRate (reference scheduler.py
  * choose_interpolation_plan, plus the HAGS gate for "auto").
  *
- * - target <= source: no synthesis, plain resampling.
- * - exact integer ratio within the runtime's native maximum (and HAGS on, or
- *   engine "native"): one native session generating m-1 frames per interval.
- * - otherwise: a cascade of 2x stages — 1 stage for 2x, 2 for 4x, else 3
- *   (grid 8) — and the nearest-timestamp writer maps the target clock onto the
- *   resulting 2^stages grid.
+ * The cascade is capped at 3 stages (8x grid) because each further stage
+ * doubles the evaluations per source frame while only halving the residual
+ * timing error, and interpolates from frames that were themselves interpolated.
  */
 export function chooseInterpolationPlan(
   sourceRate: Rational,

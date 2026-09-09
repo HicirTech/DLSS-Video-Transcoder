@@ -1,11 +1,10 @@
 /**
- * A frame engine takes an RGBA8 frame in and hands an RGBA8 frame back.
+ * The frame engine contract (RGBA8 in, RGBA8 out) plus the factory registry the
+ * NGX engines register themselves into.
  *
- * `BypassEngine` pushes every frame through GPU memory and back without
- * changing it. It exists so the whole pipeline (decode, upload, readback,
- * encode, muxing) can be verified on a machine where the neural runtime is not
- * available yet, and so a neural result can be A/B-compared against an
- * untouched pass.
+ * `BypassEngine` round-trips a frame through GPU memory unchanged, so decode,
+ * upload, readback, encode and muxing can be verified without a neural runtime
+ * and a neural result has an untouched pass to be compared against.
  */
 import {
   D3D12_RESOURCE_STATE_COPY_DEST,
@@ -69,7 +68,7 @@ export class BypassEngine implements Engine {
     try {
       this.target = session.device.createTexture2D({ width, height, format: DXGI_FORMAT_R8G8B8A8_UNORM, allowUnorderedAccess: true, label: "bypass target" });
     } catch (error) {
-      this.source.release(); // no instance exists yet, so close() will never run — release the first texture here
+      this.source.release(); // the constructor threw, so no instance exists and close() will never run
       throw error;
     }
   }
@@ -103,7 +102,7 @@ export function registerNeuralEngine(factory: EngineFactory): void {
   neuralFactory = factory;
 }
 
-/** The DLSS Super Resolution engine registers itself here (kept out of this module's imports). */
+/** The DLSS Super Resolution engine registers itself here, for the same reason. */
 export function registerSrEngine(factory: EngineFactory): void {
   srFactory = factory;
 }
