@@ -224,19 +224,27 @@ Verified against the source on 2026-09-09.
   threads as zero-copy transfers, with credit-based backpressure bounding memory.
   _Measured on an RTX 5090 at 1080p (steady-state, h264_nvenc):_
 
-  | workload | before (single thread) | after (threaded) |
-  | --- | --- | --- |
-  | neural rendering (feature 18) | 79 fps | **163 fps** |
-  | bypass transcode | 108 fps | **228 fps** |
+  | workload | single thread | threaded | + async zero-copy |
+  | --- | --- | --- | --- |
+  | neural rendering (feature 18) | 79 fps | 163 fps | **213 fps** |
+  | bypass transcode | 108 fps | **228 fps** | — |
 
-  A 3-hour 60 fps neural-rendering pass drops from ~2.3 h to ~1.1 h. The path is chosen automatically
-  for NVENC codecs (even dimensions, within the hardware size caps — H.264 ≤ 4096, HEVC ≤ 8192);
-  CPU/AV1 codecs use the original single-thread rawvideo path. Also done earlier: **GPU optical flow
-  via NVOFA** (~5.7× faster than the CPU block-matcher, auto CPU fallback), exact-rational frame-gen
-  timing, decode read-ahead. _Remaining tier (not done):_ true zero-copy GPU residency (NVDEC decode +
-  D3D12↔CUDA external-memory interop so DLSS output never touches the CPU) would push past the
-  ~5–6 ms main-thread ceiling toward the ~285 fps pure-encode rate, but needs hand-rolled shared-handle
-  interop with fence sync — high risk, and the threaded pipeline already delivered the 2× win.
+  **GPU-resident async zero-copy (NR).** For Neural Rendering the pipeline goes further: the DLSS output
+  never leaves the GPU. DLSS renders into a **D3D12 buffer shared with CUDA** (via `CreateSharedHandle`
+  + `cuImportExternalMemory`), and NVENC encodes straight from that pointer — no readback, no re-upload.
+  Ordering across the D3D12↔CUDA boundary uses a **shared fence imported as a CUDA external semaphore**,
+  and DLSS submits **asynchronously** (a command-list/allocator + buffer pool) so DLSS (compute) and
+  NVENC (independent encoder units) run **in parallel on the GPU** — measured near-perfect overlap on
+  the 5090. This lifts NR from 163 to **213 fps** at 1080p. (A synchronous version was actually *slower*
+  than the threaded path — the CPU sync point serialized the two engines — so full async was required.)
+
+  A 3-hour 60 fps neural-rendering pass drops from ~2.3 h (single thread) to ~0.85 h. Paths are chosen
+  automatically: NR + NVENC at even, in-cap dimensions takes the async zero-copy path; other engines /
+  CPU / AV1 codecs use the threaded or single-thread rawvideo path (H.264 ≤ 4096, HEVC ≤ 8192). Also
+  done: **GPU optical flow via NVOFA** (~5.7× faster than the CPU block-matcher), in-process NVENC for
+  frame generation, exact-rational frame-gen timing, decode read-ahead. _Remaining tier (not done):_
+  input-side zero-copy (in-process NVDEC decode → CUDA, removing the decode rawvideo pipe, now the next
+  ceiling) — a large hand-rolled cuvid effort.
 - **feature 18 in the pipeline — _done_.** The `nr` engine (image and video) now runs DLSS Neural
   Rendering and exposes the reference's controls (model preset, style, intensity, tone/structure).
   Model preset is an experimental, content-dependent hint; global tone is not applied; feature 18 does
