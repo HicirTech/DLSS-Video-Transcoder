@@ -6,7 +6,9 @@ driven in-process from **Bun + TypeScript** through `bun:ffi` over Direct3D 12 a
 with a **React + Material UI** web front end. DLSS runtimes are version-switchable
 (DLSS-Swapper style).
 
-![Neural Render — image job with DLSS engine and settings](docs/images/ui-image.png)
+![DLSS Neural Rendering: original vs. enhanced (100% crop)](docs/images/nr-compare.png)
+
+<sub>DLSS Neural Rendering (NGX feature 18) on a real photo — 100% crop, left original / right enhanced.</sub>
 
 > **Status (2026-09-09).** Runs on the project's RTX 5090. The **web UI** now covers the whole
 > pipeline — DLSS Super Resolution upscaling, Neural Rendering (feature 18), Frame Generation, DLSS
@@ -97,6 +99,11 @@ Resolution upscaling to the chosen output size), `nr` (DLSS Neural Rendering enh
 job queue with WebSocket progress; a before/after compare view; a hardware/runtime **probe** panel;
 and encode settings (codec incl. NVENC, quality, container, audio) for video. Optical-flow motion can
 be enabled for video.
+
+**Image tab** — choose an engine (SR upscale / Neural Rendering / bypass), a DLSS version, the output
+size and the look controls:
+
+![Neural Render — image job](docs/images/ui-image.png)
 
 **Video tab** — DLSS Frame Generation, engine/motion, NVENC encoding and the neural-rendering controls:
 
