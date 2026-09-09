@@ -10,6 +10,15 @@ with a **React + Material UI** web front end. DLSS runtimes are version-switchab
 
 <sub>DLSS Neural Rendering (NGX feature 18) on a real photo — 100% crop, left original / right enhanced.</sub>
 
+The look is tunable. This matrix sweeps **intensity** (rows — the 0–1 enhancement blend) against
+**local structure** (columns — fine-detail strength) on the same crop:
+
+![DLSS Neural Rendering parameter matrix — intensity vs. local structure](docs/images/nr-matrix.png)
+
+<sub>Rows top→bottom: intensity 0.0 / 0.5 / 1.0 (0.0 = original). Columns left→right: local-structure
+0.5 / 1.0 / 2.0. Model preset was tested and has no visible effect on the current driver, so it is
+omitted here.</sub>
+
 > **Status (2026-09-09).** Runs on the project's RTX 5090. The **web UI** now covers the whole
 > pipeline — DLSS Super Resolution upscaling, Neural Rendering (feature 18), Frame Generation, DLSS
 > version selection and browser upload — and the **command line** offers the same features for
