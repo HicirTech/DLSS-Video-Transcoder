@@ -65,7 +65,9 @@ async function run(message: RunMessage): Promise<void> {
       const result = await processFrameGen({
         input: request.input,
         output: request.output,
+        targetFps: request.frameGen.targetFps,
         multiplier: request.frameGen.multiplier,
+        engine: request.frameGen.engine,
         quality: request.encode?.quality,
         codec: request.encode?.codec,
         runtimeDir: message.runtimeDir,

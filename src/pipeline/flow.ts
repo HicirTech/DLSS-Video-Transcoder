@@ -378,8 +378,12 @@ export interface MotionResult {
 }
 
 export interface MotionEstimator {
-  /** Feed the next RGBA8 frame; returns its motion field and reset state. */
-  process(rgba: Uint8Array): MotionResult;
+  /**
+   * Feed the next RGBA8 frame; returns its motion field and reset state.
+   * `forceReset` marks a known discontinuity (timestamp gap, new segment) so
+   * the frame is treated as a scene cut regardless of its score.
+   */
+  process(rgba: Uint8Array, forceReset?: boolean): MotionResult;
   close(): void;
 }
 
@@ -430,7 +434,7 @@ class DisMotionEstimator implements MotionEstimator {
     this.offsets = buildSampleOffsets(width, height);
   }
 
-  process(rgba: Uint8Array): MotionResult {
+  process(rgba: Uint8Array, forceReset = false): MotionResult {
     if (rgba.length < this.width * this.height * 4) {
       throw new Error(`flow: frame is ${rgba.length} bytes, expected ${this.width * this.height * 4}`);
     }
@@ -446,7 +450,8 @@ class DisMotionEstimator implements MotionEstimator {
 
     const sceneScore = meanAbsLumaDiff(samples, this.prevSamples) / 255;
     const duplicate = sceneScore < DUPLICATE_SCENE_SCORE;
-    const sceneReset = sceneScore > RESET_SCENE_SCORE;
+    // A caller-known discontinuity resets exactly like a detected cut (guides.py: force_reset or score > 0.24).
+    const sceneReset = forceReset || sceneScore > RESET_SCENE_SCORE;
     if (duplicate || sceneReset) {
       this.prevGray = gray;
       this.prevSamples = samples;

@@ -18,10 +18,37 @@ const FRAME_OUT_MAGIC = 0x314f4746; // 'FGO1'
 
 export interface DlssgProbe {
   available: boolean;
+  /** In-between frames the runtime claims per interval (native multiplier max = this + 1). */
   multiFrameCountMax: number;
   runtimeVersion: string;
   workerVersion: string;
   detail: string;
+  /**
+   * Windows hardware-accelerated GPU scheduling. The DLSS-G runtime refuses
+   * multi-frame (>=3x) generation without it while still allowing 2x, so this
+   * decides whether "auto" may plan a native multi-frame session.
+   */
+  hagsEnabled: boolean;
+}
+
+/**
+ * True when HAGS is on: HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers
+ * HwSchMode == 2 (the same check the reference project makes). An absent value
+ * means the user never enabled it, which the runtime treats as off.
+ */
+export function probeHags(): boolean {
+  if (process.platform !== "win32") return false;
+  try {
+    const result = Bun.spawnSync(["reg", "query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers", "/v", "HwSchMode"], {
+      stdout: "pipe",
+      stderr: "pipe",
+      windowsHide: true,
+    });
+    const match = /HwSchMode\s+REG_DWORD\s+0x([0-9a-f]+)/i.exec(new TextDecoder().decode(result.stdout));
+    return match ? parseInt(match[1]!, 16) === 2 : false;
+  } catch {
+    return false;
+  }
 }
 
 /** Run `dlssg-worker.exe --probe` and report whether frame generation is available. */
@@ -47,6 +74,7 @@ export async function probeDlssg(workerDir: string): Promise<DlssgProbe> {
     runtimeVersion: String(json.runtime_version ?? ""),
     workerVersion: String(json.worker_version ?? ""),
     detail: String(json.detail ?? ""),
+    hagsEnabled: probeHags(),
   };
 }
 

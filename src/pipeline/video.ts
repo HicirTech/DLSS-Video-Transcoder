@@ -53,7 +53,10 @@ export interface VideoInfo {
   width: number;
   height: number;
   fps: number;
+  /** Measured average rate (avg_frame_rate) when available, else the nominal rate. */
   fpsText: string;
+  /** Nominal stream rate (r_frame_rate): the exact CFR clock frame generation plans on. */
+  nominalFpsText: string;
   frames: number | null;
   duration: number | null;
   codec: string;
@@ -96,6 +99,12 @@ export function probeVideo(ffprobe: string, input: string): VideoInfo {
     height: video.height,
     fps,
     fpsText: video.avg_frame_rate && video.avg_frame_rate !== "0/0" ? video.avg_frame_rate : (video.r_frame_rate ?? String(fps)),
+    nominalFpsText:
+      video.r_frame_rate && video.r_frame_rate !== "0/0"
+        ? video.r_frame_rate
+        : video.avg_frame_rate && video.avg_frame_rate !== "0/0"
+          ? video.avg_frame_rate
+          : String(fps),
     frames: declared ?? (duration ? Math.round(duration * fps) : null),
     duration,
     codec: video.codec_name ?? "unknown",

@@ -101,6 +101,32 @@ export function ratCeil(r: Rational): bigint {
   return (r.num + r.den - 1n) / r.den;
 }
 
+/** a + b, reduced. */
+export function ratAdd(a: Rational, b: Rational): Rational {
+  return rational(a.num * b.den + b.num * a.den, a.den * b.den);
+}
+
+/** a - b, reduced. */
+export function ratSub(a: Rational, b: Rational): Rational {
+  return rational(a.num * b.den - b.num * a.den, a.den * b.den);
+}
+
+/** |r| */
+export function ratAbs(r: Rational): Rational {
+  return r.num < 0n ? { num: -r.num, den: r.den } : r;
+}
+
+/** floor of a rational to a bigint (toward negative infinity). */
+export function ratFloor(r: Rational): bigint {
+  const q = r.num / r.den;
+  return r.num < 0n && r.num % r.den !== 0n ? q - 1n : q;
+}
+
+/** r as a JS number (lossy; for display and float-only consumers such as ffmpeg -r). */
+export function ratToNumber(r: Rational): number {
+  return Number(r.num) / Number(r.den);
+}
+
 /** Round a non-negative fraction num/den to the nearest bigint (ties round up). */
 function roundDiv(num: bigint, den: bigint): bigint {
   const q = num / den;
