@@ -211,15 +211,17 @@ Verified against the source on 2026-09-09.
 | Browser file upload | n/a | ✅ | POST /api/upload; stored under logs/uploads/ |
 | NR look controls | ✅ (`nr`) | ✅ | style / intensity(0–2) / tone / structure apply strongly; preset exposed (experimental); global tone not applied |
 | NVENC (GPU) video encode | ✅ if requested | ✅ if selected | frame-gen GPU-encodes by default |
+| GPU optical flow (NVOFA) | ✅ (video/fg motion) | ✅ | hardware flow engine, ~5.7× faster than CPU, auto CPU fallback |
 | RTX Video Super Resolution / TrueHDR | ❌ | ❌ | DLLs present but no code path uses them |
 
 ### Known limitations / roadmap
 
 - **Performance (GPU under-utilized).** _Done:_ NVENC GPU encoding with CPU fallback (video and
-  frame-gen), removed the per-frame pipe flushes, and exact-rational frame-gen timing. _Still to do:_
-  frames still make a synchronous CPU→GPU→CPU round trip each frame with no GPU residency or
-  pipelining, and optical flow is single-threaded TypeScript — planned: keep frames GPU-resident,
-  pipeline the GPU, and add a native optical-flow backend.
+  frame-gen), removed the per-frame pipe flushes, exact-rational frame-gen timing, and **GPU optical
+  flow via NVOFA** — the dedicated hardware flow engine, ~5.7× faster and more accurate than the CPU
+  block-matcher, with automatic CPU fallback. _Still to do:_ frames still make a synchronous
+  CPU→GPU→CPU round trip each frame with no GPU residency or pipelining — planned: keep frames
+  GPU-resident and pipeline the GPU.
 - **feature 18 in the pipeline — _done_.** The `nr` engine (image and video) now runs DLSS Neural
   Rendering and exposes the reference's controls (model preset, style, intensity, tone/structure).
   Model preset is an experimental, content-dependent hint; global tone is not applied; feature 18 does
