@@ -51,6 +51,23 @@ export function probeHags(): boolean {
   }
 }
 
+const probeCache = new Map<string, { at: number; probe: Promise<DlssgProbe> }>();
+
+/**
+ * probeDlssg memoised per worker folder for `ttlMs` (default 60 s): the
+ * `--probe` run costs about a second and capabilities do not change between
+ * back-to-back jobs. A failed probe is not cached.
+ */
+export function probeDlssgCached(workerDir: string, ttlMs = 60_000): Promise<DlssgProbe> {
+  const now = Date.now();
+  const hit = probeCache.get(workerDir);
+  if (hit && now - hit.at < ttlMs) return hit.probe;
+  const probe = probeDlssg(workerDir);
+  probe.catch(() => probeCache.delete(workerDir));
+  probeCache.set(workerDir, { at: now, probe });
+  return probe;
+}
+
 /** Run `dlssg-worker.exe --probe` and report whether frame generation is available. */
 export async function probeDlssg(workerDir: string): Promise<DlssgProbe> {
   const proc = Bun.spawn([join(workerDir, "dlssg-worker.exe"), "--probe"], {
@@ -84,7 +101,8 @@ class ExactReader {
   private available = 0;
   private readonly reader: ReadableStreamDefaultReader<Uint8Array>;
 
-  constructor(stream: ReadableStream<Uint8Array>) {
+  /** `shared` allocates records in SharedArrayBuffers so generated frames can go to Worker threads without a copy. */
+  constructor(stream: ReadableStream<Uint8Array>, private readonly shared = false) {
     this.reader = stream.getReader();
   }
 
@@ -97,7 +115,7 @@ class ExactReader {
         this.available += value.byteLength;
       }
     }
-    const out = new Uint8Array(size);
+    const out = this.shared ? new Uint8Array(new SharedArrayBuffer(size)) : new Uint8Array(size);
     let filled = 0;
     while (filled < size) {
       const chunk = this.pending[0]!;
@@ -119,6 +137,8 @@ export interface DlssgOptions {
   frameCount: number;
   /** Frames to synthesise per interval = native multiplier - 1 (1 = 2x). */
   generatedCount: number;
+  /** Return generated frames in SharedArrayBuffers (for hand-off to Worker threads without copying). */
+  sharedFrames?: boolean;
 }
 
 export class DlssgSession {
@@ -145,7 +165,7 @@ export class DlssgSession {
     // Drain stderr so the worker never blocks on a full pipe; keep the tail for errors.
     void new Response(proc.stderr).text().catch(() => "");
 
-    const reader = new ExactReader(proc.stdout as ReadableStream<Uint8Array>);
+    const reader = new ExactReader(proc.stdout as ReadableStream<Uint8Array>, opts.sharedFrames ?? false);
     const setup = new DataView(new ArrayBuffer(20));
     setup.setUint32(0, SETUP_MAGIC, true);
     setup.setUint32(4, opts.width, true);

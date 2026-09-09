@@ -240,11 +240,21 @@ export class NearestTimestampWriter {
   private previous: TimedFrame | null = null;
   private tieLate = false;
 
+  /**
+   * Frames to emit. Planned from the container's frame count up front; the
+   * caller may lower it at end of stream to what was actually decoded (a
+   * container that declares more frames than it decodes would otherwise end
+   * in a short freeze). Never raise it after pushes began.
+   */
+  outputCount: number;
+
   constructor(
     private readonly sink: (rgba: Uint8Array) => Promise<void> | void,
     readonly targetRate: Rational,
-    readonly outputCount: number,
-  ) {}
+    outputCount: number,
+  ) {
+    this.outputCount = outputCount;
+  }
 
   private ideal(index: number): Rational {
     return ratDiv(rational(index), this.targetRate);

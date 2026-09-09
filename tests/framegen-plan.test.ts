@@ -230,3 +230,19 @@ describe("NearestTimestampWriter", () => {
     await expect(writer.finish()).rejects.toThrow(/no decodable frames/);
   });
 });
+
+describe("NearestTimestampWriter.outputCount trimmed at end of stream", () => {
+  test("lowering outputCount before finish() ends the output at the decoded duration", async () => {
+    const out: number[] = [];
+    // Planned for 3 source frames at 1 fps (target 2 fps -> 6 frames) but only 2 decode: trim to ceil(2 * 2) = 4.
+    const writer = new NearestTimestampWriter((rgba) => { out.push(rgba[0]!); }, rational(2), outputFrameCount(rational(3), rational(2)));
+    expect(writer.outputCount).toBe(6);
+    const frame = (id: number, ts: Rational): TimedFrame => ({ rgba: new Uint8Array([id]), timestamp: ts, segment: 0, provenance: "Source", sourceIndex: id });
+    await writer.push(frame(0, rational(0)));
+    await writer.push(frame(1, rational(1)));
+    writer.outputCount = Math.max(outputFrameCount(rational(2), rational(2)), writer.nextIndex);
+    await writer.finish();
+    expect(writer.outputCount).toBe(4);
+    expect(out).toEqual([0, 0, 1, 1]);
+  });
+});
