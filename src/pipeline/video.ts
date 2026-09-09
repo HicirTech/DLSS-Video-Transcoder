@@ -9,7 +9,9 @@ import { DEFAULT_ENCODE_SETTINGS } from "../server/api-types.ts";
 import { createEngine } from "./engine.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
 import { createMotionEstimator } from "./flow.ts";
-import { NvencEncoder, type NvencCodec } from "./nvenc.ts";
+import { FrameReader } from "./frame-reader.ts";
+import { probeNvenc, type NvencCodec } from "./nvenc.ts";
+import { runThreadedEncode } from "./threaded-encode.ts";
 import { tryCreateNvofBackend } from "./nvof.ts";
 import { openGpu } from "./gpu.ts";
 import { resolveTargetSize } from "./image.ts";
@@ -142,41 +144,6 @@ function rateParts(text: string): { num: number; den: number } {
   return { num: Math.round(num), den: Math.round(den) };
 }
 
-/** Reads exact-size frames from a ReadableStream of arbitrary chunks. */
-class FrameReader {
-  private pending: Uint8Array[] = [];
-  private pendingBytes = 0;
-  private readonly reader: ReadableStreamDefaultReader<Uint8Array>;
-
-  constructor(stream: ReadableStream<Uint8Array>) {
-    this.reader = stream.getReader();
-  }
-
-  async next(frameBytes: number): Promise<Uint8Array | null> {
-    while (this.pendingBytes < frameBytes) {
-      const { value, done } = await this.reader.read();
-      if (done) break;
-      if (value && value.byteLength) {
-        this.pending.push(value);
-        this.pendingBytes += value.byteLength;
-      }
-    }
-    if (this.pendingBytes < frameBytes) return null;
-    const frame = new Uint8Array(frameBytes);
-    let filled = 0;
-    while (filled < frameBytes) {
-      const chunk = this.pending[0]!;
-      const take = Math.min(chunk.byteLength, frameBytes - filled);
-      frame.set(chunk.subarray(0, take), filled);
-      filled += take;
-      if (take === chunk.byteLength) this.pending.shift();
-      else this.pending[0] = chunk.subarray(take);
-    }
-    this.pendingBytes -= frameBytes;
-    return frame;
-  }
-}
-
 /** Cheap scene-cut detector: mean absolute luma difference on a sparse grid. */
 class SceneCutDetector {
   private previous: Float32Array | null = null;
@@ -251,10 +218,12 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const outWidth = engine.outputWidth;
   const outHeight = engine.outputHeight;
 
-  const decodeArgs = [ffmpeg, "-v", "error", "-nostdin", "-i", options.input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba"];
-  if (renderWidth !== info.width || renderHeight !== info.height) decodeArgs.push("-vf", `scale=${renderWidth}:${renderHeight}:flags=lanczos`);
-  decodeArgs.push("pipe:1");
-  const decoder = Bun.spawn(decodeArgs, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  // ffmpeg decode argv (after the binary): emit rawvideo rgba at the render size.
+  const decodeArgv = [
+    "-v", "error", "-nostdin", "-i", options.input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba",
+    ...(renderWidth !== info.width || renderHeight !== info.height ? ["-vf", `scale=${renderWidth}:${renderHeight}:flags=lanczos`] : []),
+    "pipe:1",
+  ];
 
   // Only open the source as a second input when we actually copy its audio —
   // otherwise ffmpeg would needlessly demux/decode the whole source again,
@@ -262,56 +231,10 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const wantAudio = info.hasAudio && encode.copyAudio;
   // Video is always input 0 (the pipe); audio, when copied, is input 1 (source).
   const audioArgs = wantAudio ? ["-map", "1:a:0", ...(encode.container === "mkv" ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"])] : ["-an"];
+  const faststart = encode.container === "mp4" || encode.container === "mov" ? ["-movflags", "+faststart"] : [];
 
-  // Prefer encoding on the GPU here (nvenc.ts) and handing ffmpeg only the
-  // compressed elementary stream to mux (-c:v copy). This removes the
-  // uncompressed rawvideo pipe (8 MB/frame at 1080p) and ffmpeg's rgba->yuv
-  // swscale, which are the throughput ceiling. Falls back to the rawvideo pipe
-  // (ffmpeg does the encode) if NVENC cannot be brought up here.
-  const nativeTarget = nvencNativeTarget(encode.codec, outWidth, outHeight);
-  let nvenc: NvencEncoder | null = null;
-  if (nativeTarget) {
-    const { num, den } = rateParts(info.fpsText);
-    try {
-      nvenc = NvencEncoder.open({ width: outWidth, height: outHeight, fpsNum: num, fpsDen: den, codec: nativeTarget.codec, preset: "p5", cq: encode.quality, ordinal: options.adapterIndex ?? 0 });
-      progress(0, `encode: NVENC ${nativeTarget.codec} (GPU, mux-only pipe)`);
-    } catch (error) {
-      nvenc = null;
-      progress(0, `encode: NVENC direct path unavailable (${(error as Error).message}); using rawvideo pipe`);
-    }
-  }
-
-  const encodeArgs = nvenc
-    ? [
-        ffmpeg, "-v", "error", "-y",
-        // Compressed Annex-B elementary stream from NVENC on stdin; give it the
-        // frame rate so the muxer stamps correct timestamps, then just copy it.
-        "-f", nativeTarget!.demux, "-framerate", info.fpsText, "-i", "pipe:0",
-        ...(wantAudio ? ["-i", options.input] : []),
-        // NVENC emits Annex-B; the mp4/mov muxer converts it to length-prefixed
-        // internally, so -c:v copy needs no bitstream filter.
-        "-map", "0:v:0", "-c:v", "copy",
-        ...audioArgs,
-        ...(encode.container === "mp4" || encode.container === "mov" ? ["-movflags", "+faststart"] : []),
-        ...(wantAudio ? ["-shortest"] : []),
-        output,
-      ]
-    : [
-        ffmpeg, "-v", "error", "-y",
-        "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${outWidth}x${outHeight}`, "-r", info.fpsText, "-i", "pipe:0",
-        ...(wantAudio ? ["-i", options.input] : []),
-        "-map", "0:v:0",
-        ...audioArgs,
-        ...encoderArgs(encode),
-        ...(encode.container === "mp4" || encode.container === "mov" ? ["-movflags", "+faststart"] : []),
-        ...(wantAudio ? ["-shortest"] : []),
-        output,
-      ];
-  const encoder = Bun.spawn(encodeArgs, { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
-
-  // Decoded frames arrive at the render size (source for SR, target otherwise).
-  const frameBytes = renderWidth * renderHeight * 4;
-  const reader = new FrameReader(decoder.stdout);
+  // Scene-cut / motion guide, run on this thread (it feeds the DLSS engine's
+  // input). Called exactly once per frame, in order.
   const cuts = new SceneCutDetector(renderWidth, renderHeight);
   let estimator: ReturnType<typeof createMotionEstimator> | null = null;
   if (options.motion === "flow") {
@@ -320,56 +243,97 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
     estimator = createMotionEstimator(renderWidth, renderHeight, nvof ? { backend: nvof } : {});
     progress(0, nvof ? "optical flow: NVIDIA hardware (NVOFA)" : "optical flow: CPU block matching (NVOFA unavailable)");
   }
+  const guide = (rgba: Uint8Array, index: number): { reset: boolean; motion: Float32Array | null; sceneCut: boolean } => {
+    if (estimator) {
+      const g = estimator.process(rgba);
+      return { reset: index === 0 || g.reset, motion: g.motion, sceneCut: g.reset && index > 0 };
+    }
+    const cut = index > 0 && cuts.isCut(rgba);
+    if (index === 0) cuts.isCut(rgba); // prime history on the first frame
+    return { reset: index === 0 || cut, motion: null, sceneCut: cut };
+  };
+
+  // Decoded frames arrive at the render size (source for SR, target otherwise).
+  const frameBytes = renderWidth * renderHeight * 4;
+  // Prefer the threaded GPU pipeline: decode, DLSS and NVENC each on their own
+  // thread, encoding on the GPU here (nvenc.ts) and handing ffmpeg only the
+  // compressed elementary stream to mux (-c:v copy). This removes the
+  // uncompressed rawvideo output pipe + ffmpeg swscale AND overlaps the stages
+  // (each is ~4-5 ms at 1080p, serial ran at their sum). Falls back to the
+  // single-thread rawvideo path for CPU/AV1 codecs, oversized frames, or when
+  // NVENC cannot be brought up here.
+  const nativeTarget = nvencNativeTarget(encode.codec, outWidth, outHeight);
+  const useThreaded = nativeTarget !== null && probeNvenc(options.adapterIndex ?? 0).available;
+
   let frames = 0;
   let sceneCuts = 0;
   try {
-    // Decoding is 8 MB/frame of rawvideo over a pipe while the GPU work is ~1 ms;
-    // the loop is I/O-bound, so prefetch the next frame's decode so it overlaps
-    // with the current frame's GPU pass + encoder write (which use other pipes).
-    let pending = reader.next(frameBytes);
-    for (;;) {
-      const rgba = await pending;
-      if (!rgba) break;
-      pending = reader.next(frameBytes); // start the next decode-read immediately
-      let reset: boolean;
-      let motion: Float32Array | null = null;
-      if (estimator) {
-        const guide = estimator.process(rgba);
-        reset = frames === 0 || guide.reset;
-        motion = guide.motion;
-        if (guide.reset && frames > 0) sceneCuts++;
-      } else {
-        const cut = frames > 0 && cuts.isCut(rgba);
-        if (cut) sceneCuts++;
-        else if (frames === 0) cuts.isCut(rgba);
-        reset = frames === 0 || cut;
+    if (useThreaded && nativeTarget) {
+      const { num, den } = rateParts(info.fpsText);
+      const sinkArgs = [
+        "-v", "error", "-y",
+        // Compressed Annex-B elementary stream from NVENC on stdin; give it the
+        // frame rate so the muxer stamps correct timestamps, then just copy it.
+        // (The mp4/mov muxer converts Annex-B to length-prefixed internally.)
+        "-f", nativeTarget.demux, "-framerate", info.fpsText, "-i", "pipe:0",
+        ...(wantAudio ? ["-i", options.input] : []),
+        "-map", "0:v:0", "-c:v", "copy",
+        ...audioArgs, ...faststart,
+        // No -shortest here: with -c:v copy from a raw elementary stream it drops
+        // the audio track. The transcode emits one frame per source frame, so
+        // audio and video already share the source duration.
+        output,
+      ];
+      progress(0, `encode: NVENC ${nativeTarget.codec} (threaded GPU pipeline, mux-only)`);
+      const result = await runThreadedEncode({
+        engine, ffmpeg, decodeArgs: decodeArgv, frameBytes, sinkArgs,
+        enc: { width: outWidth, height: outHeight, fpsNum: num, fpsDen: den, codec: nativeTarget.codec, preset: "p5", cq: encode.quality, ordinal: options.adapterIndex ?? 0 },
+        totalFrames: info.frames, guide, onProgress: progress,
+      });
+      frames = result.frames;
+      sceneCuts = result.sceneCuts;
+    } else {
+      // Single-thread rawvideo path: ffmpeg does the encode.
+      const decoder = Bun.spawn([ffmpeg, ...decodeArgv], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+      const encoder = Bun.spawn(
+        [
+          ffmpeg, "-v", "error", "-y",
+          "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${outWidth}x${outHeight}`, "-r", info.fpsText, "-i", "pipe:0",
+          ...(wantAudio ? ["-i", options.input] : []),
+          "-map", "0:v:0", ...audioArgs, ...encoderArgs(encode), ...faststart,
+          ...(wantAudio ? ["-shortest"] : []),
+          output,
+        ],
+        { stdin: "pipe", stdout: "ignore", stderr: "pipe" },
+      );
+      const reader = new FrameReader(decoder.stdout);
+      // Prefetch the next frame's decode so it overlaps the current GPU pass.
+      let pending = reader.next(frameBytes);
+      for (;;) {
+        const rgba = await pending;
+        if (!rgba) break;
+        pending = reader.next(frameBytes);
+        const g = guide(rgba, frames);
+        if (g.sceneCut) sceneCuts++;
+        const result = engine.process({ rgba, reset: g.reset, motion: g.motion });
+        const wrote = encoder.stdin.write(result);
+        if (wrote instanceof Promise) await wrote;
+        frames++;
+        const total = info.frames;
+        progress(total ? Math.min(0.98, frames / total) : 0.5, `frame ${frames}/${total ?? "?"}`, frames);
       }
-      const result = engine.process({ rgba, reset, motion });
-      // NVENC path: encode on the GPU here and pipe only the compressed bytes.
-      // Rawvideo path: pipe the uncompressed RGBA frame to ffmpeg.
-      // Write with backpressure only: await when the sink buffer is full, but do
-      // not flush every frame (that drained the pipe and stalled the loop). The
-      // final stdin.end() flushes whatever remains.
-      const payload = nvenc ? nvenc.encode(result) : result;
-      const wrote = encoder.stdin.write(payload);
-      if (wrote instanceof Promise) await wrote;
-      frames++;
-      const total = info.frames;
-      progress(total ? Math.min(0.98, frames / total) : 0.5, `frame ${frames}/${total ?? "?"}`, frames);
+      encoder.stdin.end();
+      const [decodeExit, encodeExit] = await Promise.all([decoder.exited, encoder.exited]);
+      const decodeErr = (await new Response(decoder.stderr).text()).trim();
+      const encodeErr = (await new Response(encoder.stderr).text()).trim();
+      if (decodeExit !== 0) throw new Error(`ffmpeg decode failed (${decodeExit}): ${decodeErr}`);
+      if (encodeExit !== 0) throw new Error(`ffmpeg encode failed (${encodeExit}): ${encodeErr}`);
     }
-    if (nvenc) nvenc.finish();
-    encoder.stdin.end();
   } finally {
-    nvenc?.close();
     estimator?.close();
     engine.close();
     session.close();
   }
-  const [decodeExit, encodeExit] = await Promise.all([decoder.exited, encoder.exited]);
-  const decodeErr = (await new Response(decoder.stderr).text()).trim();
-  const encodeErr = (await new Response(encoder.stderr).text()).trim();
-  if (decodeExit !== 0) throw new Error(`ffmpeg decode failed (${decodeExit}): ${decodeErr}`);
-  if (encodeExit !== 0) throw new Error(`ffmpeg encode failed (${encodeExit}): ${encodeErr}`);
   if (frames === 0) throw new Error("No frames were decoded from the input. The file may be empty, corrupt, or not a video ffmpeg can read.");
   progress(1, `encoded ${frames} frames to ${output}${sceneCuts ? ` (${sceneCuts} scene cuts reset history)` : ""}`);
   return { output, width: outWidth, height: outHeight, fps: info.fps, frames, sceneCuts, engine: options.engine, ms: Math.round(performance.now() - started) };
