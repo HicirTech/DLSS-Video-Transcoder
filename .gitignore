@@ -5,3 +5,10 @@ logs/
 runtime/*
 !runtime/README.md
 *.log
+
+# Local AI-assistant working files: instructions and scratch, never pushed
+CLAUDE.md
+AGENTS.md
+.claude/
+# Reference material for AI work lives outside this repository
+ai-context/
