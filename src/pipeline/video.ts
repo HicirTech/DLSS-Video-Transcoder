@@ -128,7 +128,7 @@ export function encoderArgs(encode: EncodeSettings): string[] {
  * path. NVENC needs even dimensions and stays within the hardware size caps
  * (H.264 up to 4096, HEVC up to 8192 on current GPUs).
  */
-function nvencNativeTarget(codec: EncodeSettings["codec"], width: number, height: number): { codec: NvencCodec; demux: string } | null {
+export function nvencNativeTarget(codec: EncodeSettings["codec"], width: number, height: number): { codec: NvencCodec; demux: string } | null {
   if (width % 2 !== 0 || height % 2 !== 0) return null;
   if (codec === "h264_nvenc") return width <= 4096 && height <= 4096 ? { codec: "h264", demux: "h264" } : null;
   if (codec === "hevc_nvenc") return width <= 8192 && height <= 8192 ? { codec: "hevc", demux: "hevc" } : null;
