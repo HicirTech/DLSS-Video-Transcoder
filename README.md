@@ -93,9 +93,16 @@ Key per-command options (defaults in parentheses):
 - **`nr`** — `--intensity F` (1; overall strength 0–2, 1 = default, the effect tends to plateau past ~1),
   `--local-tone F` (1; 0–2, 1 = neutral), `--local-structure F` (1; 0–2, 1 = neutral). (`--preset`
   exists but has no visible effect on the current driver.)
-- **`fg`** — `--multiplier N` (2; reliable at 2×, up to the GPU/runtime maximum, e.g. 3×/4× on
-  RTX 50), `--codec NAME` (default: GPU NVENC when available, else libx264), `--quality N` (encoder
-  quality, CRF for CPU / CQ for NVENC, 0–51, lower = better, 20).
+- **`fg`** — `--fps RATE` (output frame rate: 23.976, 25, 29.97, 30, 50, 59.94, 60, 90, 119.88, 120,
+  144, 165, 180, 240, 360, 480, or an exact `num/den`; default: source fps × `--multiplier`),
+  `--multiplier N` (2; used when `--fps` is absent), `--engine MODE` (auto; `auto` = one native
+  multi-frame DLSSG session when output ÷ source is an exact integer the runtime supports **and HAGS is
+  on**, otherwise a cascade of 2× stages chained in memory — 1 stage for 2×, 2 for 4×, else 3 on an 8×
+  grid — placing the nearest frame on each instant of the exact target clock; `native` / `cascade` force
+  a path; 2× works without HAGS, 3× and above natively need HAGS and an RTX 50), `--codec NAME`
+  (default: GPU NVENC when available, else libx264), `--quality N` (encoder quality, CRF for CPU / CQ for
+  NVENC, 0–51, lower = better, 20). The output always keeps the source duration (frame count =
+  ⌈duration × rate⌉) and the original audio, and is verified after muxing.
 
 ## Web UI
 
