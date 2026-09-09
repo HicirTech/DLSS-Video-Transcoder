@@ -35,6 +35,14 @@ export const D3D12_HEAP_TYPE_DEFAULT = 1;
 export const D3D12_HEAP_TYPE_UPLOAD = 2;
 export const D3D12_HEAP_TYPE_READBACK = 3;
 
+// Sharing flags for CUDA (or cross-process) interop.
+export const D3D12_HEAP_FLAG_NONE = 0;
+export const D3D12_HEAP_FLAG_SHARED = 0x1;
+export const D3D12_FENCE_FLAG_NONE = 0;
+export const D3D12_FENCE_FLAG_SHARED = 0x1; // 0x2 is SHARED_CROSS_ADAPTER — not what we want
+// Access mask for ID3D12Device::CreateSharedHandle (currently unused by the API; GENERIC_ALL recommended).
+export const GENERIC_ALL = 0x10000000;
+
 export const D3D12_RESOURCE_DIMENSION_BUFFER = 1;
 export const D3D12_RESOURCE_DIMENSION_TEXTURE2D = 3;
 export const D3D12_TEXTURE_LAYOUT_UNKNOWN = 0;
@@ -343,17 +351,43 @@ export class D3D12Device extends ComObject {
     return new D3D12GraphicsCommandList(out.value, "ID3D12GraphicsCommandList");
   }
 
-  createFence(initialValue = 0n): D3D12Fence {
+  createFence(initialValue = 0n, flags = 0): D3D12Fence {
     const out = new OutPointer();
-    this.callHr(36, { args: [FFIType.u64, FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }, "CreateFence", initialValue, 0, IID_ID3D12Fence, out.ptr);
+    this.callHr(36, { args: [FFIType.u64, FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }, "CreateFence", initialValue, flags, IID_ID3D12Fence, out.ptr);
     return new D3D12Fence(out.value, "ID3D12Fence");
+  }
+
+  /** A fence created with D3D12_FENCE_FLAG_SHARED so a Win32 NT handle can be minted for CUDA external-semaphore interop. */
+  createSharedFence(initialValue = 0n): D3D12Fence {
+    return this.createFence(initialValue, D3D12_FENCE_FLAG_SHARED);
+  }
+
+  /**
+   * Mint a Win32 NT HANDLE for a shared resource or fence
+   * (ID3D12Device::CreateSharedHandle, vtable slot 31). The object must have been
+   * created with the matching SHARED flag. The caller owns the handle and must
+   * CloseHandle it after CUDA has imported (and duplicated) it.
+   */
+  createSharedHandle(object: ComObject): number {
+    const out = new OutPointer();
+    this.callHr(
+      31,
+      { args: [FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
+      "CreateSharedHandle",
+      object.ptr,
+      null,
+      GENERIC_ALL,
+      null,
+      out.ptr,
+    );
+    return out.value;
   }
 
   deviceRemovedReason(): number {
     return this.call(37, { args: [], returns: FFIType.i32 }) as number;
   }
 
-  private createCommitted(heapType: number, desc: NativeStruct, initialState: number, label: string): number {
+  private createCommitted(heapType: number, desc: NativeStruct, initialState: number, label: string, heapFlags = 0): number {
     const heap = heapProperties(heapType);
     const out = new OutPointer();
     this.callHr(
@@ -361,7 +395,7 @@ export class D3D12Device extends ComObject {
       { args: [FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
       `CreateCommittedResource(${label})`,
       heap.ptr,
-      0,
+      heapFlags,
       desc.ptr,
       initialState,
       null,
@@ -369,6 +403,16 @@ export class D3D12Device extends ComObject {
       out.ptr,
     );
     return out.value;
+  }
+
+  /**
+   * A DEFAULT-heap committed buffer created with HEAP_FLAG_SHARED, so a Win32 NT
+   * handle can be minted (createSharedHandle) and imported into CUDA as external
+   * memory for zero-copy D3D12<->CUDA interop. Initial state COMMON.
+   */
+  createSharedBuffer(sizeInBytes: number, label = `shared buffer ${sizeInBytes}B`): D3D12Resource {
+    const ptr = this.createCommitted(D3D12_HEAP_TYPE_DEFAULT, bufferDescription(sizeInBytes), D3D12_RESOURCE_STATE_COMMON, label, D3D12_HEAP_FLAG_SHARED);
+    return new D3D12Resource(ptr, label, "buffer", sizeInBytes, 1, DXGI_FORMAT_UNKNOWN, sizeInBytes, D3D12_RESOURCE_STATE_COMMON);
   }
 
   createTexture2D(options: TextureOptions): D3D12Resource {

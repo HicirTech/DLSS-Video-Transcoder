@@ -236,6 +236,14 @@ export interface NvencEncoderOptions {
   /** Constant-quality target (H.264/HEVC 0..51, lower = better). Default 20. */
   cq?: number;
   ordinal?: number;
+  /**
+   * Zero-copy input: register this external CUDA device pointer (e.g. a D3D12
+   * shared buffer imported via cuda-interop) as the ABGR input, with `pitch`
+   * bytes per row. When set, encode() is not used — call encodeGpuResident()
+   * after the producer has written the frame into this buffer. The encoder does
+   * not own/free the pointer.
+   */
+  input?: { devPtr: bigint; pitch: number };
 }
 
 /**
@@ -254,7 +262,9 @@ export class NvencEncoder {
     readonly width: number,
     readonly height: number,
     readonly codec: NvencCodec,
-    private readonly device: bigint, // CUDA input buffer (ABGR, pitch = width*4)
+    private readonly device: bigint, // CUDA input buffer (ABGR)
+    private readonly pitch: number, // bytes per row of the input buffer
+    private readonly ownsDevice: boolean, // false when device is an external (shared) pointer
     private readonly registered: bigint,
     private readonly bitstream: bigint,
     private readonly api: {
@@ -280,7 +290,9 @@ export class NvencEncoder {
     const cq = Math.max(0, Math.min(51, opts.cq ?? 20));
     const codecGuid = CODEC_GUID[codec];
     const presetGuid = PRESET_GUID[preset];
-    const pitch = width * 4;
+    // Zero-copy: register the caller's external pointer + pitch; else own a packed buffer.
+    const pitch = opts.input?.pitch ?? width * 4;
+    const ownsDevice = !opts.input;
 
     const ctx = cudaCreateContext(opts.ordinal ?? 0);
 
@@ -345,8 +357,9 @@ export class NvencEncoder {
       check(fn(FN.createBitstreamBuffer, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(enc, ptr(cbb)), "nvEncCreateBitstreamBuffer");
       const bitstream = new DataView(cbb.buffer).getBigUint64(16, true);
 
-      // 5. CUDA input buffer + register it as an ABGR input resource.
-      const device = cudaMalloc(pitch * height);
+      // 5. CUDA input buffer (own a packed one, or use the caller's external
+      // shared pointer) + register it as an ABGR input resource.
+      const device = opts.input ? opts.input.devPtr : cudaMalloc(pitch * height);
       const reg = new Uint8Array(1536);
       const rdv = new DataView(reg.buffer);
       rdv.setUint32(0, V.REGISTER_RESOURCE, true);
@@ -360,7 +373,7 @@ export class NvencEncoder {
       check(fn(FN.registerResource, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(enc, ptr(reg)), "nvEncRegisterResource");
       const registered = rdv.getBigUint64(32, true);
 
-      return new NvencEncoder(enc, width, height, codec, device, registered, bitstream, {
+      return new NvencEncoder(enc, width, height, codec, device, pitch, ownsDevice, registered, bitstream, {
         encodePicture: fn(FN.encodePicture, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 }),
         lockBitstream: fn(FN.lockBitstream, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 }),
         unlockBitstream: fn(FN.unlockBitstream, { args: [FFIType.u64, FFIType.u64], returns: FFIType.i32 }),
@@ -380,13 +393,27 @@ export class NvencEncoder {
   /** Encode one tightly-packed RGBA frame (width*height*4 bytes); returns its Annex-B bytes. */
   encode(rgba: Uint8Array): Uint8Array {
     if (this.closed) throw new Error("NvencEncoder.encode after close");
+    if (!this.ownsDevice) throw new Error("NvencEncoder: this encoder uses an external input pointer; call encodeGpuResident() instead of encode()");
     const expected = this.width * this.height * 4;
     if (rgba.byteLength !== expected) throw new Error(`NVENC encode: expected ${expected} RGBA bytes, got ${rgba.byteLength}`);
-
-    // Upload to the registered CUDA buffer (pitch = width*4, so tightly packed).
+    // Upload to the owned CUDA buffer (pitch = width*4, tightly packed), then encode.
     cudaMemcpyHtoD(this.device, rgba, expected);
+    return this.encodeMapped();
+  }
 
-    // Map the registered resource for this encode.
+  /**
+   * Encode the frame already resident in the registered input buffer — used by
+   * the zero-copy path, where a D3D12 producer has written RGBA straight into the
+   * shared CUDA buffer (and ordering is guaranteed by the caller, e.g. a fence
+   * wait or a completed submit). No CPU upload.
+   */
+  encodeGpuResident(): Uint8Array {
+    if (this.closed) throw new Error("NvencEncoder.encodeGpuResident after close");
+    return this.encodeMapped();
+  }
+
+  /** Map the registered input, encode one picture, and read back its Annex-B bytes. */
+  private encodeMapped(): Uint8Array {
     const map = new Uint8Array(1544);
     const mdv = new DataView(map.buffer);
     mdv.setUint32(0, V.MAP_INPUT_RESOURCE, true);
@@ -400,7 +427,7 @@ export class NvencEncoder {
       cdv.setUint32(0, V.PIC_PARAMS, true);
       cdv.setUint32(4, this.width, true);
       cdv.setUint32(8, this.height, true);
-      cdv.setUint32(12, this.width * 4, true); // inputPitch
+      cdv.setUint32(12, this.pitch, true); // inputPitch
       cdv.setUint32(20, this.frameIdx, true); // frameIdx
       cdv.setBigUint64(24, BigInt(this.frameIdx), true); // inputTimeStamp
       cdv.setBigUint64(40, mapped, true); // inputBuffer
@@ -449,7 +476,7 @@ export class NvencEncoder {
     this.closed = true;
     try { this.api.unregister(this.enc, this.registered); } catch { /* best effort */ }
     try { this.api.destroyBitstream(this.enc, this.bitstream); } catch { /* best effort */ }
-    try { cudaFree(this.device); } catch { /* best effort */ }
+    if (this.ownsDevice) { try { cudaFree(this.device); } catch { /* best effort */ } }
     try { this.api.destroyEncoder(this.enc); } catch { /* best effort */ }
   }
 

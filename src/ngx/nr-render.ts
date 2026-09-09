@@ -14,6 +14,9 @@ import { mkdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+  D3D12_RESOURCE_STATE_COPY_SOURCE,
+  D3D12_RESOURCE_STATE_COPY_DEST,
+  D3D12_RESOURCE_STATE_COMMON,
   DXGI_FORMAT_R8G8B8A8_UNORM,
   type D3D12Resource,
 } from "../native/d3d12.ts";
@@ -87,8 +90,8 @@ export class DlssNrSession {
     return new DlssNrSession(session, core, params, created.handle, opts.width, opts.height, opts.settings, color, output);
   }
 
-  /** Enhance one RGBA8 frame at the same size; returns the enhanced RGBA8 frame. */
-  evaluate(colorRgba: Uint8Array, reset = true): Uint8Array {
+  /** Upload the input and record the NGX evaluate into the command list (no submit). */
+  private recordEvaluate(colorRgba: Uint8Array, reset: boolean): void {
     const expected = this.width * this.height * 4;
     if (colorRgba.byteLength !== expected) throw new Error(`DLSS NR: expected ${expected} color bytes, got ${colorRgba.byteLength}`);
     const gpu = this.session.gpu;
@@ -108,7 +111,31 @@ export class DlssNrSession {
     this.params.setU32(NrParam.UseAutoMask, s.autoMask ? 1 : 0);
     this.params.setU32(NrParam.UICorrection, s.uiCorrection ? 1 : 0);
     ngxCheck(this.core.evaluateFeature(gpu.list.ptr, this.handle, this.params), "DLSS NR EvaluateFeature");
-    return gpu.readbackTexture(this.output, UAV);
+  }
+
+  /** Enhance one RGBA8 frame at the same size; returns the enhanced RGBA8 frame. */
+  evaluate(colorRgba: Uint8Array, reset = true): Uint8Array {
+    this.recordEvaluate(colorRgba, reset);
+    return this.session.gpu.readbackTexture(this.output, UAV);
+  }
+
+  /**
+   * Enhance one frame and copy the result straight into `dst` (a row-major RGBA
+   * buffer with `rowPitch` bytes per row) on the GPU — no CPU readback. For the
+   * zero-copy encode path: `dst` is a D3D12 shared buffer whose CUDA-mapped
+   * pointer NVENC reads. After this returns the GPU copy is complete.
+   */
+  evaluateInto(colorRgba: Uint8Array, reset: boolean, dst: D3D12Resource, rowPitch: number): void {
+    this.recordEvaluate(colorRgba, reset);
+    const gpu = this.session.gpu;
+    gpu.list.transition(this.output, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    gpu.list.transition(dst, D3D12_RESOURCE_STATE_COPY_DEST);
+    gpu.list.copyTextureRegion(
+      { resource: dst, footprint: { offset: 0, format: DXGI_FORMAT_R8G8B8A8_UNORM, width: this.width, height: this.height, rowPitch } },
+      { resource: this.output },
+    );
+    gpu.list.transition(dst, D3D12_RESOURCE_STATE_COMMON);
+    gpu.submitAndWait();
   }
 
   close(): void {
