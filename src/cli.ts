@@ -15,6 +15,7 @@ import { DlssSrSession } from "./ngx/sr.ts";
 import { DEFAULT_NR_SETTINGS, type EncodeSettings } from "./server/api-types.ts";
 import { DlssRenderPreset, DLSS_RATIO } from "./ngx/results.ts";
 import { processFrameGen } from "./pipeline/framegen.ts";
+import type { FrameGenEngine } from "./pipeline/framegen-plan.ts";
 import { openGpu } from "./pipeline/gpu.ts";
 import { evenSize } from "./pipeline/resize.ts";
 
@@ -151,7 +152,9 @@ const COMMANDS: readonly CommandSpec[] = [
       { name: "output.mp4", desc: "destination; defaults to <input>.dlssg.mp4 next to the input" },
     ],
     options: [
-      { flag: "--multiplier N", desc: "output/input frame ratio (2 = double fps); 2x reliable, up to GPU max", def: "2" },
+      { flag: "--fps RATE", desc: "output frame rate: 23.976, 25, 29.97, 30, 50, 59.94, 60, 90, 119.88, 120, 144, 165, 180, 240, 360, 480, or an exact num/den; overrides --multiplier", def: "source fps x --multiplier" },
+      { flag: "--multiplier N", desc: "output/input frame ratio when --fps is not given (2 = double fps)", def: "2" },
+      { flag: "--engine MODE", desc: "auto = native multi-frame when the ratio is an exact integer and HAGS is on, else a cascade of 2x stages; native or cascade force that path", def: "auto" },
       { flag: "--codec NAME", desc: "encoder: h264, hevc, av1, or h264_nvenc/hevc_nvenc/av1_nvenc for GPU", def: "GPU NVENC when available, else libx264" },
       { flag: "--quality N", desc: "encoder quality (CRF for CPU, CQ for NVENC), 0..51 (lower = better)", def: "20" },
       RUNTIME_OPT,
@@ -437,7 +440,10 @@ async function main(): Promise<void> {
       const result = await processFrameGen({
         input,
         output: positional[1],
+        targetFps: option(args, "--fps"),
         multiplier: Number(option(args, "--multiplier") ?? 2),
+        // chooseInterpolationPlan rejects anything but auto / native / cascade with a clear error.
+        engine: (option(args, "--engine") ?? "auto") as FrameGenEngine,
         quality: Number(option(args, "--quality") ?? 20),
         codec: option(args, "--codec") as EncodeSettings["codec"] | undefined,
         runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
@@ -445,7 +451,11 @@ async function main(): Promise<void> {
           if (frames === undefined) console.log(`  ${(f * 100).toFixed(0)}%  ${m}`);
         },
       });
-      console.log(`DLSS Frame Generation: ${result.inputFrames} -> ${result.outputFrames} frames, ${result.sourceFps.toFixed(2)} -> ${result.outputFps.toFixed(2)} fps in ${result.ms} ms`);
+      const how = result.path === "Cascade" ? `${result.cascadeStages} cascade stage(s)` : result.path === "Native DLSSG" ? `native ${result.nativeMultiplier}x` : "resample";
+      console.log(
+        `DLSS Frame Generation (${how}): ${result.inputFrames} -> ${result.outputFrames} frames, ${result.sourceFps.toFixed(2)} -> ${result.targetFps} fps; ` +
+          `${result.generatedFrames} generated, ${result.copiedFrames} copied, ${result.sceneCuts} scene cut(s), max timing error ${result.maximumTemporalErrorSeconds.toFixed(4)} s, in ${result.ms} ms`,
+      );
       console.log(`wrote ${result.output}`);
       process.exit(0);
     }
