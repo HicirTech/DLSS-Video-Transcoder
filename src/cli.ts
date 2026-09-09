@@ -100,8 +100,9 @@ const COMMANDS: readonly CommandSpec[] = [
       { name: "output.png", desc: "destination; defaults to <input>.nr.png next to the input" },
     ],
     options: [
-      { flag: "--intensity F", desc: "enhancement blend, 0..1 (0 = original, 1 = full; values above 1 are clamped)", def: String(DEFAULT_NR_SETTINGS.intensity) },
-      { flag: "--preset ID", desc: "neural model preset hint (0, or 10/11/12/13 = J/K/L/M); note: no visible effect on the current runtime", def: String(DEFAULT_NR_SETTINGS.preset) },
+      { flag: "--intensity F", desc: "overall strength, 0..2 (1 = default; effect tends to plateau past ~1)", def: String(DEFAULT_NR_SETTINGS.intensity) },
+      { flag: "--style N", desc: "look style: 0 = Default, 1 = Natural, 2 = Cinematic (strong, visible effect)", def: String(DEFAULT_NR_SETTINGS.style) },
+      { flag: "--preset ID", desc: "NR model preset hint: 0 = Default, 1/2/3 = Preset #1/#2/#3 (experimental, content-dependent)", def: String(DEFAULT_NR_SETTINGS.preset) },
       { flag: "--local-tone F", desc: "local tone-mapping strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localTone) },
       { flag: "--local-structure F", desc: "local detail / structure strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localStructure) },
       RUNTIME_OPT,
@@ -357,7 +358,8 @@ async function main(): Promise<void> {
       const settings = {
         ...DEFAULT_NR_SETTINGS,
         intensity: Number(option(args, "--intensity") ?? DEFAULT_NR_SETTINGS.intensity),
-        preset: Number(option(args, "--preset") ?? DEFAULT_NR_SETTINGS.preset) as 0 | 10 | 11 | 12 | 13,
+        style: Number(option(args, "--style") ?? DEFAULT_NR_SETTINGS.style) as 0 | 1 | 2,
+        preset: Number(option(args, "--preset") ?? DEFAULT_NR_SETTINGS.preset) as 0 | 1 | 2 | 3,
         localTone: Number(option(args, "--local-tone") ?? DEFAULT_NR_SETTINGS.localTone),
         localStructure: Number(option(args, "--local-structure") ?? DEFAULT_NR_SETTINGS.localStructure),
       };
