@@ -13,8 +13,9 @@
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import { callableAt, type Signature } from "../native/com.ts";
-import { cudaCreateContext } from "../native/cuda.ts";
+import { cudaCreateContext, cudaMemcpy2DDtoH, cudaMemcpy2DHtoD, cudaSynchronize } from "../native/cuda.ts";
 import { OutU64 } from "../native/memory.ts";
+import { DEFAULT_FLOW_WIDTH, flowGridSize, type FlowBackend } from "./flow.ts";
 
 const NV_OF_API_VERSION = 0x20; // (major 2 << 4) | minor 0
 const OK = 0;
@@ -92,5 +93,172 @@ export function probeNvof(ordinal = 0): NvofCaps {
     return { available: true, detail: "ok", widthMin, widthMax, heightMin, heightMax, outGridSizes };
   } catch (error) {
     return { available: false, detail: (error as Error).message };
+  }
+}
+
+// -- Full flow session --------------------------------------------------------
+
+const MODE_OPTICALFLOW = 1;
+const PERF_MEDIUM = 10;
+const FMT_GRAYSCALE8 = 1;
+const FMT_SHORT2 = 5;
+const USAGE_INPUT = 1;
+const USAGE_OUTPUT = 2;
+const CUDA_BUF_DEVPTR = 2;
+
+function ckof(status: unknown, what: string): void {
+  if ((status as number) !== OK) throw new Error(`NVOFA ${what} failed: NV_OF_STATUS ${status}`);
+}
+
+interface NvofBuffer {
+  handle: bigint;
+  device: bigint;
+  pitch: number;
+}
+
+/** A live NVOFA optical-flow session sized to one grid resolution. */
+export class NvofSession {
+  private constructor(
+    private readonly hOf: bigint,
+    readonly width: number,
+    readonly height: number,
+    private readonly input: NvofBuffer,
+    private readonly reference: NvofBuffer,
+    private readonly output: NvofBuffer,
+    private readonly execute: (...a: unknown[]) => unknown,
+    private readonly destroyBuf: (...a: unknown[]) => unknown,
+    private readonly destroy: (...a: unknown[]) => unknown,
+  ) {}
+
+  static open(width: number, height: number, ordinal = 0, perf = PERF_MEDIUM): NvofSession {
+    const ctx = cudaCreateContext(ordinal);
+    const create = fn(FN.create, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 });
+    const hOut = new OutU64();
+    ckof(create(ctx, hOut.ptr), "nvCreateOpticalFlowCuda");
+    const hOf = hOut.value;
+
+    const initParams = new Uint8Array(48);
+    const idv = new DataView(initParams.buffer);
+    idv.setUint32(0, width, true);
+    idv.setUint32(4, height, true);
+    idv.setUint32(8, 1, true); // outGridSize = 1 (flow at full grid resolution)
+    idv.setUint32(16, MODE_OPTICALFLOW, true);
+    idv.setUint32(20, perf, true);
+    ckof(fn(FN.init, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(hOf, ptr(initParams)), "nvOFInit");
+
+    const getDev = fn(FN.getDevPtr, { args: [FFIType.u64], returns: FFIType.u64 });
+    const getStride = fn(FN.getStride, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 });
+    const createBuf = fn(FN.createBuf, { args: [FFIType.u64, FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 });
+    const mkBuf = (w: number, h: number, usage: number, format: number): NvofBuffer => {
+      const desc = new Uint8Array(16);
+      const d = new DataView(desc.buffer);
+      d.setUint32(0, w, true);
+      d.setUint32(4, h, true);
+      d.setUint32(8, usage, true);
+      d.setUint32(12, format, true);
+      const bOut = new OutU64();
+      ckof(createBuf(hOf, ptr(desc), CUDA_BUF_DEVPTR, bOut.ptr), "nvOFCreateGPUBufferCuda");
+      const handle = bOut.value;
+      const device = getDev(handle) as bigint;
+      const stride = new Uint8Array(28);
+      ckof(getStride(handle, ptr(stride)), "nvOFGPUBufferGetStrideInfo");
+      const pitch = new DataView(stride.buffer).getUint32(0, true);
+      return { handle, device, pitch };
+    };
+
+    const input = mkBuf(width, height, USAGE_INPUT, FMT_GRAYSCALE8);
+    const reference = mkBuf(width, height, USAGE_INPUT, FMT_GRAYSCALE8);
+    const output = mkBuf(width, height, USAGE_OUTPUT, FMT_SHORT2);
+
+    return new NvofSession(
+      hOf, width, height, input, reference, output,
+      fn(FN.exec, { args: [FFIType.u64, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }),
+      fn(FN.destroyBuf, { args: [FFIType.u64], returns: FFIType.i32 }),
+      fn(FN.destroy, { args: [FFIType.u64], returns: FFIType.i32 }),
+    );
+  }
+
+  /**
+   * Compute optical flow from `currentGray` to `previousGray` (GRAYSCALE8, tightly
+   * packed width*height). Returns the raw flow field as interleaved int16 (x, y)
+   * in S10.5 fixed point (divide by 32 for pixels), length width*height*2.
+   */
+  computeFlow(currentGray: Uint8Array, previousGray: Uint8Array, disableTemporalHints: boolean): Int16Array {
+    const w = this.width;
+    const h = this.height;
+    cudaMemcpy2DHtoD({ src: currentGray, srcPitch: w, dstDevice: this.input.device, dstPitch: this.input.pitch, widthBytes: w, height: h });
+    cudaMemcpy2DHtoD({ src: previousGray, srcPitch: w, dstDevice: this.reference.device, dstPitch: this.reference.pitch, widthBytes: w, height: h });
+
+    const inParams = new Uint8Array(56);
+    const iv = new DataView(inParams.buffer);
+    iv.setBigUint64(0, this.input.handle, true);
+    iv.setBigUint64(8, this.reference.handle, true);
+    iv.setUint32(24, disableTemporalHints ? 1 : 0, true);
+    const outParams = new Uint8Array(24);
+    new DataView(outParams.buffer).setBigUint64(0, this.output.handle, true);
+    ckof(this.execute(this.hOf, ptr(inParams), ptr(outParams)), "nvOFExecute");
+    cudaSynchronize();
+
+    const host = new Uint8Array(w * h * 4);
+    cudaMemcpy2DDtoH({ dst: host, dstPitch: w * 4, srcDevice: this.output.device, srcPitch: this.output.pitch, widthBytes: w * 4, height: h });
+    return new Int16Array(host.buffer);
+  }
+
+  close(): void {
+    try {
+      this.destroyBuf(this.input.handle);
+      this.destroyBuf(this.reference.handle);
+      this.destroyBuf(this.output.handle);
+      this.destroy(this.hOf);
+    } catch {
+      // best-effort teardown; the process/worker exit reclaims the rest
+    }
+  }
+}
+
+function toByte(v: number): number {
+  return v <= 0 ? 0 : v >= 255 ? 255 : v | 0;
+}
+
+/**
+ * Wrap an NVOFA session as a flow.ts FlowBackend: it receives the estimator's
+ * downscaled Float32 grayscale grids, runs hardware optical flow, and returns the
+ * grid-resolution (dx, dy) field in grid pixels (current -> previous, matching
+ * the block-match sign convention).
+ */
+function nvofBackend(session: NvofSession): FlowBackend {
+  const n = session.width * session.height;
+  const cur = new Uint8Array(n);
+  const prev = new Uint8Array(n);
+  return {
+    name: "nvof",
+    calc: (current, previous, w, h) => {
+      if (w !== session.width || h !== session.height) {
+        throw new Error(`nvof backend: expected ${session.width}x${session.height}, got ${w}x${h}`);
+      }
+      for (let i = 0; i < n; i++) {
+        cur[i] = toByte(current[i]!);
+        prev[i] = toByte(previous[i]!);
+      }
+      const raw = session.computeFlow(cur, prev, false);
+      const out = new Float32Array(n * 2);
+      for (let i = 0; i < n * 2; i++) out[i] = raw[i]! / 32; // S10.5 -> pixels
+      return out;
+    },
+    close: () => session.close(),
+  };
+}
+
+/**
+ * Try to build an NVOFA optical-flow backend for frames of `width`x`height`
+ * (sized to the estimator's flow grid). Returns null if NVOFA is unavailable so
+ * the caller can fall back to the CPU block matcher.
+ */
+export function tryCreateNvofBackend(width: number, height: number, flowWidth = DEFAULT_FLOW_WIDTH, ordinal = 0): FlowBackend | null {
+  try {
+    const { flowW, flowH } = flowGridSize(width, height, flowWidth);
+    return nvofBackend(NvofSession.open(flowW, flowH, ordinal));
+  } catch {
+    return null;
   }
 }
