@@ -105,6 +105,9 @@ const COMMANDS: readonly CommandSpec[] = [
       { flag: "--preset ID", desc: "NR model preset hint: 0 = Default, 1/2/3 = Preset #1/#2/#3 (experimental, content-dependent)", def: String(DEFAULT_NR_SETTINGS.preset) },
       { flag: "--local-tone F", desc: "local tone-mapping strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localTone) },
       { flag: "--local-structure F", desc: "local detail / structure strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localStructure) },
+      { flag: "--skin-structure F", desc: "detail strength on skin regions only; -1 = runtime default, typical 0..2", def: String(DEFAULT_NR_SETTINGS.skinStructure) },
+      { flag: "--auto-mask", desc: "let the runtime derive the processed-region mask instead of the whole frame", def: "off" },
+      { flag: "--ui-correction", desc: "protect overlays / text / sharp UI edges from being re-rendered", def: "off" },
       RUNTIME_OPT,
       ADAPTER_OPT,
     ],
@@ -362,6 +365,9 @@ async function main(): Promise<void> {
         preset: Number(option(args, "--preset") ?? DEFAULT_NR_SETTINGS.preset) as 0 | 1 | 2 | 3,
         localTone: Number(option(args, "--local-tone") ?? DEFAULT_NR_SETTINGS.localTone),
         localStructure: Number(option(args, "--local-structure") ?? DEFAULT_NR_SETTINGS.localStructure),
+        skinStructure: Number(option(args, "--skin-structure") ?? DEFAULT_NR_SETTINGS.skinStructure),
+        autoMask: flag(args, "--auto-mask") || DEFAULT_NR_SETTINGS.autoMask,
+        uiCorrection: flag(args, "--ui-correction") || DEFAULT_NR_SETTINGS.uiCorrection,
       };
       const session = openGpu({ adapterIndex: option(args, "--adapter") !== undefined ? Number(option(args, "--adapter")) : undefined });
       const started = performance.now();
