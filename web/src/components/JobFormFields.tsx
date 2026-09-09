@@ -124,8 +124,8 @@ export function MotionSelect({ value, disabled, onChange }: MotionSelectProps) {
         <MenuItem value="flow">Optical flow (estimate motion between frames)</MenuItem>
       </Select>
       <FormHelperText>
-        Optical flow estimates motion between frames for steadier temporal results, but the current estimator is
-        slow.
+        Optical flow estimates motion between frames for steadier temporal results — using the GPU hardware
+        flow engine (NVOFA) when available, otherwise a slower CPU estimator.
       </FormHelperText>
     </FormControl>
   );
