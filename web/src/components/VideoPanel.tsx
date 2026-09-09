@@ -75,7 +75,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
 
   const changeEngine = (next: EngineKind): void => {
     setEngine(next);
-    setDllDir("");
+    setDllDir(""); // a version chosen for one feature does not apply to another
   };
 
   const run = (): void => {

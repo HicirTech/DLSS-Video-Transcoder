@@ -34,7 +34,7 @@ export function formatDateTime(iso: string | null): string {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
 }
 
-/** Megabytes with one decimal, or "-" when unknown. */
+/** "-" when null, one decimal below 10 MB, whole MB up to 1024, GB with one decimal above. */
 export function formatMB(mb: number | null): string {
   if (mb === null) return "-";
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
@@ -58,7 +58,6 @@ export function isJobActive(job: JobStatus): boolean {
   return job.state === "queued" || job.state === "running";
 }
 
-/** Newest first. */
 export function sortJobsNewestFirst(jobs: JobStatus[]): JobStatus[] {
   return jobs.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }

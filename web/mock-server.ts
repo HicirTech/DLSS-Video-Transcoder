@@ -1,12 +1,10 @@
 /*
- * Standalone preview server: serves the UI from index.html and answers every /api route
- * and /ws with mock data, so the frontend can be developed without the real backend.
+ * Standalone preview server: serves the UI from index.html and answers every /api route and
+ * /ws with mock data, so the frontend can be developed without the real backend. Opening the
+ * page with `?mock=1` instead keeps the same requests inside the browser (src/mock.ts).
  *
- *   bun run web/mock-server.ts        -> http://127.0.0.1:3080/
- *   http://127.0.0.1:3080/?mock=1     -> the same page, but with the in-browser mock client
- *
- * PORT=3090 bun run web/mock-server.ts moves it when 3080 cannot be bound (on Windows, check
- * `netsh interface ipv4 show excludedportrange protocol=tcp` for Hyper-V / WSL reservations).
+ * Listens on 127.0.0.1:3080; PORT=3090 moves it. On Windows a failed bind is usually a
+ * Hyper-V / WSL port reservation: `netsh interface ipv4 show excludedportrange protocol=tcp`.
  */
 import index from "./index.html";
 import type { JobRequest, WsEvent } from "../src/server/api-types";

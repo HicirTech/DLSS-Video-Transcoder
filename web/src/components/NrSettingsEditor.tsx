@@ -15,9 +15,9 @@ function formatSkin(value: number): string {
 }
 
 /**
- * Editor for the DLSS neural rendering (feature 18) look controls, mirroring the
- * reference project: model preset, style, and the strength sliders. `warmupFrames`
- * lives in the Settings tab. (Global tone is not applied by the current runtime.)
+ * Look controls for DLSS neural rendering (feature 18): style, model preset and the strength
+ * sliders. `warmupFrames` is edited in the Settings tab, and there is no global-tone control
+ * because the current runtime ignores that parameter.
  */
 export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
   const update = (patch: Partial<NrSettings>): void => onChange({ ...value, ...patch });

@@ -23,7 +23,7 @@ export function PathFields({ kind, input, output, disabled, onInputChange, onOut
 
   const onPick = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = event.target.files?.[0];
-    event.target.value = ""; // allow re-picking the same file
+    event.target.value = ""; // an <input type=file> only fires change when the value differs
     if (!file) return;
     setUploading(true);
     setUploadError(null);
