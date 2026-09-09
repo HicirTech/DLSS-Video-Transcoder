@@ -17,6 +17,7 @@ import {
   type WsEvent,
 } from "./api-types.ts";
 import { JobManager } from "./jobs.ts";
+import { asJobRequest, isWithin, validateJobRequest } from "./validate.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const RUNTIME_DIR = process.env.NR_RUNTIME_DIR ?? join(ROOT, "runtime");
@@ -40,37 +41,6 @@ const MIME: Record<string, string> = {
   ".txt": "text/plain; charset=utf-8",
   ".json": "application/json",
 };
-
-function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function isJobRequest(value: unknown): value is JobRequest {
-  if (!isObject(value)) return false;
-  const v = value;
-  return (
-    (v.kind === "image" || v.kind === "video") &&
-    typeof v.input === "string" &&
-    (v.output === undefined || typeof v.output === "string") &&
-    (v.engine === "bypass" || v.engine === "nr" || v.engine === "sr") &&
-    (v.motion === "none" || v.motion === "flow") &&
-    isObject(v.settings) &&
-    isObject(v.scale) &&
-    (v.frameGen === undefined ||
-      (isObject(v.frameGen) &&
-        // One of targetFps / multiplier must be present, or the job has no rate to aim for.
-        (typeof v.frameGen.multiplier === "number" || typeof v.frameGen.targetFps === "string") &&
-        (v.frameGen.multiplier === undefined || typeof v.frameGen.multiplier === "number") &&
-        (v.frameGen.targetFps === undefined || typeof v.frameGen.targetFps === "string") &&
-        (v.frameGen.engine === undefined || v.frameGen.engine === "auto" || v.frameGen.engine === "native" || v.frameGen.engine === "cascade")))
-  );
-}
-
-/** True if `child` resolves to a path inside `root` (used to confine job output paths). */
-function isWithin(child: string, root: string): boolean {
-  const rel = relative(resolve(root), resolve(child));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-}
 
 // Bind to loopback by default: this API has no auth and exposes file read
 // (/api/file) and job output paths, so it must not be network-reachable unless
@@ -97,19 +67,25 @@ const server = Bun.serve({
         } catch {
           return fail("Request body must be valid JSON.");
         }
-        if (!isJobRequest(body))
-          return fail(
-            "Invalid job request. Expected kind ('image' or 'video'), an absolute input path, engine ('sr', 'nr' or 'bypass'), motion ('none' or 'flow'), and settings and scale objects.",
-          );
-        if (!isAbsolute(body.input) || !existsSync(body.input))
-          return fail(`Input file not found: ${body.input}. Provide an absolute path to a file that exists.`);
+        const invalid = validateJobRequest(body);
+        if (invalid) return fail(invalid);
+        const request = asJobRequest(body);
+        if (!isAbsolute(request.input) || !existsSync(request.input))
+          return fail(`Input file not found: ${request.input}. Provide an absolute path to a file that exists.`);
         // Confine the output path so a request cannot write anywhere on the host.
-        if (body.output !== undefined) {
-          const roots = [APP_DATA, RUNTIME_DIR, dirname(resolve(body.input))];
-          if (!isAbsolute(body.output) || !roots.some((r) => isWithin(body.output!, r)))
+        if (request.output !== undefined) {
+          const roots = [APP_DATA, RUNTIME_DIR, dirname(resolve(request.input))];
+          if (!isAbsolute(request.output) || !roots.some((r) => isWithin(request.output!, r)))
             return fail("The output path must be absolute and inside the app-data folder or the input's own directory.");
         }
-        return json(jobs.submit(body), 201);
+        // A DLL directory drives a native LoadLibrary, so it must be one the
+        // server itself advertises through GET /api/catalog.
+        if (request.dllDir !== undefined) {
+          const advertised = new Set(buildRuntimeCatalog(RUNTIME_DIR).features.flatMap((f) => f.versions.map((v) => resolve(v.dir))));
+          if (!isAbsolute(request.dllDir) || !advertised.has(resolve(request.dllDir)))
+            return fail("dllDir must be one of the runtime folders listed by GET /api/catalog.");
+        }
+        return json(jobs.submit(request), 201);
       },
     },
     "/api/jobs/:id": (req) => {

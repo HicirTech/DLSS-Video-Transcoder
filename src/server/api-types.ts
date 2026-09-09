@@ -97,6 +97,28 @@ export type FrameGenFps = (typeof FRAME_GEN_FPS_CHOICES)[number];
 export const FRAME_GEN_ENGINES = ["auto", "native", "cascade"] as const;
 export type FrameGenEngine = (typeof FRAME_GEN_ENGINES)[number];
 
+// The accepted values for every constrained setting, in one place: the UI clamps
+// to these and the API rejects outside them, so the two cannot drift apart.
+export const NR_PRESETS = [0, 1, 2, 3] as const;
+export const NR_STYLES = [0, 1, 2] as const;
+export const NR_PATHS = ["auto", "core", "snippet"] as const;
+export const SCALE_MODES = ["none", "factor", "size"] as const;
+export const ENCODE_CODECS = ["h264", "hevc", "av1", "h264_nvenc", "hevc_nvenc", "av1_nvenc"] as const;
+export const ENCODE_CONTAINERS = ["mp4", "mkv", "mov"] as const;
+
+/** Inclusive `[min, max]` for each numeric setting; `integer` fields reject fractions. */
+export const SETTING_RANGES = {
+  intensity: { min: 0, max: 2, integer: false },
+  localTone: { min: 0, max: 2, integer: false },
+  localStructure: { min: 0, max: 2, integer: false },
+  skinStructure: { min: -1, max: 2, integer: false },
+  warmupFrames: { min: 0, max: 64, integer: true },
+  factor: { min: 0.25, max: 8, integer: false },
+  width: { min: 16, max: 16384, integer: true },
+  height: { min: 16, max: 16384, integer: true },
+  quality: { min: 0, max: 51, integer: true },
+} as const;
+
 export interface JobRequest {
   kind: "image" | "video";
   /** Absolute path on the machine running the server. */
