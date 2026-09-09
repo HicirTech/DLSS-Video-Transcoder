@@ -6,9 +6,9 @@ driven in-process from **Bun + TypeScript** through `bun:ffi` over Direct3D 12 a
 with a **React + Material UI** web front end. DLSS runtimes are version-switchable
 (DLSS-Swapper style).
 
-![DLSS Neural Rendering: original vs. enhanced (100% crop)](docs/images/nr-compare.png)
+![DLSS Neural Rendering styles — Original vs. Natural vs. Cinematic (100% crop)](docs/images/nr-style.png)
 
-<sub>DLSS Neural Rendering (NGX feature 18) on a real photo — 100% crop, left original / right enhanced.</sub>
+<sub>DLSS Neural Rendering (NGX feature 18) on a real photo — 100% crop: Original vs. the Natural and Cinematic styles.</sub>
 
 The look is tunable — the reference project's controls (model preset, style, intensity and the
 strength sliders) are all exposed. This matrix sweeps **style** (rows) against **intensity** (columns)
