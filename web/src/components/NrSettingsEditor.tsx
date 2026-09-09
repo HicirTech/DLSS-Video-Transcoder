@@ -7,8 +7,7 @@ interface NrSettingsEditorProps {
   onChange: (next: NrSettings) => void;
 }
 
-const INTENSITY_MARKS = [{ value: 0, label: "off" }, { value: 0.5 }, { value: 1, label: "full" }];
-const NEUTRAL_MARKS = [{ value: 0 }, { value: 1, label: "neutral" }, { value: 2 }];
+const NEUTRAL_MARKS = [{ value: 0 }, { value: 1, label: "default" }, { value: 2 }];
 const SKIN_MARKS = [{ value: -1, label: "default" }, { value: 0 }, { value: 1, label: "neutral" }, { value: 2 }];
 
 function formatSkin(value: number): string {
@@ -16,10 +15,9 @@ function formatSkin(value: number): string {
 }
 
 /**
- * Editor for the DLSS neural rendering (feature 18) look controls. Only the
- * controls verified to change the result on the current runtime are shown —
- * model preset and global tone had no effect and are omitted; `warmupFrames`
- * lives in the Settings tab.
+ * Editor for the DLSS neural rendering (feature 18) look controls, mirroring the
+ * reference project: model preset, style, and the strength sliders. `warmupFrames`
+ * lives in the Settings tab. (Global tone is not applied by the current runtime.)
  */
 export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
   const update = (patch: Partial<NrSettings>): void => onChange({ ...value, ...patch });
@@ -28,21 +26,38 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
     <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) minmax(0, 1fr)" }, gap: 3 }}>
       <Stack spacing={2}>
         <Box>
-          <FormControl fullWidth>
-            <InputLabel id="nr-style-label">Style</InputLabel>
-            <Select<NrSettings["style"]>
-              labelId="nr-style-label"
-              label="Style"
-              value={value.style}
-              onChange={(event) => update({ style: event.target.value })}
-            >
-              <MenuItem value={0}>Default</MenuItem>
-              <MenuItem value={1}>Natural</MenuItem>
-              <MenuItem value={2}>Cinematic</MenuItem>
-            </Select>
-          </FormControl>
+          <Stack direction="row" spacing={2}>
+            <FormControl fullWidth>
+              <InputLabel id="nr-style-label">Style</InputLabel>
+              <Select<NrSettings["style"]>
+                labelId="nr-style-label"
+                label="Style"
+                value={value.style}
+                onChange={(event) => update({ style: event.target.value })}
+              >
+                <MenuItem value={0}>Default</MenuItem>
+                <MenuItem value={1}>Natural</MenuItem>
+                <MenuItem value={2}>Cinematic</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel id="nr-preset-label">Model preset</InputLabel>
+              <Select<NrSettings["preset"]>
+                labelId="nr-preset-label"
+                label="Model preset"
+                value={value.preset}
+                onChange={(event) => update({ preset: event.target.value })}
+              >
+                <MenuItem value={0}>Default</MenuItem>
+                <MenuItem value={1}>Preset #1</MenuItem>
+                <MenuItem value={2}>Preset #2</MenuItem>
+                <MenuItem value={3}>Preset #3</MenuItem>
+              </Select>
+            </FormControl>
+          </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-            Overall look of the neural enhancement.
+            Style sets the overall look (strong effect). Model preset is an experimental,
+            content-dependent hint — Default is recommended.
           </Typography>
         </Box>
 
@@ -73,9 +88,9 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
           label="Intensity"
           value={value.intensity}
           min={0}
-          max={1}
-          marks={INTENSITY_MARKS}
-          hint="How much of the neural enhancement to blend in. 0 = original, 1 = full."
+          max={2}
+          marks={NEUTRAL_MARKS}
+          hint="Overall neural-rendering strength. 0 = original, 1 = default (effect tends to plateau past ~1)."
           onChange={(intensity) => update({ intensity })}
         />
         <SliderRow
