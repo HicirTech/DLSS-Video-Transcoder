@@ -154,7 +154,7 @@ const COMMANDS: readonly CommandSpec[] = [
     options: [
       { flag: "--fps RATE", desc: "output frame rate: 23.976, 25, 29.97, 30, 50, 59.94, 60, 90, 119.88, 120, 144, 165, 180, 240, 360, 480, or an exact num/den; overrides --multiplier", def: "source fps x --multiplier" },
       { flag: "--multiplier N", desc: "output/input frame ratio when --fps is not given (2 = double fps)", def: "2" },
-      { flag: "--engine MODE", desc: "auto = native multi-frame when the ratio is an exact integer and HAGS is on, else a cascade of 2x stages; native or cascade force that path", def: "auto" },
+      { flag: "--engine MODE", desc: "auto = native multi-frame when the runtime accepts it (exact integer ratio, HAGS on), else a cascade of 2x stages; the bundled worker only does 2x natively, so auto falls back to the cascade by itself; native or cascade force that path", def: "auto" },
       { flag: "--codec NAME", desc: "encoder: h264, hevc, av1, or h264_nvenc/hevc_nvenc/av1_nvenc for GPU", def: "GPU NVENC when available, else libx264" },
       { flag: "--quality N", desc: "encoder quality (CRF for CPU, CQ for NVENC), 0..51 (lower = better)", def: "20" },
       RUNTIME_OPT,

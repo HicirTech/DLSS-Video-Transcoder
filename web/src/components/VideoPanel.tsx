@@ -151,8 +151,9 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
           DLSS Frame Generation to the chosen output rate; the result keeps the source duration and audio. Auto runs one
           native DLSSG session when output ÷ source is an exact integer the runtime supports and hardware-accelerated GPU
           scheduling (HAGS) is on; otherwise it chains 2× stages in memory (1 stage for 2×, 2 for 4×, else 3 on an 8× grid)
-          and places the nearest frame on each output instant. 2× works without HAGS; 3× and above natively need HAGS and
-          an RTX 50. Uses the codec/quality below; the engine and output-size settings do not apply.
+          and places the nearest frame on each output instant. The bundled dlssg-worker synthesises one frame per interval
+          (2×), so higher rates run as a cascade; when a native multi-frame session is refused, Auto falls back to the
+          cascade by itself. Uses the codec/quality below; the engine and output-size settings do not apply.
         </FormHelperText>
       </Section>
 

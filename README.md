@@ -99,7 +99,9 @@ Key per-command options (defaults in parentheses):
   multi-frame DLSSG session when output ÷ source is an exact integer the runtime supports **and HAGS is
   on**, otherwise a cascade of 2× stages chained in memory — 1 stage for 2×, 2 for 4×, else 3 on an 8×
   grid — placing the nearest frame on each instant of the exact target clock; `native` / `cascade` force
-  a path; 2× works without HAGS, 3× and above natively need HAGS and an RTX 50), `--codec NAME`
+  a path; the bundled dlssg-worker synthesises only 1 frame per interval, so 3× and above run as a
+  cascade and `auto` falls back to it automatically when a native multi-frame session is refused, HAGS
+  or not), `--codec NAME`
   (default: GPU NVENC when available, else libx264), `--quality N` (encoder quality, CRF for CPU / CQ for
   NVENC, 0–51, lower = better, 20). The output always keeps the source duration (frame count =
   ⌈duration × rate⌉) and the original audio, and is verified after muxing.

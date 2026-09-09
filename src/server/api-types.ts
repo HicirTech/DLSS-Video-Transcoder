@@ -126,7 +126,10 @@ export interface JobRequest {
     /**
      * auto (default): native multi-frame DLSSG when target/source is an exact
      * integer the runtime supports and HAGS is on, otherwise a cascade of 2x
-     * stages. native / cascade force that path (native needs HAGS for 3x+).
+     * stages; when the runtime refuses a native multi-frame session (the
+     * bundled dlssg-worker synthesises one frame per interval, even with HAGS
+     * on) auto falls back to the cascade automatically. native / cascade force
+     * that path.
      */
     engine?: FrameGenEngine;
   };
