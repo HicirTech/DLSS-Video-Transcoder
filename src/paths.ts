@@ -1,3 +1,7 @@
+/**
+ * Canonical filesystem locations: the runtime folder holding the DLSS DLLs, plus the
+ * logs, NGX app-data and output folders. NR_RUNTIME_DIR points the runtime elsewhere.
+ */
 import { dirname, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
 

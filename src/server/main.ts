@@ -58,7 +58,7 @@ function isJobRequest(value: unknown): value is JobRequest {
     isObject(v.scale) &&
     (v.frameGen === undefined ||
       (isObject(v.frameGen) &&
-        // Either a target rate or a multiplier must be present; both optional fields must be well-typed when given.
+        // One of targetFps / multiplier must be present, or the job has no rate to aim for.
         (typeof v.frameGen.multiplier === "number" || typeof v.frameGen.targetFps === "string") &&
         (v.frameGen.multiplier === undefined || typeof v.frameGen.multiplier === "number") &&
         (v.frameGen.targetFps === undefined || typeof v.frameGen.targetFps === "string") &&
@@ -123,10 +123,9 @@ const server = Bun.serve({
       },
     },
     "/api/file": (req) => {
-      // Serves an arbitrary local file for preview: user-selected inputs and job
-      // outputs live wherever the user chose. This is only safe because the
-      // server binds loopback by default (see HOST) — never set NR_HOST to a
-      // public interface without adding authentication in front.
+      // Serves any local file for preview, because user-selected inputs and job outputs
+      // live wherever the user chose. Safe only because the server binds loopback (see
+      // HOST) — NR_HOST must not reach a public interface without auth in front of it.
       const path = new URL(req.url).searchParams.get("path") ?? "";
       if (!isAbsolute(path) || !existsSync(path) || !statSync(path).isFile())
         return fail("File not found. The 'path' query parameter must be an absolute path to an existing file.", 404);
@@ -134,9 +133,9 @@ const server = Bun.serve({
       return new Response(Bun.file(path), { headers: { "content-type": type, "cache-control": "no-store" } });
     },
     "/api/upload": {
-      // Accept a browser file upload and store it server-side, returning the saved
-      // absolute path to use as a job input. The filename is generated (never taken
-      // from the client) so an upload cannot escape the uploads directory.
+      // Stores a browser upload and returns its absolute path for use as a job input.
+      // The stored name is generated, never taken from the client, so an upload cannot
+      // escape UPLOADS_DIR via a traversing filename.
       POST: async (req) => {
         let form: FormData;
         try {

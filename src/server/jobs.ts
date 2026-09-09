@@ -6,7 +6,7 @@ import type { JobRequest, JobStatus, WsEvent } from "./api-types.ts";
 import type { RunMessage, WorkerMessage } from "../pipeline/worker.ts";
 
 const LOG_LIMIT = 400;
-const MAX_JOBS = 200; // retain at most this many jobs; evict the oldest finished ones beyond it
+const MAX_JOBS = 200;
 
 export interface JobManagerOptions {
   runtimeDir: string;

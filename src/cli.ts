@@ -1,9 +1,8 @@
 /**
- * Command line entry point.
+ * Command line entry point: flag parsing, help text and dispatch for the DLSS commands.
  *
- * Commands: probe | forwarder | sr | nr | fg | versions | help
- * Run `bun run src/cli.ts help` for the overview or `help <command>` for details.
- * The command specs in COMMANDS below are the single source of truth for that help.
+ * COMMANDS below is the single source of truth: it renders the help *and* tells the
+ * positional-argument parser which flags consume a following value token.
  */
 import { basename, dirname, extname, join } from "node:path";
 import { decodePng, encodePng, isPng } from "./codec/png.ts";
@@ -41,10 +40,8 @@ function valueFlagNames(spec: CommandSpec): Set<string> {
 }
 
 /**
- * Positional arguments only: skip every `--flag` and, for value-bearing flags,
- * the value token that follows it. Without this a value like `3` in
- * `sr in.png --factor 3` (which does not start with `--`) would be mistaken for
- * the optional output path.
+ * Positional arguments only. A value-bearing flag's value token is skipped as well:
+ * without that, the `3` in `sr in.png --factor 3` would be read as the output path.
  */
 function positionalArgs(args: string[], spec: CommandSpec): string[] {
   const valued = valueFlagNames(spec);
@@ -276,7 +273,6 @@ function printProbe(report: Awaited<ReturnType<typeof runProbe>>): void {
 
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
-  // Global help: `help`, `--help`/`-h` with no command, or no command at all.
   if (command === "help") {
     const ok = printHelp(args.filter((a) => !a.startsWith("-"))[0]);
     process.exit(ok ? 0 : 1);
@@ -285,7 +281,6 @@ async function main(): Promise<void> {
     printHelp();
     process.exit(0);
   }
-  // Per-command help: `<command> --help` / `-h`.
   if (flag(args, "--help") || flag(args, "-h")) {
     const ok = printHelp(command);
     process.exit(ok ? 0 : 1);
@@ -336,9 +331,8 @@ async function main(): Promise<void> {
         Object.entries(DLSS_RATIO).reduce((best, [q, ratio]) =>
           Math.abs(ratio - factor) < Math.abs(DLSS_RATIO[Number(best)]! - factor) ? q : best, "0"),
       );
-      // Case-insensitive preset lookup so documented values like "Default" work
-      // (the key is mixed-case "Default", not "DEFAULT"); reject unknown presets
-      // instead of silently falling back to L.
+      // DlssRenderPreset keys are mixed case ("Default", not "DEFAULT"), so match
+      // case-insensitively; an unknown name is an error, not a silent fallback to L.
       const presetInput = option(args, "--preset") ?? "L";
       const presetKey = (Object.keys(DlssRenderPreset) as (keyof typeof DlssRenderPreset)[]).find((k) => k.toLowerCase() === presetInput.toLowerCase());
       if (!presetKey) {
@@ -346,9 +340,9 @@ async function main(): Promise<void> {
         process.exit(1);
       }
       const preset = DlssRenderPreset[presetKey];
-      // Snap the output size to the chosen DLSS mode's fixed ratio (help documents
-      // --factor as snapping to a mode); feeding DLSS a render/output ratio that
-      // does not match its PerfQuality mode risks CreateFeature failure/artifacts.
+      // The output size must follow the chosen PerfQuality mode's fixed ratio rather than
+      // the raw --factor: a render/output ratio that disagrees with the mode risks
+      // CreateFeature failure or artifacts.
       const snappedRatio = DLSS_RATIO[quality] ?? factor;
       const outputWidth = evenSize(image.width * snappedRatio);
       const outputHeight = evenSize(image.height * snappedRatio);

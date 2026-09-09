@@ -10,7 +10,7 @@
  *   GET  /api/jobs/:id              -> JobStatus
  *   POST /api/jobs/:id/cancel       -> JobStatus
  *   GET  /api/file?path=<abs path>  -> raw file bytes (previews of inputs/outputs; local paths only)
- *   POST /api/upload  multipart/form-data 'file' -> { path, name, size } (stores the upload, returns its server path for use as a job input)
+ *   POST /api/upload  multipart/form-data 'file' -> { path, name, size } (saved server-side; the path is usable as a job input)
  *   GET  /api/tools                 -> ToolsReport      (ffmpeg / ffprobe availability)
  *   GET  /api/catalog               -> RuntimeManifest  (installed DLSS runtime DLL versions; see JobRequest.dllDir)
  * WebSocket:
@@ -115,21 +115,15 @@ export interface JobRequest {
    * `multiplier` (targetFps wins when both are present).
    */
   frameGen?: {
-    /**
-     * Output frame rate: one of the named choices "23.976", "25", "29.97", "30",
-     * "50", "59.94", "60", "90", "119.88", "120", "144", "165", "180", "240",
-     * "360", "480", or an exact "num/den" such as "60000/1001".
-     */
+    /** One of FRAME_GEN_FPS_CHOICES, or an exact "num/den" rate such as "60000/1001". */
     targetFps?: string;
     /** Convenience ratio when targetFps is absent: output = source rate x multiplier (2 = double the fps). */
     multiplier?: number;
     /**
-     * auto (default): native multi-frame DLSSG when target/source is an exact
-     * integer the runtime supports and HAGS is on, otherwise a cascade of 2x
-     * stages; when the runtime refuses a native multi-frame session (the
-     * bundled dlssg-worker synthesises one frame per interval, even with HAGS
-     * on) auto falls back to the cascade automatically. native / cascade force
-     * that path.
+     * auto (default): native multi-frame DLSSG when target/source is an exact integer the
+     * runtime supports and HAGS is on, otherwise a cascade of 2x stages. The bundled
+     * dlssg-worker only ever synthesises one frame per interval — even with HAGS on — so
+     * auto falls back to the cascade on its own. native / cascade force a path.
      */
     engine?: FrameGenEngine;
   };
