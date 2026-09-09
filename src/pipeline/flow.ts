@@ -145,28 +145,45 @@ export function packFlowResizedR16G16(flow: Float32Array, inW: number, inH: numb
   // round-to-nearest-even, identical to bitsToHalf on finite values and ~5x
   // faster); the scalar loop stays as the fallback.
   const outHalf = HALF_ARRAY ? new HALF_ARRAY(out.buffer) : null;
+  // Each output row blends the horizontal interpolation of input rows y0 and
+  // y0+1, and consecutive output rows reuse them (sy < 1), so keep the last two
+  // in a two-slot cache: the horizontal pass then runs about inH times instead
+  // of 2*outH. The arithmetic is unchanged (still float64 until the fround), so
+  // the result stays bit-identical.
+  const cachedRow = [new Float64Array(outW * 2), new Float64Array(outW * 2)];
+  const cachedIndex = [-1, -1];
+  let nextSlot = 0;
+  const horizontal = (yRow: number): Float64Array => {
+    if (cachedIndex[0] === yRow) return cachedRow[0]!;
+    if (cachedIndex[1] === yRow) return cachedRow[1]!;
+    const slot = nextSlot;
+    nextSlot ^= 1;
+    const dst = cachedRow[slot]!;
+    cachedIndex[slot] = yRow;
+    const base = yRow * inW * 2;
+    for (let ox = 0; ox < outW; ox++) {
+      const wx = wxs[ox]!;
+      const a = base + x0s[ox]! * 2;
+      const b = base + x1s[ox]! * 2;
+      const o = ox * 2;
+      dst[o] = flow[a]! * (1 - wx) + flow[b]! * wx;
+      dst[o + 1] = flow[a + 1]! * (1 - wx) + flow[b + 1]! * wx;
+    }
+    return dst;
+  };
   for (let oy = 0; oy < outH; oy++) {
     const fy = oy * sy;
     const y0 = Math.floor(fy);
     const y1 = Math.min(y0 + 1, inH - 1);
     const wy = fy - y0;
-    const r0 = y0 * inW * 2;
-    const r1 = y1 * inW * 2;
-    for (let ox = 0; ox < outW; ox++) {
-      const wx = wxs[ox]!;
-      const i00 = r0 + x0s[ox]! * 2;
-      const i10 = r0 + x1s[ox]! * 2;
-      const i01 = r1 + x0s[ox]! * 2;
-      const i11 = r1 + x1s[ox]! * 2;
-      const o = ox * 2;
+    const top = horizontal(y0);
+    const bottom = y1 === y0 ? top : horizontal(y1);
+    const wt = 1 - wy;
+    for (let i = 0; i < outW * 2; i += 2) {
       // Math.fround reproduces the float32 store of the interpolated value that
       // precedes the scale multiply in the reference path.
-      const topX = flow[i00]! * (1 - wx) + flow[i10]! * wx;
-      const botX = flow[i01]! * (1 - wx) + flow[i11]! * wx;
-      row[o] = Math.fround(topX * (1 - wy) + botX * wy) * kx;
-      const topY = flow[i00 + 1]! * (1 - wx) + flow[i10 + 1]! * wx;
-      const botY = flow[i01 + 1]! * (1 - wx) + flow[i11 + 1]! * wx;
-      row[o + 1] = Math.fround(topY * (1 - wy) + botY * wy) * ky;
+      row[i] = Math.fround(top[i]! * wt + bottom[i]! * wy) * kx;
+      row[i + 1] = Math.fround(top[i + 1]! * wt + bottom[i + 1]! * wy) * ky;
     }
     const base = oy * outW * 2;
     if (outHalf) outHalf.set(row, base);
@@ -258,6 +275,28 @@ export function flowGridSize(width: number, height: number, flowWidth = DEFAULT_
  */
 export function smallGray(rgba: Uint8Array, width: number, height: number, flowW: number, flowH: number): Float32Array {
   const out = new Float32Array(flowW * flowH);
+  // Exact integer downscale — the usual case, e.g. 1280x720 -> 640x360. Every
+  // output pixel then averages the same sx*sy block, so the per-output-pixel
+  // divisions, ceilings and bounds checks of the general path below can go. The
+  // same source pixels are summed in the same order, so the result is identical.
+  if (width % flowW === 0 && height % flowH === 0) {
+    const sx = width / flowW;
+    const sy = height / flowH;
+    const n = sx * sy;
+    for (let oy = 0; oy < flowH; oy++) {
+      const yTop = oy * sy;
+      for (let ox = 0; ox < flowW; ox++) {
+        const xLeft = ox * sx;
+        let sum = 0;
+        for (let y = 0; y < sy; y++) {
+          let base = ((yTop + y) * width + xLeft) * 4;
+          for (let x = 0; x < sx; x++, base += 4) sum += luma(rgba[base]!, rgba[base + 1]!, rgba[base + 2]!);
+        }
+        out[oy * flowW + ox] = sum / n;
+      }
+    }
+    return out;
+  }
   for (let oy = 0; oy < flowH; oy++) {
     const y0 = Math.floor((oy * height) / flowH);
     const y1 = Math.max(y0 + 1, Math.floor(((oy + 1) * height) / flowH));
@@ -472,6 +511,22 @@ export interface PackedMotionResult {
   confidence: number;
 }
 
+/**
+ * The analysis half of processPacked(): scene decisions plus the grid-resolution
+ * flow, leaving the (expensive) upsample + pack to another thread. At most one
+ * of `small` / `half` is set: `small` on the fast path (every grid sample
+ * finite — the caller packs it with packFlowResizedR16G16), `half` when the
+ * slow exact path already had to build the full field.
+ */
+export interface AnalyzedMotion {
+  small: Float32Array | null;
+  half: Uint16Array | null;
+  reset: boolean;
+  sceneScore: number;
+  duplicate: boolean;
+  confidence: number;
+}
+
 export interface MotionEstimator {
   /**
    * Feed the next RGBA8 frame; returns its motion field and reset state.
@@ -485,6 +540,8 @@ export interface MotionEstimator {
    * float32 field that frame generation would only convert anyway.
    */
   processPacked(rgba: Uint8Array, forceReset?: boolean): PackedMotionResult;
+  /** processPacked() split in two: decisions + grid flow now, packing left to the caller (see AnalyzedMotion). */
+  analyzePacked(rgba: Uint8Array, forceReset?: boolean): AnalyzedMotion;
   close(): void;
 }
 
@@ -603,6 +660,15 @@ class DisMotionEstimator implements MotionEstimator {
     const { full, confidence } = this.toFull(a.small);
     const reset = confidence < RESET_CONFIDENCE;
     return { motion: reset ? null : full, reset, sceneScore: a.sceneScore, duplicate: false, confidence };
+  }
+
+  analyzePacked(rgba: Uint8Array, forceReset = false): AnalyzedMotion {
+    const a = this.analyze(rgba, forceReset);
+    if (a.small === null) return { small: null, half: null, reset: a.reset, sceneScore: a.sceneScore, duplicate: a.duplicate, confidence: a.confidence };
+    if (allFinite(a.small)) return { small: a.small, half: null, reset: false, sceneScore: a.sceneScore, duplicate: false, confidence: 1 };
+    const { full, confidence } = this.toFull(a.small);
+    const reset = confidence < RESET_CONFIDENCE;
+    return { small: null, half: reset ? null : encodeMotionR16G16(full), reset, sceneScore: a.sceneScore, duplicate: false, confidence };
   }
 
   processPacked(rgba: Uint8Array, forceReset = false): PackedMotionResult {
