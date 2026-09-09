@@ -27,14 +27,14 @@ export type NrPath = "auto" | "core" | "snippet";
  */
 export interface NrSettings {
   /**
-   * Neural model preset hint (DLSSNR.Hint.Render.Preset, i32): 0 = runtime default; 10/11/12/13 =
-   * transformer models J/K/L/M. NOTE: verified to have no visible effect on the current runtime,
-   * so the UI does not surface it; kept for forward compatibility.
+   * NR model preset hint (DLSSNR.Hint.Render.Preset): 0 = Default, 1/2/3 = Preset #1/#2/#3.
+   * Experimental and content-dependent (per the reference project) — Default is recommended and is
+   * often the only one with a visible effect. Distinct from the SR model preset J/K/L/M.
    */
-  preset: 0 | 10 | 11 | 12 | 13;
-  /** Look style: 0 = default, 1 = natural, 2 = cinematic. (Verified to change the result.) */
+  preset: 0 | 1 | 2 | 3;
+  /** Look style: 0 = Default, 1 = Natural, 2 = Cinematic. (Strong, visible effect.) */
   style: 0 | 1 | 2;
-  /** Overall enhancement blend, 0..1 (0 = off / original, 1 = full). Values above 1 are clamped. */
+  /** Overall neural-rendering strength, 0..2 (1 = default; the effect tends to plateau past ~1). */
   intensity: number;
   /** Local tone-mapping strength (float). Typical 0..2, 1 = neutral. */
   localTone: number;
