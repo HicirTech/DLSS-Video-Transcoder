@@ -48,7 +48,15 @@ const u32 = new Uint32Array(f32.buffer);
  */
 export function floatToHalf(value: number): number {
   f32[0] = value;
-  const x = u32[0]!;
+  return bitsToHalf(u32[0]!);
+}
+
+/**
+ * floatToHalf on the raw IEEE-754 bits of a float32. Lets a whole buffer be
+ * converted through a Uint32Array view with integer ops only, instead of a
+ * scalar store/load per element (13 ms per 720p motion field before).
+ */
+export function bitsToHalf(x: number): number {
   const sign = (x >>> 16) & 0x8000;
   const rawExp = (x >>> 23) & 0xff;
   const mant = x & 0x7fffff;
@@ -98,8 +106,74 @@ export function halfToFloat(half: number): number {
  */
 export function encodeMotionR16G16(motion: Float32Array): Uint16Array {
   const out = new Uint16Array(motion.length);
-  for (let i = 0; i < motion.length; i++) out[i] = floatToHalf(motion[i]!);
+  // A Float32Array's byteOffset is always 4-aligned, so the bit view is valid.
+  const bits = new Uint32Array(motion.buffer, motion.byteOffset, motion.length);
+  for (let i = 0; i < motion.length; i++) out[i] = bitsToHalf(bits[i]!);
   return out;
+}
+
+/**
+ * Bilinearly upsample an interleaved (dx, dy) grid flow to (outW, outH), scale
+ * x by outW/inW and y by outH/inH (grid pixels -> render pixels) and pack the
+ * result as R16G16_FLOAT halves in ONE pass, one row at a time. Bit-identical
+ * to `encodeMotionR16G16` applied to the estimator's scaled
+ * `resizeFlowBilinear` output (the same float32 rounding happens at the same
+ * two points), but without the two full-resolution float32 passes and the
+ * 14.7 MB intermediate a 720p field needs. Every grid sample must be finite.
+ */
+export function packFlowResizedR16G16(flow: Float32Array, inW: number, inH: number, outW: number, outH: number): Uint16Array {
+  const out = new Uint16Array(outW * outH * 2);
+  const kx = outW / inW;
+  const ky = outH / inH;
+  const sx = inW > 1 && outW > 1 ? (inW - 1) / (outW - 1) : 0;
+  const sy = inH > 1 && outH > 1 ? (inH - 1) / (outH - 1) : 0;
+  // Column sample positions and weights are the same for every row; keep the
+  // weights in float64 exactly as resizeFlowBilinear computes them.
+  const x0s = new Int32Array(outW);
+  const x1s = new Int32Array(outW);
+  const wxs = new Float64Array(outW);
+  for (let ox = 0; ox < outW; ox++) {
+    const fx = ox * sx;
+    const x0 = Math.floor(fx);
+    x0s[ox] = x0;
+    x1s[ox] = Math.min(x0 + 1, inW - 1);
+    wxs[ox] = fx - x0;
+  }
+  const row = new Float32Array(outW * 2);
+  const rowBits = new Uint32Array(row.buffer);
+  for (let oy = 0; oy < outH; oy++) {
+    const fy = oy * sy;
+    const y0 = Math.floor(fy);
+    const y1 = Math.min(y0 + 1, inH - 1);
+    const wy = fy - y0;
+    const r0 = y0 * inW * 2;
+    const r1 = y1 * inW * 2;
+    for (let ox = 0; ox < outW; ox++) {
+      const wx = wxs[ox]!;
+      const i00 = r0 + x0s[ox]! * 2;
+      const i10 = r0 + x1s[ox]! * 2;
+      const i01 = r1 + x0s[ox]! * 2;
+      const i11 = r1 + x1s[ox]! * 2;
+      const o = ox * 2;
+      // Math.fround reproduces the float32 store of the interpolated value that
+      // precedes the scale multiply in the reference path.
+      const topX = flow[i00]! * (1 - wx) + flow[i10]! * wx;
+      const botX = flow[i01]! * (1 - wx) + flow[i11]! * wx;
+      row[o] = Math.fround(topX * (1 - wy) + botX * wy) * kx;
+      const topY = flow[i00 + 1]! * (1 - wx) + flow[i10 + 1]! * wx;
+      const botY = flow[i01 + 1]! * (1 - wx) + flow[i11 + 1]! * wx;
+      row[o + 1] = Math.fround(topY * (1 - wy) + botY * wy) * ky;
+    }
+    const base = oy * outW * 2;
+    for (let i = 0; i < rowBits.length; i++) out[base + i] = bitsToHalf(rowBits[i]!);
+  }
+  return out;
+}
+
+/** True when every value of the buffer is finite. */
+export function allFinite(values: Float32Array): boolean {
+  for (let i = 0; i < values.length; i++) if (!Number.isFinite(values[i]!)) return false;
+  return true;
 }
 
 // -- Scene-cut score (sparse-grid mean abs luma diff) --------------------------
@@ -377,6 +451,16 @@ export interface MotionResult {
   confidence: number;
 }
 
+/** MotionResult with the field already packed as R16G16_FLOAT (what the DLSSG worker consumes). */
+export interface PackedMotionResult {
+  /** Interleaved (x, y) halves in render pixels, length width*height*2, or null when there is no usable motion. */
+  half: Uint16Array | null;
+  reset: boolean;
+  sceneScore: number;
+  duplicate: boolean;
+  confidence: number;
+}
+
 export interface MotionEstimator {
   /**
    * Feed the next RGBA8 frame; returns its motion field and reset state.
@@ -384,6 +468,12 @@ export interface MotionEstimator {
    * the frame is treated as a scene cut regardless of its score.
    */
   process(rgba: Uint8Array, forceReset?: boolean): MotionResult;
+  /**
+   * Same decisions as process(), but the motion comes back packed as halves
+   * via one fused resize+scale+pack pass — skipping the full-resolution
+   * float32 field that frame generation would only convert anyway.
+   */
+  processPacked(rgba: Uint8Array, forceReset?: boolean): PackedMotionResult;
   close(): void;
 }
 
@@ -434,7 +524,13 @@ class DisMotionEstimator implements MotionEstimator {
     this.offsets = buildSampleOffsets(width, height);
   }
 
-  process(rgba: Uint8Array, forceReset = false): MotionResult {
+  /**
+   * Scene analysis shared by process() and processPacked(): updates the
+   * history and returns the grid flow when there is one to upsample. A null
+   * `small` means the frame already has its final verdict (first frame, cut,
+   * duplicate); confidence is then settled, otherwise the caller decides it.
+   */
+  private analyze(rgba: Uint8Array, forceReset: boolean): { small: Float32Array | null; reset: boolean; sceneScore: number; duplicate: boolean; confidence: number } {
     if (rgba.length < this.width * this.height * 4) {
       throw new Error(`flow: frame is ${rgba.length} bytes, expected ${this.width * this.height * 4}`);
     }
@@ -445,7 +541,7 @@ class DisMotionEstimator implements MotionEstimator {
     if (!this.prevGray || !this.prevSamples) {
       this.prevGray = gray;
       this.prevSamples = samples;
-      return { motion: null, reset: true, sceneScore: 1, duplicate: false, confidence: 0 };
+      return { small: null, reset: true, sceneScore: 1, duplicate: false, confidence: 0 };
     }
 
     const sceneScore = meanAbsLumaDiff(samples, this.prevSamples) / 255;
@@ -456,13 +552,20 @@ class DisMotionEstimator implements MotionEstimator {
       this.prevGray = gray;
       this.prevSamples = samples;
       // Duplicate does not force reset (confidence 1); a scene cut does.
-      return { motion: null, reset: sceneReset, sceneScore, duplicate, confidence: duplicate ? 1 : 0 };
+      return { small: null, reset: sceneReset, sceneScore, duplicate, confidence: duplicate ? 1 : 0 };
     }
 
     // Dense flow on the small grid, current -> previous, in grid pixels.
     const small = this.backend.calc(gray, this.prevGray, this.flowW, this.flowH);
+    this.prevGray = gray;
+    this.prevSamples = samples;
+    return { small, reset: false, sceneScore, duplicate: false, confidence: -1 };
+  }
+
+  /** Full-resolution render-pixel float32 field plus the finite fraction (guides.py:52-63). */
+  private toFull(small: Float32Array): { full: Float32Array; confidence: number } {
     const full = resizeFlowBilinear(small, this.flowW, this.flowH, this.width, this.height);
-    // Convert grid displacement to render-res pixels (guides.py:52-55).
+    // Convert grid displacement to render-res pixels.
     const kx = this.width / this.flowW;
     const ky = this.height / this.flowH;
     let finite = 0;
@@ -480,12 +583,29 @@ class DisMotionEstimator implements MotionEstimator {
         full[yi] = 0;
       }
     }
-    const confidence = finite / (this.width * this.height);
-    const reset = confidence < RESET_CONFIDENCE;
+    return { full, confidence: finite / (this.width * this.height) };
+  }
 
-    this.prevGray = gray;
-    this.prevSamples = samples;
-    return { motion: reset ? null : full, reset, sceneScore, duplicate: false, confidence };
+  process(rgba: Uint8Array, forceReset = false): MotionResult {
+    const a = this.analyze(rgba, forceReset);
+    if (a.small === null) return { motion: null, reset: a.reset, sceneScore: a.sceneScore, duplicate: a.duplicate, confidence: a.confidence };
+    const { full, confidence } = this.toFull(a.small);
+    const reset = confidence < RESET_CONFIDENCE;
+    return { motion: reset ? null : full, reset, sceneScore: a.sceneScore, duplicate: false, confidence };
+  }
+
+  processPacked(rgba: Uint8Array, forceReset = false): PackedMotionResult {
+    const a = this.analyze(rgba, forceReset);
+    if (a.small === null) return { half: null, reset: a.reset, sceneScore: a.sceneScore, duplicate: a.duplicate, confidence: a.confidence };
+    // Fast path: every grid sample finite (always, for NVOFA and block matching)
+    // means the interpolated field is finite too, so confidence is exactly 1 and
+    // one fused pass replaces resize + scale + count + pack.
+    if (allFinite(a.small)) {
+      return { half: packFlowResizedR16G16(a.small, this.flowW, this.flowH, this.width, this.height), reset: false, sceneScore: a.sceneScore, duplicate: false, confidence: 1 };
+    }
+    const { full, confidence } = this.toFull(a.small);
+    const reset = confidence < RESET_CONFIDENCE;
+    return { half: reset ? null : encodeMotionR16G16(full), reset, sceneScore: a.sceneScore, duplicate: false, confidence };
   }
 
   close(): void {

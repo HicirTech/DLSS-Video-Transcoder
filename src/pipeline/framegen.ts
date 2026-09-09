@@ -29,7 +29,7 @@ import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings } from "../server/api-types.ts";
 import { DlssgSession, probeDlssg } from "./dlssg.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
-import { createMotionEstimator, encodeMotionR16G16, type MotionEstimator, type MotionResult } from "./flow.ts";
+import { createMotionEstimator, type MotionEstimator, type PackedMotionResult } from "./flow.ts";
 import { FrameReader } from "./frame-reader.ts";
 import {
   type FrameGenEngine,
@@ -124,7 +124,7 @@ function frameGenDisabledError(plan: InterpolationPlan, disabledFrames: number, 
 interface PreparedFrame {
   frame: TimedFrame;
   previousTimestamp: Rational | null;
-  guide: MotionResult;
+  guide: PackedMotionResult;
   reset: boolean;
 }
 
@@ -151,7 +151,7 @@ class DlssgStage {
     let frame = input;
     // A segment change (timestamp discontinuity, or a cut found by an earlier stage) is a known reset.
     let forceReset = previous !== null && frame.segment !== previous.segment;
-    const guide = this.estimator.process(frame.rgba, forceReset);
+    const guide = this.estimator.processPacked(frame.rgba, forceReset);
     // Only the first stage discovers scene cuts; it starts a new segment so later stages inherit the decision.
     if (previous !== null && this.detectSourceCuts && guide.reset && !forceReset) {
       frame = { ...frame, segment: previous.segment + 1 };
@@ -168,7 +168,7 @@ class DlssgStage {
   /** Synthesised frames that precede the real frame, then the real frame itself. */
   async evaluate(prepared: PreparedFrame): Promise<TimedFrame[]> {
     const { frame } = prepared;
-    const motion = prepared.guide.motion ? encodeMotionR16G16(prepared.guide.motion) : this.zeros;
+    const motion = prepared.guide.half ?? this.zeros;
     const generated = await this.session.processFrame(frame.rgba, motion, this.nextIndex++, prepared.reset, frame.timestamp.num, frame.timestamp.den);
     this.generatedTotal += generated.length;
     const output: TimedFrame[] = [];
