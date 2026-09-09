@@ -10,7 +10,9 @@
  *   GET  /api/jobs/:id              -> JobStatus
  *   POST /api/jobs/:id/cancel       -> JobStatus
  *   GET  /api/file?path=<abs path>  -> raw file bytes (previews of inputs/outputs; local paths only)
+ *   POST /api/upload  multipart/form-data 'file' -> { path, name, size } (stores the upload, returns its server path for use as a job input)
  *   GET  /api/tools                 -> ToolsReport      (ffmpeg / ffprobe availability)
+ *   GET  /api/catalog               -> RuntimeManifest  (installed DLSS runtime DLL versions; see JobRequest.dllDir)
  * WebSocket:
  *   /ws  server -> client messages are WsEvent JSON; the client never needs to send anything.
  */

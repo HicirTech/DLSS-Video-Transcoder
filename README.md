@@ -90,7 +90,7 @@ Key per-command options (defaults in parentheses):
   `1.5`=Quality, `1.72`=Balanced, `2.0`=Performance, `3.0`=Ultra Performance), `--preset NAME` (L;
   `A`–`F` are older CNN models, `J`–`O` are transformer models), `--dlss-version VER` (bundled DLL;
   prefix match against `versions`).
-- **`nr`** — `--intensity F` (1; a 0–1 blend, 0 = original, 1 = full — values above 1 are clamped),
+- **`nr`** — `--intensity F` (1; overall strength 0–2, 1 = default, the effect tends to plateau past ~1),
   `--local-tone F` (1; 0–2, 1 = neutral), `--local-structure F` (1; 0–2, 1 = neutral). (`--preset`
   exists but has no visible effect on the current driver.)
 - **`fg`** — `--multiplier N` (2; reliable at 2×, up to the GPU/runtime maximum, e.g. 3×/4× on

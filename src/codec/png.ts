@@ -7,7 +7,8 @@
  *   - all colour types (0 greyscale, 2 RGB, 3 indexed, 4 grey+alpha, 6 RGBA) at every bit depth the
  *     specification allows for them (1, 2, 4, 8, 16)
  *   - the five scanline filters (None, Sub, Up, Average, Paeth) and Adam7 interlacing
- *   - the zlib stream itself is handled by Bun.inflateSync / Bun.deflateSync
+ *   - the zlib stream itself is handled by node:zlib's inflateSync / deflateSync (not Bun's own,
+ *     whose 1.4.2 build mishandles some valid streams — see decodePng / encodePng for details)
  *
  * Decoded images are always 8-bit RGBA; 16-bit samples are reduced by keeping their high byte.
  * Encoded images are always 8-bit RGBA (colour type 6), filter type 0 on every scanline, a single IDAT chunk.
@@ -754,7 +755,7 @@ type ZlibLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
  * Encodes an 8-bit RGBA image as a PNG (colour type 6, bit depth 8, no interlace).
  *
  * Every scanline uses filter type 0 and the whole zlib stream goes into one IDAT chunk, so the cost is
- * essentially one memcpy plus `Bun.deflateSync` at the requested level (default 6).
+ * essentially one memcpy plus node:zlib's `deflateSync` at the requested level (default 6).
  *
  * @throws {PngError} when the dimensions, buffer length or compression level are invalid.
  */
