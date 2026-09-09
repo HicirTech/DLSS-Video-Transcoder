@@ -216,15 +216,27 @@ Verified against the source on 2026-09-09.
 
 ### Known limitations / roadmap
 
-- **Performance.** _Done:_ NVENC GPU encoding with CPU fallback, **GPU optical flow via NVOFA**
-  (~5.7× faster and more accurate than the CPU block-matcher, auto CPU fallback), removed the
-  per-frame pipe flushes, exact-rational frame-gen timing, decode read-ahead, and dropping ffmpeg's
-  unused second input. _Measured on an RTX 5090 at 1080p (warm):_ ~84 fps bypass, ~60 fps neural
-  rendering, ~27 fps with optical-flow motion. **The GPU is not the bottleneck** — a full
-  upload→process→readback is ~1.3 ms/frame; the cost is the uncompressed RGBA rawvideo piped to and
-  from ffmpeg. The remaining structural win — keeping frames GPU-resident and encoding on the GPU
-  (D3D12↔NVENC/NVDEC interop, no rawvideo pipes) — is a large effort with questionable ROI at current
-  throughput, so it is deferred.
+- **Performance — threaded GPU pipeline (~2× throughput).** Video encoding now runs in-process on
+  the GPU via **NVENC** (H.264/HEVC), and ffmpeg only muxes the compressed elementary stream
+  (`-c:v copy`) — removing the uncompressed RGBA output pipe and ffmpeg's `rgba→yuv` swscale. On top of
+  that, decode, DLSS and NVENC each run on their own thread, so the synchronous GPU/FFI stages
+  (each ~4–5 ms at 1080p) overlap instead of running back-to-back on one thread. Frames move between
+  threads as zero-copy transfers, with credit-based backpressure bounding memory.
+  _Measured on an RTX 5090 at 1080p (steady-state, h264_nvenc):_
+
+  | workload | before (single thread) | after (threaded) |
+  | --- | --- | --- |
+  | neural rendering (feature 18) | 79 fps | **163 fps** |
+  | bypass transcode | 108 fps | **228 fps** |
+
+  A 3-hour 60 fps neural-rendering pass drops from ~2.3 h to ~1.1 h. The path is chosen automatically
+  for NVENC codecs (even dimensions, within the hardware size caps — H.264 ≤ 4096, HEVC ≤ 8192);
+  CPU/AV1 codecs use the original single-thread rawvideo path. Also done earlier: **GPU optical flow
+  via NVOFA** (~5.7× faster than the CPU block-matcher, auto CPU fallback), exact-rational frame-gen
+  timing, decode read-ahead. _Remaining tier (not done):_ true zero-copy GPU residency (NVDEC decode +
+  D3D12↔CUDA external-memory interop so DLSS output never touches the CPU) would push past the
+  ~5–6 ms main-thread ceiling toward the ~285 fps pure-encode rate, but needs hand-rolled shared-handle
+  interop with fence sync — high risk, and the threaded pipeline already delivered the 2× win.
 - **feature 18 in the pipeline — _done_.** The `nr` engine (image and video) now runs DLSS Neural
   Rendering and exposes the reference's controls (model preset, style, intensity, tone/structure).
   Model preset is an experimental, content-dependent hint; global tone is not applied; feature 18 does
