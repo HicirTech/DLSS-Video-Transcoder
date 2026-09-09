@@ -9,6 +9,7 @@ import type { EncodeSettings } from "../server/api-types.ts";
 import { DlssgSession, probeDlssg } from "./dlssg.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
 import { createMotionEstimator, encodeMotionR16G16 } from "./flow.ts";
+import { tryCreateNvofBackend } from "./nvof.ts";
 import { formatRational, parseRational, ratMul, rational } from "./nut.ts";
 import { findTool } from "./tools.ts";
 import { encoderArgs, probeVideo } from "./video.ts";
@@ -112,7 +113,10 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
   );
 
   const session = await DlssgSession.open(workerDir, { width, height, frameCount: info.frames ?? 1, generatedCount });
-  const estimator = createMotionEstimator(width, height);
+  // Prefer the GPU optical-flow engine (NVOFA) for the motion field; fall back to CPU.
+  const nvof = tryCreateNvofBackend(width, height);
+  const estimator = createMotionEstimator(width, height, nvof ? { backend: nvof } : {});
+  progress(0, nvof ? "optical flow: NVIDIA hardware (NVOFA)" : "optical flow: CPU block matching (NVOFA unavailable)");
   const zeros = new Uint16Array(width * height * 2);
   const reader = new FrameReader(decoder.stdout as ReadableStream<Uint8Array>);
   const stdin = encoder.stdin as { write(b: Uint8Array): unknown; flush(): number | Promise<number>; end(): unknown };

@@ -9,6 +9,7 @@ import { DEFAULT_ENCODE_SETTINGS } from "../server/api-types.ts";
 import { createEngine } from "./engine.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
 import { createMotionEstimator } from "./flow.ts";
+import { tryCreateNvofBackend } from "./nvof.ts";
 import { openGpu } from "./gpu.ts";
 import { resolveTargetSize } from "./image.ts";
 import { findTool } from "./tools.ts";
@@ -262,7 +263,13 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const frameBytes = renderWidth * renderHeight * 4;
   const reader = new FrameReader(decoder.stdout);
   const cuts = new SceneCutDetector(renderWidth, renderHeight);
-  const estimator = options.motion === "flow" ? createMotionEstimator(renderWidth, renderHeight) : null;
+  let estimator: ReturnType<typeof createMotionEstimator> | null = null;
+  if (options.motion === "flow") {
+    // Prefer the GPU optical-flow engine (NVOFA); fall back to the CPU matcher.
+    const nvof = tryCreateNvofBackend(renderWidth, renderHeight);
+    estimator = createMotionEstimator(renderWidth, renderHeight, nvof ? { backend: nvof } : {});
+    progress(0, nvof ? "optical flow: NVIDIA hardware (NVOFA)" : "optical flow: CPU block matching (NVOFA unavailable)");
+  }
   let frames = 0;
   let sceneCuts = 0;
   try {
