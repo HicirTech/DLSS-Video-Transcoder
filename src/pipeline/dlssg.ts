@@ -94,6 +94,9 @@ export interface DlssgOptions {
 }
 
 export class DlssgSession {
+  /** Frames for which the worker reported generation disabled (status ok, but no in-between frames). */
+  disabledFrames = 0;
+
   private constructor(
     private readonly proc: ReturnType<typeof Bun.spawn>,
     private readonly reader: ExactReader,
@@ -159,6 +162,7 @@ export class DlssgSession {
     if (reply.getUint32(4, true) !== 0) throw new Error(`DLSS Frame Generation failed while processing a frame (status ${reply.getUint32(4, true)}).`);
     const generated = reply.getUint32(8, true);
     const disabled = reply.getUint32(12, true);
+    if (disabled) this.disabledFrames++;
     if (disabled || generated === 0) return [];
     const frameBytes = this.width * this.height * 4;
     const frames: Uint8Array[] = [];

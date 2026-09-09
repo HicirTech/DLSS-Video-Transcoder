@@ -4,6 +4,7 @@
  * worker, the interpolated frames it returns are interleaved before the real
  * frame, and a second ffmpeg encodes the result at the multiplied frame rate.
  */
+import { existsSync, unlinkSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings } from "../server/api-types.ts";
 import { DlssgSession, probeDlssg } from "./dlssg.ts";
@@ -43,6 +44,20 @@ export interface FrameGenResult {
 export function defaultFrameGenOutput(input: string): string {
   const ext = extname(input);
   return join(dirname(input), `${basename(input, ext)}.dlssg.mp4`);
+}
+
+/**
+ * The worker produced no in-between frames. Muxing what we have at the multiplied
+ * rate would yield a video with source-count frames stamped Nx too fast (it plays
+ * fast, then freezes for the rest of the audio), so the job fails instead.
+ */
+function frameGenDisabledError(multiplier: number, disabledFrames: number): Error {
+  return new Error(
+    `DLSS Frame Generation produced no interpolated frames (0 of the requested ${multiplier}x)` +
+      (disabledFrames ? `; the worker reported generation disabled for ${disabledFrames} frame(s)` : "") +
+      ". DLSS Frame Generation needs a real-time render context and does not run for offline video on this GPU/driver. " +
+      "No output was written — use Super Resolution or Neural Rendering instead.",
+  );
 }
 
 export async function processFrameGen(options: FrameGenOptions): Promise<FrameGenResult> {
@@ -138,13 +153,26 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
 
   let inputFrames = 0;
   let outputFrames = 0;
+  let generatedTotal = 0;
+  let intervals = 0;
+  // Real inter-frame intervals to tolerate with zero synthesised frames before
+  // concluding frame generation is disabled and bailing out (fast fail).
+  const FG_PROBE_INTERVALS = 8;
   try {
     for (;;) {
       const rgba = await reader.next(frameBytes);
       if (!rgba) break;
       const guide = estimator.process(rgba);
+      const reset = inputFrames === 0 || guide.reset;
       const motion = guide.motion ? encodeMotionR16G16(guide.motion) : zeros;
-      const generated = await session.processFrame(rgba, motion, inputFrames, inputFrames === 0 || guide.reset, BigInt(inputFrames), 1n);
+      const generated = await session.processFrame(rgba, motion, inputFrames, reset, BigInt(inputFrames), 1n);
+      generatedTotal += generated.length;
+      if (!reset) intervals++;
+      // Fail fast before spending the whole encode: if nothing has been
+      // synthesised after several real intervals, the worker has disabled
+      // generation. Continuing would mux source-count frames at the multiplied
+      // rate -> a video that plays Nx too fast and then freezes.
+      if (generatedTotal === 0 && intervals >= FG_PROBE_INTERVALS) throw frameGenDisabledError(multiplier, session.disabledFrames);
       for (const frame of generated) { await write(frame); outputFrames++; }
       await write(rgba);
       outputFrames++;
@@ -152,8 +180,19 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
       const total = info.frames;
       progress(total ? Math.min(0.98, inputFrames / total) : 0.5, `frame ${inputFrames}/${total ?? "?"}`, inputFrames);
     }
+    // Clips shorter than the probe window still must not emit a wrong-rate file:
+    // if any real interval produced nothing, generation is not working.
+    if (generatedTotal === 0 && intervals >= 1) throw frameGenDisabledError(multiplier, session.disabledFrames);
     if (nvenc) nvenc.finish();
     stdin.end();
+  } catch (error) {
+    // Tear down both ffmpeg children and remove the partial / wrong-rate output
+    // so a failed job never leaves a misleading file behind.
+    try { decoder.kill(); } catch {}
+    try { encoder.kill(); } catch {}
+    await Promise.allSettled([decoder.exited, encoder.exited, decodeErrDrained, encodeErrDrained]);
+    try { if (existsSync(output)) unlinkSync(output); } catch {}
+    throw error;
   } finally {
     nvenc?.close();
     estimator.close();
