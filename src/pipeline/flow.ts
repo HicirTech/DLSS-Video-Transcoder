@@ -243,6 +243,8 @@ export function resizeFlowBilinear(flow: Float32Array, inW: number, inH: number,
 export interface FlowBackend {
   readonly name: string;
   calc(current: Float32Array, previous: Float32Array, w: number, h: number): Float32Array;
+  /** Release any native resources (GPU backends); optional for pure backends. */
+  close?(): void;
 }
 
 export interface BlockMatchOptions {
@@ -384,8 +386,8 @@ export type FlowBackendKind = "auto" | "ts" | "ffmpeg" | "nvof" | "dis";
 export interface MotionEstimatorOptions {
   /** Long-side resolution to run flow at (default 640, rounded even, >= 64). */
   flowWidth?: number;
-  /** Backend selection (default 'auto' -> pure-TS block matching). */
-  backend?: FlowBackendKind;
+  /** Backend selection (default 'auto' -> pure-TS block matching), or a ready-made backend instance (e.g. NVOFA). */
+  backend?: FlowBackendKind | FlowBackend;
   /** Override the block-match backend tuning (ts backend only). */
   blockMatch?: BlockMatchOptions;
 }
@@ -482,6 +484,7 @@ class DisMotionEstimator implements MotionEstimator {
   close(): void {
     this.prevGray = null;
     this.prevSamples = null;
+    this.backend.close?.();
   }
 }
 
@@ -493,6 +496,9 @@ class DisMotionEstimator implements MotionEstimator {
  */
 export function createMotionEstimator(width: number, height: number, opts: MotionEstimatorOptions = {}): MotionEstimator {
   if (width <= 0 || height <= 0) throw new Error(`flow: invalid size ${width}x${height}`);
-  const backend = selectBackend(opts.backend ?? "auto", opts);
+  // A ready-made backend instance (e.g. the NVOFA GPU backend) is used directly;
+  // otherwise select one of the pure/built-in backends by kind.
+  const chosen = opts.backend;
+  const backend = chosen && typeof chosen === "object" ? chosen : selectBackend(chosen ?? "auto", opts);
   return new DisMotionEstimator(width, height, backend, opts.flowWidth ?? DEFAULT_FLOW_WIDTH);
 }
