@@ -12,7 +12,9 @@ import { createMotionEstimator } from "./flow.ts";
 import { FrameReader } from "./frame-reader.ts";
 import { probeNvenc, type NvencCodec } from "./nvenc.ts";
 import { runThreadedEncode } from "./threaded-encode.ts";
+import { runAsyncNrEncode } from "./async-nr-encode.ts";
 import { tryCreateNvofBackend } from "./nvof.ts";
+import { DXGI_FORMAT_R8G8B8A8_UNORM, linearLayout } from "../native/d3d12.ts";
 import { openGpu } from "./gpu.ts";
 import { resolveTargetSize } from "./image.ts";
 import { findTool } from "./tools.ts";
@@ -205,6 +207,58 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   progress(0, `source ${info.width}x${info.height} ${info.codec} ${info.fpsText} fps, ${info.frames ?? "?"} frames; ${upscaling ? `upscaling to ${target.width}x${target.height}` : `working size ${target.width}x${target.height}`}`);
 
   const session = openGpu({ adapterIndex: options.adapterIndex, debugLayer: options.debugLayer });
+
+  // GPU-resident async zero-copy path: DLSS Neural Rendering + NVENC with no CPU
+  // frame copies between DLSS and NVENC (the DLSS output stays on the GPU and
+  // NVENC reads it via a shared buffer). DLSS and NVENC overlap on the GPU — ~30%
+  // faster than the CPU-frame threaded pipeline (measured ~212 vs 163 fps at
+  // 1080p). Applies to NR at 1:1 with an NVENC codec at even, in-cap dimensions.
+  // (feature 18 consumes no motion, so motion="flow" would only waste work here.)
+  const nrNative = options.engine === "nr" && !upscaling && options.runtimeDir ? nvencNativeTarget(encode.codec, target.width, target.height) : null;
+  if (nrNative && probeNvenc(options.adapterIndex ?? 0).available) {
+    try {
+      const { num, den } = rateParts(info.fpsText);
+      const layout = linearLayout(target.width, target.height, DXGI_FORMAT_R8G8B8A8_UNORM);
+      const decodeArgs = [
+        "-v", "error", "-nostdin", "-i", options.input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba",
+        ...(target.width !== info.width || target.height !== info.height ? ["-vf", `scale=${target.width}:${target.height}:flags=lanczos`] : []),
+        "pipe:1",
+      ];
+      const wantAudio = info.hasAudio && encode.copyAudio;
+      const audioArgs = wantAudio ? ["-map", "1:a:0", ...(encode.container === "mkv" ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"])] : ["-an"];
+      const faststart = encode.container === "mp4" || encode.container === "mov" ? ["-movflags", "+faststart"] : [];
+      const sinkArgs = [
+        "-v", "error", "-y", "-f", nrNative.demux, "-framerate", info.fpsText, "-i", "pipe:0",
+        ...(wantAudio ? ["-i", options.input] : []),
+        "-map", "0:v:0", "-c:v", "copy", ...audioArgs, ...faststart, output,
+      ];
+      const cuts = new SceneCutDetector(target.width, target.height);
+      const guide = (rgba: Uint8Array, index: number): { reset: boolean; sceneCut: boolean } => {
+        const cut = index > 0 && cuts.isCut(rgba);
+        if (index === 0) cuts.isCut(rgba);
+        return { reset: index === 0 || cut, sceneCut: cut };
+      };
+      progress(0, `encode: NVENC ${nrNative.codec} (GPU-resident async zero-copy pipeline)`);
+      const { DlssNrSession } = await import("../ngx/nr-render.ts");
+      const nr = DlssNrSession.open(session, { width: target.width, height: target.height, settings: options.settings, runtimeDir: options.runtimeDir!, dllDir: options.dllDir, appDataPath: options.appDataPath });
+      try {
+        const r = await runAsyncNrEncode({
+          session, nr, ffmpeg, decodeArgs, sinkArgs,
+          width: target.width, height: target.height, rowPitch: layout.rowPitch, totalBytes: layout.totalBytes,
+          enc: { fpsNum: num, fpsDen: den, codec: nrNative.codec, cq: encode.quality, ordinal: options.adapterIndex ?? 0 },
+          totalFrames: info.frames, guide, onProgress: progress,
+        });
+        if (r.frames === 0) throw new Error("No frames were decoded from the input. The file may be empty, corrupt, or not a video ffmpeg can read.");
+        progress(1, `encoded ${r.frames} frames to ${output}${r.sceneCuts ? ` (${r.sceneCuts} scene cuts reset history)` : ""}`);
+        return { output, width: target.width, height: target.height, fps: info.fps, frames: r.frames, sceneCuts: r.sceneCuts, engine: options.engine, ms: Math.round(performance.now() - started) };
+      } finally {
+        nr.close();
+      }
+    } finally {
+      session.close();
+    }
+  }
+
   const engine = createEngine(options.engine, session, {
     width: renderWidth,
     height: renderHeight,
