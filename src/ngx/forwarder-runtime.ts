@@ -1,8 +1,7 @@
 /**
- * Load the generated nvngx.dll shim and expose its exports as typed calls.
- * Also provides a self-test that proves the call path works without touching
- * NVIDIA code: the slots are pointed at JavaScript callbacks and the stubs are
- * driven with sentinel arguments.
+ * Loads the generated nvngx.dll shim and exposes its exports as typed calls,
+ * plus a self-test that proves the call path end to end without touching NVIDIA
+ * code.
  */
 import { FFIType, JSCallback } from "bun:ffi";
 import { callableAt } from "../native/com.ts";
@@ -13,7 +12,7 @@ import { FORWARDER_EXPORTS, writeForwarder, writeForwarderSync } from "./forward
 export interface ForwarderModule {
   readonly path: string;
   readonly module: NativeModule;
-  /** Address of each export, for diagnostics. */
+  /** Address of each export; `fwd_create` is also re-bound to other NGX signatures (see NgxCore.fn). */
   readonly addresses: Record<(typeof FORWARDER_EXPORTS)[number], number>;
   setSlots(create: number, evaluate: number, release: number): void;
   create(cmdList: number, featureId: number, params: number, outHandle: number): number;
@@ -66,8 +65,9 @@ export interface SelfTestResult {
 
 /**
  * Point every slot at a JavaScript callback and drive the stubs with sentinel
- * values. Verifies export resolution, slot storage, argument passing, and that
- * the return value comes back through the stub.
+ * values, checking export resolution, slot storage, argument passing and the
+ * returned value. A loaded-but-broken shim would otherwise only show up as a
+ * fault inside NVIDIA code.
  */
 export function selfTestForwarder(fwd: ForwarderModule): SelfTestResult {
   const seen: { name: string; args: number[] }[] = [];

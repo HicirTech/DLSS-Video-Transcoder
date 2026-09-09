@@ -1,15 +1,14 @@
 /**
- * Our own NVSDK_NGX_Parameter object.
+ * Our own NVSDK_NGX_Parameter object, for driving a feature snippet DLL directly.
  *
- * The feature snippet DLLs (nvngx_dlss.dll, nvngx_dlssg.dll, nvngx_dlssnr.dll)
- * export CreateFeature / EvaluateFeature but NOT AllocateParameters /
- * GetCapabilityParameters — those live only in the driver's NGX core. To drive a
- * snippet directly in-process we must hand it a parameter object we own: a
+ * The snippet DLLs (nvngx_dlss.dll, nvngx_dlssg.dll, nvngx_dlssnr.dll) export
+ * CreateFeature / EvaluateFeature but NOT AllocateParameters /
+ * GetCapabilityParameters — those live only in the driver's NGX core — so a
+ * snippet driven in-process must be handed a parameter object we own: a
  * C++-style object whose first field points at a vtable of Set / Get / Reset
- * methods. NVIDIA's static library lays adjacent overloads out in reverse
- * declaration order (the "msvc" layout in params.ts); this object implements
- * exactly that layout, backed by a plain JavaScript map, so both the runtime and
- * our own code read and write the same store.
+ * methods, laid out in MSVC's reverse-declaration order (the "msvc" layout in
+ * params.ts). It is backed by a plain JavaScript map, so the runtime and our own
+ * code read and write one store.
  */
 import { FFIType, JSCallback } from "bun:ffi";
 import { NativeStruct, asPtr, readCString, viewNative } from "../native/memory.ts";
@@ -67,7 +66,7 @@ export class NgxParamObject {
       slots.pointer(slot * 8, asPtr(cb.ptr));
     }
 
-    // Slots 8..15: getters copy the stored value out and report found / not-found.
+    // Slots 8..15: getters, each writing the stored value at its own width.
     for (let i = 0; i < 8; i++) {
       const write = WRITERS[i]!;
       const cb = new JSCallback(
@@ -84,7 +83,7 @@ export class NgxParamObject {
       slots.pointer((8 + i) * 8, asPtr(cb.ptr));
     }
 
-    // Slot 16: Reset clears the store.
+    // Slot 16: Reset.
     const reset = new JSCallback(() => this.store.clear(), { args: [FFIType.ptr], returns: FFIType.void });
     this.callbacks.push(reset);
     slots.pointer(16 * 8, asPtr(reset.ptr));

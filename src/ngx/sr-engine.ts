@@ -1,12 +1,10 @@
 /**
- * DLSS Super Resolution frame engine (NGX feature 1) — real upscaling.
+ * DLSS Super Resolution frame engine: importing this module (as the worker does
+ * when a job's engine is "sr") wires NGX feature 1 into `createEngine`.
  *
- * Importing this module (the worker does so when a job's engine is "sr") wires an
- * upscaling engine into `createEngine`. Unlike the neural-rendering engine, this
- * one has a different output size from its input: it feeds DLSS the source-size
- * frame and DLSS writes the larger output. The requested factor (outputWidth /
- * width) is snapped to the nearest fixed DLSS quality mode, exactly like the `sr`
- * CLI command.
+ * This is the one engine whose output size differs from its input. DLSS accepts
+ * only a fixed set of render-to-output ratios, so the requested factor is snapped
+ * to the nearest quality mode rather than honoured exactly.
  */
 import { RUNTIME_DIR } from "../paths.ts";
 import { registerSrEngine, type Engine, type EngineOptions } from "../pipeline/engine.ts";

@@ -118,6 +118,9 @@ export class NgxCore {
     this.forwarder = forwarder;
   }
 
+  // The forwarder's slot 0 is shared mutable state: it is re-pointed at the target
+  // immediately before each call, so a ForwarderModule must not be driven from two
+  // threads at once.
   private fn(name: string, args: FFIType[], returns: FFIType = FFIType.i32) {
     const address = this.address(name);
     if (!this.forwarder) return callableAt(address, { args, returns });

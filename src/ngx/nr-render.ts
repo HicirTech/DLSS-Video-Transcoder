@@ -5,10 +5,9 @@
  * nvngx_dlssnr.dll, which exports the whole NVSDK_NGX_D3D12 API but NOT the
  * parameter allocator — so this session loads that DLL directly (not the driver
  * core), routes calls through the nvngx.dll forwarder shim, and hands the runtime
- * our own NgxParamObject. The DLL reads the output size from DLSSNR.Width /
- * DLSSNR.Height (the generic Width/Height names do not exist in it) plus a
- * PerfQualityValue; neural controls are read at evaluate. Neural rendering is a
- * 1:1 enhancement (no upscale), so render and output size are equal.
+ * our own NgxParamObject. The DLL reads its size from DLSSNR.Width /
+ * DLSSNR.Height; the generic Width/Height names do not exist in it. Neural
+ * rendering is a 1:1 enhancement, so render and output size are equal.
  */
 import { mkdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -93,7 +92,7 @@ export class DlssNrSession {
     return new DlssNrSession(session, core, params, created.handle, opts.width, opts.height, opts.settings, color, output);
   }
 
-  /** Set the color/output resources and all neural control parameters for one evaluate. */
+  /** The runtime reads the look controls at evaluate, so every one is re-set per frame. */
   private setEvalParams(reset: boolean): void {
     const s = this.settings;
     this.params.setResource(NrParam.Color, this.color.ptr);
@@ -110,7 +109,7 @@ export class DlssNrSession {
     this.params.setU32(NrParam.UICorrection, s.uiCorrection ? 1 : 0);
   }
 
-  /** Upload the input and record the NGX evaluate into the shared command list (no submit). */
+  /** Records into the session's shared command list; the caller submits it. */
   private recordEvaluate(colorRgba: Uint8Array, reset: boolean): void {
     const expected = this.width * this.height * 4;
     if (colorRgba.byteLength !== expected) throw new Error(`DLSS NR: expected ${expected} color bytes, got ${colorRgba.byteLength}`);
@@ -122,18 +121,17 @@ export class DlssNrSession {
   }
 
   /**
-   * Async zero-copy path: record (onto the caller's `list`, no submit) the input
-   * upload via `staging`, the NGX evaluate, and a GPU copy of the output into
-   * `dst` (a shared row-major RGBA buffer, `rowPitch` bytes/row). The caller
-   * submits `list` and signals a fence; a CUDA worker waits that fence and
-   * encodes `dst`. Nothing touches the CPU. `staging` must be an UPLOAD buffer of
-   * at least linearLayout(width,height,RGBA8).totalBytes.
+   * Async zero-copy path: records upload, evaluate and a GPU copy of the output
+   * into `dst` onto the caller's `list` without submitting it, so the caller can
+   * submit once and signal a fence that a CUDA encoder waits on — the frame never
+   * reaches the CPU. `staging` must be an UPLOAD buffer of at least
+   * linearLayout(width, height, RGBA8).totalBytes, and `dst` a row-major RGBA
+   * texture of `rowPitch` bytes per row.
    */
   recordEvaluateInto(list: D3D12GraphicsCommandList, staging: D3D12Resource, colorRgba: Uint8Array, reset: boolean, dst: D3D12Resource, rowPitch: number): void {
     const expected = this.width * this.height * 4;
     if (colorRgba.byteLength !== expected) throw new Error(`DLSS NR: expected ${expected} color bytes, got ${colorRgba.byteLength}`);
     const layout = linearLayout(this.width, this.height, DXGI_FORMAT_R8G8B8A8_UNORM);
-    // Upload input rgba -> color via the caller's staging buffer + list.
     const target = viewNative(staging.map({ begin: 0, end: 0 }), layout.totalBytes);
     if (layout.rowPitch === layout.rowBytes) target.set(colorRgba);
     else for (let y = 0; y < this.height; y++) target.set(colorRgba.subarray(y * layout.rowBytes, (y + 1) * layout.rowBytes), y * layout.rowPitch);
@@ -144,11 +142,9 @@ export class DlssNrSession {
       { resource: staging, footprint: { offset: 0, format: DXGI_FORMAT_R8G8B8A8_UNORM, width: this.width, height: this.height, rowPitch: layout.rowPitch } },
     );
     list.transition(this.color, UAV);
-    // Evaluate on the caller's list.
     list.transition(this.output, UAV);
     this.setEvalParams(reset);
     ngxCheck(this.core.evaluateFeature(list.ptr, this.handle, this.params), "DLSS NR EvaluateFeature");
-    // Copy the output straight into the shared buffer.
     list.transition(this.output, D3D12_RESOURCE_STATE_COPY_SOURCE);
     list.transition(dst, D3D12_RESOURCE_STATE_COPY_DEST);
     list.copyTextureRegion(
@@ -169,7 +165,7 @@ export class DlssNrSession {
     this.params.close();
     this.color.release();
     this.output.release();
-    // The standalone dlssnr DLL shuts down cleanly, but we leave NGX to process
-    // exit for parity with the SR path; the session releases the device.
+    // No Shutdown1: the standalone dlssnr DLL survives it, but the SR path cannot
+    // (see sr.ts), so both leave NGX to process exit. The session owns the device.
   }
 }

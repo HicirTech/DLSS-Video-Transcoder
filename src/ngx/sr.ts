@@ -7,10 +7,10 @@
  * passes), creates the feature once, then evaluates one frame at a time on
  * GPU-resident textures.
  *
- * Teardown note: this driver core's Shutdown1 frees the D3D12 device and faults
- * after a feature has been created, so close() releases the feature and its
- * resources but does NOT call Shutdown1 — NGX is reclaimed when the process
- * exits. Run one job per short-lived process (or reuse the session across jobs).
+ * Teardown: this driver core's Shutdown1 frees the D3D12 device and faults once a
+ * feature has been created, so close() releases the feature and its resources but
+ * never calls it — NGX is reclaimed at process exit. Reuse one session across
+ * jobs, or run one job per short-lived process.
  */
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";

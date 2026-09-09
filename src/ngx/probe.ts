@@ -65,8 +65,8 @@ function driverVersionFromSmi(): string | null {
 async function inventory(runtimeDir: string): Promise<RuntimeFile[]> {
   const files: RuntimeFile[] = [];
   for (const { name, subdir, role } of RUNTIME_FILES) {
-    // The runtime keeps each feature's DLL in its own subfolder (runtime/dlss,
-    // runtime/dlssg, runtime/dlssnr); fall back to the flat layout for older setups.
+    // Each feature's DLL lives in its own subfolder; the flat layout is the
+    // fallback for setups predating that split.
     const path = [join(runtimeDir, subdir, name), join(runtimeDir, name)].find((p) => existsSync(p)) ?? null;
     if (!path) {
       files.push({ name, role, present: false, path: null, sizeMB: null, version: null, exports: null });
@@ -301,9 +301,9 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
         feature.minHwArchitecture = r.minHwArchitecture;
         feature.minOsVersion = r.minOsVersion;
         feature.detail = `GetFeatureRequirements -> ${ngxName(r.result)}`;
-        // This driver returns NotImplemented for GetFeatureRequirements on every
-        // NGX feature, so it cannot confirm support — say so plainly instead of
-        // "query failed" (the features still work; readiness is judged below).
+        // NotImplemented here means the driver declines to answer, not that the
+        // feature is missing — the features still work, so do not say "query
+        // failed". Readiness is judged from the prerequisites below.
         if ((r.result >>> 0) === 0xbad00012) feature.support = "not reported by this driver";
       } catch (error) {
         feature.support = "query failed";
@@ -314,17 +314,13 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     }
   }
 
-  // --- forwarder shim was prepared and wired to the core before Init (see above) ---
-
   // --- verdict ---
-  // GetFeatureRequirements cannot confirm feature 18 on this driver (it returns
-  // NotImplemented for all features), so readiness is judged on the real
-  // prerequisites: the neural-rendering DLL is present, the caller shim loaded,
-  // and a D3D12 device was created. Actual CreateFeature(18) is exercised by the
-  // nr command / pipeline, not here (running it in-process can destabilise a
-  // long-lived server).
-  // The forwarder must not only load but PASS its self-test: a loaded-but-broken
-  // shim means calls cannot reach the driver, so NR is not actually ready.
+  // GetFeatureRequirements returns NotImplemented for every feature on this
+  // driver, so it cannot confirm feature 18; readiness is judged on the real
+  // prerequisites instead — the DLL present, a D3D12 device, and a shim that both
+  // loaded and passed its self-test (a loaded-but-broken shim cannot reach the
+  // driver). CreateFeature(18) itself is left to the nr command and the pipeline:
+  // running it in-process can destabilise a long-lived server.
   const forwarderOk = report.forwarder.loaded && Boolean(report.forwarder.selfTest?.startsWith("ok"));
   report.verdict.neuralRenderingReady =
     Boolean(dlssnr?.present) && forwarderOk && report.device.created && core !== null;

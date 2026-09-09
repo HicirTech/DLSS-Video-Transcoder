@@ -1,27 +1,17 @@
 /**
- * Generate the caller-validation shim as a real x64 PE DLL, entirely in
- * TypeScript — no C compiler in the build.
+ * Emits the caller-validation shim as an x64 PE DLL built byte by byte in
+ * TypeScript, so the build needs no C compiler.
  *
- * Why this exists: NVIDIA's neural-rendering runtime checks the module that
- * calls into the NGX core and refuses callers it does not recognise (it returns
- * PlatformError, 0xBAD00002). A module literally named `nvngx.dll` is accepted.
- * So the actual `CreateFeature` / `EvaluateFeature` / `ReleaseFeature` calls
- * must be issued from inside a module on disk with that name.
+ * NVIDIA's neural-rendering runtime checks which module called into the NGX core
+ * and returns PlatformError (0xBAD00002) for callers it does not recognise; a
+ * module on disk literally named `nvngx.dll` is accepted. The host parks the NGX
+ * core's function addresses in this DLL's slots and calls its stubs, and because
+ * each stub uses a real `call` rather than a tail `jmp`, the return address on
+ * the stack points back into this image — so the caller check sees `nvngx.dll`.
  *
- * This module emits a tiny DLL that exports four functions:
- *   void fwd_set_slots(void* create, void* evaluate, void* release)
- *   int  fwd_create(cmdList, featureId, params, outHandle)   -> calls create
- *   int  fwd_evaluate(cmdList, handle, params, callback)     -> calls evaluate
- *   int  fwd_release(handle)                                 -> calls release
- *
- * The host stores the NGX core's function addresses via fwd_set_slots, then
- * calls fwd_create/fwd_evaluate/fwd_release. Because each stub uses a real
- * `call` (not a tail `jmp`), the return address on the stack points back into
- * this DLL, so the runtime's caller check sees `nvngx.dll` and passes.
- *
- * The code is fully position independent (RIP-relative slot access, exports as
+ * The emitted code is position independent (RIP-relative slot access, exports as
  * RVAs, no imports, no absolute addresses), so an empty relocation table is
- * enough to keep ASLR happy.
+ * enough to satisfy ASLR.
  */
 
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
@@ -87,12 +77,12 @@ class TextBuilder {
   }
 
   /**
-   * A stub that reserves shadow space and calls the target held in `slot`.
-   * The four register arguments (rcx/rdx/r8/r9) forward for free. `stackArgs`
-   * further arguments ride the stack (Init_Ext has one, Init_ProjectID three);
-   * each is copied from the caller's frame down into the inner call's argument
-   * slot. Copying is harmless for shorter calls: the extra copies land in shadow
-   * space the shorter callee never reads.
+   * A stub that reserves shadow space and calls the target held in `slot`. The
+   * four register arguments (rcx/rdx/r8/r9) forward for free; `stackArgs` further
+   * arguments ride the stack (Init_Ext has one, Init_ProjectID three) and are
+   * copied from the caller's frame into the inner call's argument slots. Copying
+   * more than a call actually passes is harmless: the extra copies land in shadow
+   * space the callee never reads.
    */
   emitCallThunk(slot: number, stackArgs = 0): number {
     const at = this.rva;
@@ -310,11 +300,11 @@ const inflightWrites = new Map<string, Promise<{ path: string; wrote: boolean; s
 let tmpSeq = 0;
 
 /**
- * Write the shim to `path` unless an identical file is already there.
- * Concurrent writes to the same path within this process are coalesced (two
- * first-run `/api/probe` requests would otherwise both write the file), and the
- * write is atomic (temp file + rename) so a concurrent loader never reads a
- * half-written DLL.
+ * Write the shim to `path` unless an identical file is already there. Concurrent
+ * writes to the same path in this process are coalesced (two first-run
+ * `/api/probe` requests would otherwise both write it), and the write goes
+ * through a temp file + rename so a concurrent loader never maps a half-written
+ * DLL.
  */
 export function writeForwarder(path: string): Promise<{ path: string; wrote: boolean; size: number }> {
   const existing = inflightWrites.get(path);
