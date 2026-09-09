@@ -1,6 +1,9 @@
 /**
  * DXGI adapter enumeration through bun:ffi, used to pick the NVIDIA GPU on
- * laptops that also carry an integrated GPU.
+ * machines that also carry an integrated one.
+ *
+ * Vtable slots come from dxgi.h: IDXGIFactory1::EnumAdapters1 = 12,
+ * IDXGIAdapter1::GetDesc1 = 10.
  */
 import { dlopen, FFIType } from "bun:ffi";
 import { ComObject, checkHresult } from "./com.ts";
@@ -66,6 +69,10 @@ export class DxgiFactory extends ComObject {
         const raw = new ComObject(adapterPtr, `IDXGIAdapter1[${index}]`);
         let info: AdapterInfo;
         try {
+          // DXGI_ADAPTER_DESC1 (dxgi.h, x64, 312 bytes): Description WCHAR[128] @0;
+          // VendorId @256; DeviceId @260; SubSysId @264; Revision @268;
+          // DedicatedVideoMemory @272; DedicatedSystemMemory @280; SharedSystemMemory @288;
+          // AdapterLuid {LowPart u32 @296, HighPart i32 @300}; Flags @304.
           const desc = new NativeStruct(312);
           const hrDesc = (raw as unknown as { call: ComObject["call"] }).call.call(
             raw,

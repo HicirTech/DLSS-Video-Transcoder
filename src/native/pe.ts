@@ -110,6 +110,8 @@ export function parsePe(bytes: Uint8Array): PeInfo {
       for (let i = 0; i < functionCount; i++) {
         const rva = view.getUint32(functionsOffset + i * 4, true);
         if (rva === 0) continue;
+        // PE spec: an export RVA pointing back inside the export directory is a
+        // forwarder string ("OtherDll.Function"), not the address of code.
         const forwarder = rva >= exportRva && rva < exportRva + exportSize ? readAscii(bytes, rvaToOffset(rva), 512) : null;
         exports.push({ name: named.get(i) ?? `#${ordinalBase + i}`, ordinal: ordinalBase + i, rva, forwarder });
       }

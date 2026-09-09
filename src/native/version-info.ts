@@ -1,11 +1,10 @@
 /**
- * Reads the VS_VERSION_INFO resource out of a PE file (DLL / EXE) without
- * loading it, so the runtime catalog can report the version of an NGX DLL by
- * static inspection only. The section walking reuses the conventions in
- * ./pe.ts; the numeric FixedFileInfo is the canonical version (DLSS Swapper
- * names its folders from it), while the optional StringFileInfo string may
- * carry a non-numeric label (e.g. "310.8.SF.0") that is useful only for
- * display.
+ * Reads the VS_VERSION_INFO resource out of a PE file (DLL / EXE) without loading
+ * it, so the runtime catalog can version an NGX DLL by static inspection alone.
+ *
+ * The numeric FixedFileInfo is the canonical version — DLSS Swapper names its
+ * folders from it — while the optional StringFileInfo string may carry a
+ * non-numeric label (e.g. "310.8.SF.0") that is only good for display.
  */
 import { parsePe, type PeSection } from "./pe.ts";
 
@@ -151,9 +150,9 @@ export function parseVersionInfo(bytes: Uint8Array): VersionInfo {
     if (!blob) return NULL_VERSION;
 
     const blobEnd = Math.min(blob.offset + blob.size, bytes.length);
-    // Scan only within the bounded blob for the FixedFileInfo signature that is
-    // immediately followed by dwStrucVersion == 0x00010000 (this filters the
-    // false-positive raw matches that a whole-file scan hits).
+    // The 0xFEEF04BD signature alone matches unrelated bytes elsewhere in a DLL,
+    // so require dwStrucVersion == 0x00010000 right behind it and stay inside the
+    // located blob.
     for (let p = blob.offset; p + 24 <= blobEnd; p += 4) {
       if (view.getUint32(p, true) === FIXED_FILE_INFO_SIGNATURE && view.getUint32(p + 4, true) === STRUC_VERSION) {
         const fileVersion = `${fmtWord(view.getUint32(p + 8, true))}.${fmtWord(view.getUint32(p + 12, true))}`;

@@ -1,17 +1,14 @@
 /**
- * Asynchronous multi-buffered D3D12 submission for the zero-copy encode pipeline.
+ * Multi-buffered D3D12 submission: a pool of `depth` allocators/lists so the CPU
+ * can record and submit frame i+1 while the GPU still works on frame i.
  *
- * The default GpuContext is synchronous: record on one list, submit, block until
- * the GPU finishes, repeat. That serializes DLSS against everything downstream.
- * AsyncSubmit keeps a small pool of command allocators/lists so the CPU can
- * record and submit frame i+1 while the GPU is still working on frame i, and
- * signals a SHARED fence with a monotonic value per submit — a CUDA worker,
- * having imported that fence as an external semaphore, waits on value i before
- * encoding frame i. DLSS (D3D12 compute) and NVENC (independent encoder units)
- * then overlap on the GPU (measured: near-perfect parallelism on the 5090).
+ * Every submit signals a SHARED fence with the next monotonic value. A CUDA
+ * worker that imported that fence as an external semaphore waits on value i
+ * before encoding frame i, which is what lets DLSS (D3D12 compute) and NVENC
+ * (separate encoder units) run concurrently instead of in lockstep.
  *
- * Resource-state tracking stays correct because a single queue executes lists in
- * submit order (FIFO), which matches the order the CPU records them in.
+ * D3D12Resource.state tracking stays correct only because one queue executes
+ * lists in submit order, which is the order the CPU recorded them in.
  */
 import {
   D3D12CommandQueue, D3D12CommandAllocator, D3D12Fence, D3D12GraphicsCommandList, D3D12Device,
@@ -35,14 +32,14 @@ export class AsyncSubmit {
     for (let i = 0; i < depth; i++) {
       const allocator = device.createCommandAllocator();
       const list = device.createCommandList(allocator);
-      list.close(); // created open; close so begin() can reset it
+      list.close(); // D3D12 hands back an open list; begin() expects to reset it
       this.allocators.push(allocator);
       this.lists.push(list);
       this.slotValue.push(0n);
     }
   }
 
-  /** Wait until slot `k`'s previous submit is done on the GPU, then reset it and return its (open) list to record into. */
+  /** Wait for slot `k`'s previous submit to finish on the GPU before reusing its allocator; returns the reset, open list. */
   begin(k: number, timeoutMs = 30_000): D3D12GraphicsCommandList {
     const want = this.slotValue[k]!;
     if (this.fence.completedValue() < want) {
@@ -54,7 +51,7 @@ export class AsyncSubmit {
     return this.lists[k]!;
   }
 
-  /** Close + execute slot `k`'s list and signal the shared fence with the next monotonic value; returns that value. */
+  /** Execute slot `k`'s list; returns the fence value the GPU will reach once that list has retired. */
   submit(k: number): bigint {
     const list = this.lists[k]!;
     list.close();

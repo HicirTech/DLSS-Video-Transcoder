@@ -1,7 +1,7 @@
 /**
- * Calling COM interfaces from TypeScript: a COM object is a pointer to a
- * pointer to a vtable, and every method takes the object pointer as its first
- * argument. bun:ffi's CFunction turns a raw function address into a callable.
+ * Calling COM interfaces from TypeScript: a COM object is a pointer to a pointer
+ * to a vtable of 8-byte function addresses, and every method takes the object
+ * pointer as its implicit first argument.
  */
 import { CFunction, FFIType, read, type Pointer } from "bun:ffi";
 import { asPtr, hex32 } from "./memory.ts";
@@ -89,6 +89,7 @@ export class ComObject {
   release(): void {
     if (this.released) return;
     this.released = true;
+    // IUnknown::Release is vtable slot 2 (QueryInterface 0, AddRef 1) — unknwn.h.
     vtableMethod(this.ptr, 2, { args: [], returns: FFIType.u32 })(this.ptr);
   }
 }

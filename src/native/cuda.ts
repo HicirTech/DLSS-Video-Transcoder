@@ -1,8 +1,7 @@
 /**
- * Minimal CUDA Driver API (nvcuda.dll) bindings — just enough to drive NVIDIA's
- * hardware Optical Flow engine (NVOFA, src/pipeline/nvof.ts) alongside our D3D12
- * device: create a context on the GPU and copy frames to / flow vectors from the
- * NVOFA GPU buffers.
+ * Minimal CUDA Driver API (nvcuda.dll) bindings: context creation and host<->device
+ * copies, enough to feed the hardware Optical Flow engine in src/pipeline/nvof.ts
+ * alongside our D3D12 device.
  *
  * CUresult 0 = CUDA_SUCCESS. 64-bit handles (CUcontext, CUdeviceptr) are carried
  * as bigint; CUdevice is a 32-bit ordinal.
@@ -38,7 +37,7 @@ const CU_MEMORYTYPE_DEVICE = 2;
 
 let initialised = false;
 
-/** cuInit + retain the primary context of GPU `ordinal` and make it current on this thread. Returns the CUcontext. */
+/** Retain GPU `ordinal`'s primary context and push it onto *this* thread's context stack; returns the CUcontext. */
 export function cudaCreateContext(ordinal = 0): bigint {
   if (!initialised) {
     ck(cuda.symbols.cuInit(0) as number, "cuInit");
@@ -73,7 +72,6 @@ export function cudaMalloc(bytes: number): bigint {
   return out.value;
 }
 
-/** Free device memory previously returned by cudaMalloc. */
 export function cudaFree(device: bigint): void {
   ck(cuda.symbols.cuMemFree_v2(device) as number, "cuMemFree");
 }
@@ -88,10 +86,7 @@ export function cudaMemcpyDtoH(dst: Uint8Array, src: bigint, bytes: number): voi
   ck(cuda.symbols.cuMemcpyDtoH_v2(ptr(dst), src, BigInt(bytes)) as number, "cuMemcpyDtoH");
 }
 
-/**
- * 2D host→device copy respecting the device pitch (NVOFA buffers are
- * pitch-linear). Builds a CUDA_MEMCPY2D (128-byte, v2) descriptor.
- */
+/** 2D host→device copy honouring the device pitch — NVOFA buffers are pitch-linear, not tightly packed. */
 export function cudaMemcpy2DHtoD(opts: {
   src: Uint8Array;
   srcPitch: number;
@@ -102,11 +97,13 @@ export function cudaMemcpy2DHtoD(opts: {
 }): void {
   const desc = new Uint8Array(128);
   const dv = new DataView(desc.buffer);
-  // src: XInBytes@0, Y@8, memoryType@16, host@24, device@32, array@40, pitch@48
+  // CUDA_MEMCPY2D v2 (cuda.h, x64, 128 bytes):
+  //   src XInBytes@0, Y@8, memoryType@16, host@24, device@32, array@40, pitch@48
   dv.setBigUint64(16, BigInt(CU_MEMORYTYPE_HOST), true);
   dv.setBigUint64(24, BigInt(ptr(opts.src)), true);
   dv.setBigUint64(48, BigInt(opts.srcPitch), true);
-  // dst: XInBytes@56, Y@64, memoryType@72, host@80, device@88, array@96, pitch@104
+  //   dst XInBytes@56, Y@64, memoryType@72, host@80, device@88, array@96, pitch@104;
+  //   WidthInBytes@112, Height@120
   dv.setBigUint64(72, BigInt(CU_MEMORYTYPE_DEVICE), true);
   dv.setBigUint64(88, opts.dstDevice, true);
   dv.setBigUint64(104, BigInt(opts.dstPitch), true);

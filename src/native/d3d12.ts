@@ -104,10 +104,16 @@ export function formatName(format: number): string {
 }
 
 function heapProperties(type: number): NativeStruct {
-  // D3D12_HEAP_PROPERTIES: Type, CPUPageProperty, MemoryPoolPreference, CreationNodeMask, VisibleNodeMask
+  // D3D12_HEAP_PROPERTIES (d3d12.h, 20 bytes): Type, CPUPageProperty,
+  // MemoryPoolPreference, CreationNodeMask, VisibleNodeMask. Node masks are 1
+  // because everything here is single-adapter.
   return new NativeStruct(20).u32(0, type).u32(4, 0).u32(8, 0).u32(12, 1).u32(16, 1);
 }
 
+// D3D12_RESOURCE_DESC (d3d12.h, x64, 56 bytes): Dimension u32 @0; Alignment u64 @8;
+// Width u64 @16; Height u32 @24; DepthOrArraySize u16 @28; MipLevels u16 @30;
+// Format u32 @32; SampleDesc{Count @36, Quality @40}; Layout u32 @44; Flags u32 @48.
+// A buffer must be ROW_MAJOR with Height/Depth/MipLevels 1 and format UNKNOWN.
 function bufferDescription(sizeInBytes: number): NativeStruct {
   const desc = new NativeStruct(56);
   desc.u32(0, D3D12_RESOURCE_DIMENSION_BUFFER);
@@ -167,7 +173,7 @@ export class D3D12Resource extends ComObject {
     this.state = initialState;
   }
 
-  /** Map subresource 0 and return the CPU address. `readRange` null means "may read everything". */
+  /** Map subresource 0 and return the CPU address. A null `readRange` means "may read everything"; `{begin:0,end:0}` promises the CPU will not read. */
   map(readRange: { begin: number; end: number } | null = null): number {
     const out = new OutPointer();
     const range = readRange ? new NativeStruct(16).u64(0, readRange.begin).u64(8, readRange.end) : null;
@@ -215,6 +221,9 @@ export interface CopyLocation {
 }
 
 function copyLocation(location: CopyLocation): NativeStruct {
+  // D3D12_TEXTURE_COPY_LOCATION (d3d12.h, x64, 48 bytes): pResource @0; Type u32 @8;
+  // then a union at @16 — either PlacedFootprint{Offset u64 @16, Format @24, Width @28,
+  // Height @32, Depth @36, RowPitch @40} or SubresourceIndex u32 @16.
   const s = new NativeStruct(48);
   s.pointer(0, location.resource.ptr);
   if (location.footprint) {
@@ -276,7 +285,7 @@ export class D3D12GraphicsCommandList extends ComObject {
     barrier.u32(0, 0); // D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
     barrier.u32(4, 0);
     barrier.pointer(8, resource.ptr);
-    barrier.u32(16, 0xffffffff); // all subresources
+    barrier.u32(16, 0xffffffff); // D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES
     barrier.u32(20, resource.state);
     barrier.u32(24, newState);
     this.call(26, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.void }, 1, barrier.ptr);
@@ -364,10 +373,9 @@ export class D3D12Device extends ComObject {
   }
 
   /**
-   * Mint a Win32 NT HANDLE for a shared resource or fence
-   * (ID3D12Device::CreateSharedHandle, vtable slot 31). The object must have been
-   * created with the matching SHARED flag. The caller owns the handle and must
-   * CloseHandle it after CUDA has imported (and duplicated) it.
+   * Mint a Win32 NT HANDLE for a resource or fence that was created with the
+   * matching SHARED flag. The caller owns the handle and must CloseHandle it once
+   * CUDA has imported (and duplicated) it.
    */
   createSharedHandle(object: ComObject): number {
     const out = new OutPointer();
@@ -407,9 +415,8 @@ export class D3D12Device extends ComObject {
   }
 
   /**
-   * A DEFAULT-heap committed buffer created with HEAP_FLAG_SHARED, so a Win32 NT
-   * handle can be minted (createSharedHandle) and imported into CUDA as external
-   * memory for zero-copy D3D12<->CUDA interop. Initial state COMMON.
+   * A DEFAULT-heap committed buffer with HEAP_FLAG_SHARED, so createSharedHandle
+   * can mint an NT handle for CUDA to import as external memory. Starts in COMMON.
    */
   createSharedBuffer(sizeInBytes: number, label = `shared buffer ${sizeInBytes}B`): D3D12Resource {
     const ptr = this.createCommitted(D3D12_HEAP_TYPE_DEFAULT, bufferDescription(sizeInBytes), D3D12_RESOURCE_STATE_COMMON, label, D3D12_HEAP_FLAG_SHARED);

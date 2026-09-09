@@ -1,18 +1,13 @@
 /**
- * D3D12 <-> CUDA zero-copy interop via the CUDA Driver API external-memory and
- * external-semaphore entry points (nvcuda.dll).
+ * D3D12 <-> CUDA zero-copy interop through the CUDA Driver API external-memory
+ * and external-semaphore entry points (nvcuda.dll): a D3D12 buffer created with
+ * HEAP_FLAG_SHARED becomes a CUdeviceptr that NVENC can register, and a shared
+ * D3D12 fence becomes the external semaphore that orders the two engines.
  *
- * DLSS must run on D3D12, and NVENC runs on CUDA. To keep a frame on the GPU
- * across that boundary we share a D3D12 committed buffer (created with
- * HEAP_FLAG_SHARED) with CUDA: mint a Win32 NT handle for it
- * (ID3D12Device::CreateSharedHandle), import it as CUDA external memory, and map
- * it to a CUdeviceptr that NVENC can register — no CPU readback/upload. A shared
- * D3D12 fence, imported as a CUDA external semaphore, orders the two engines.
- *
- * ABI: CUDA Driver API (cuda.h). Natural alignment, x64. CUresult 0 = SUCCESS.
- * Handles (CUexternalMemory / CUexternalSemaphore / CUdeviceptr) are 8-byte,
- * carried as bigint. The imported NT handle is duplicated by CUDA on import, so
- * the original must be CloseHandle'd afterwards (kernel32).
+ * ABI: cuda.h, x64, natural alignment. CUresult 0 = SUCCESS; the 8-byte handles
+ * (CUexternalMemory / CUexternalSemaphore / CUdeviceptr) are carried as bigint.
+ * CUDA duplicates the NT handle on import, so the caller's original still has to
+ * be CloseHandle'd afterwards.
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import { OutU64 } from "./memory.ts";
@@ -52,9 +47,9 @@ export interface ImportedBuffer {
 }
 
 /**
- * Import a shared D3D12 committed buffer (via its NT handle) as CUDA external
- * memory and map it to a CUdeviceptr of `size` bytes. The returned devPtr aliases
- * the same physical VRAM as the D3D12 resource. Does NOT close the handle.
+ * Import a shared D3D12 committed buffer by its NT handle and map `size` bytes of
+ * it to a CUdeviceptr aliasing the same physical VRAM. The handle stays the
+ * caller's to close.
  */
 export function importD3D12Buffer(sharedHandle: number, size: number): ImportedBuffer {
   // CUDA_EXTERNAL_MEMORY_HANDLE_DESC (x64, 104 bytes):
