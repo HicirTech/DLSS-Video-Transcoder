@@ -231,7 +231,11 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   decodeArgs.push("pipe:1");
   const decoder = Bun.spawn(decodeArgs, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
 
-  const audioArgs = info.hasAudio && encode.copyAudio ? ["-map", "1:a:0", ...(encode.container === "mkv" ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"])] : ["-an"];
+  // Only open the source as a second input when we actually copy its audio —
+  // otherwise ffmpeg would needlessly demux/decode the whole source again,
+  // which dominated the per-frame time (the raw video pipe is the real cost).
+  const wantAudio = info.hasAudio && encode.copyAudio;
+  const audioArgs = wantAudio ? ["-map", "1:a:0", ...(encode.container === "mkv" ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"])] : ["-an"];
   const encodeArgs = [
     ffmpeg,
     "-v",
@@ -247,14 +251,13 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
     info.fpsText,
     "-i",
     "pipe:0",
-    "-i",
-    options.input,
+    ...(wantAudio ? ["-i", options.input] : []),
     "-map",
     "0:v:0",
     ...audioArgs,
     ...encoderArgs(encode),
     ...(encode.container === "mp4" || encode.container === "mov" ? ["-movflags", "+faststart"] : []),
-    "-shortest",
+    ...(wantAudio ? ["-shortest"] : []),
     output,
   ];
   const encoder = Bun.spawn(encodeArgs, { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
@@ -273,9 +276,14 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   let frames = 0;
   let sceneCuts = 0;
   try {
+    // Decoding is 8 MB/frame of rawvideo over a pipe while the GPU work is ~1 ms;
+    // the loop is I/O-bound, so prefetch the next frame's decode so it overlaps
+    // with the current frame's GPU pass + encoder write (which use other pipes).
+    let pending = reader.next(frameBytes);
     for (;;) {
-      const rgba = await reader.next(frameBytes);
+      const rgba = await pending;
       if (!rgba) break;
+      pending = reader.next(frameBytes); // start the next decode-read immediately
       let reset: boolean;
       let motion: Float32Array | null = null;
       if (estimator) {
