@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Alert, Box, Button, Chip, FormControl, FormControlLabel, FormHelperText, InputLabel, Link, MenuItem, Select, Stack, Switch, Typography } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
-import type { EngineKind, JobRequest, JobStatus, MotionKind, ToolsReport } from "../../../src/server/api-types";
+import type { EngineKind, FrameGenEngine, FrameGenFps, JobRequest, JobStatus, MotionKind, ToolsReport } from "../../../src/server/api-types";
+import { FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES } from "../../../src/server/api-types";
 import { api } from "../api";
 import { useJobRunner } from "../hooks/useJobRunner";
 import { useSettings } from "../hooks/useSettings";
@@ -65,7 +66,8 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
   const [engine, setEngine] = useState<EngineKind>("nr");
   const [motion, setMotion] = useState<MotionKind>("flow");
   const [frameGenOn, setFrameGenOn] = useState(false);
-  const [multiplier, setMultiplier] = useState(2);
+  const [targetFps, setTargetFps] = useState<FrameGenFps>("60");
+  const [fgEngine, setFgEngine] = useState<FrameGenEngine>("auto");
   const [dllDir, setDllDir] = useState("");
 
   const canRun = input.trim() !== "" && !runner.submitting;
@@ -86,7 +88,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
       scale: settings.scale,
       encode: settings.encode,
     };
-    if (frameGenOn) request.frameGen = { multiplier };
+    if (frameGenOn) request.frameGen = { targetFps, engine: fgEngine };
     if (usesDlss && dllDir !== "") request.dllDir = dllDir;
     if (output.trim() !== "") request.output = output.trim();
     void runner.submit(request);
@@ -114,24 +116,44 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
             control={<Switch checked={frameGenOn} onChange={(_e, checked) => setFrameGenOn(checked)} />}
             label="Interpolate to a higher frame rate"
           />
-          <FormControl sx={{ minWidth: 160 }} disabled={!frameGenOn}>
-            <InputLabel id="fg-mult-label">Frame rate</InputLabel>
-            <Select<number>
-              labelId="fg-mult-label"
-              label="Frame rate"
-              value={multiplier}
-              onChange={(event) => setMultiplier(Number(event.target.value))}
+          <FormControl sx={{ minWidth: 180 }} disabled={!frameGenOn}>
+            <InputLabel id="fg-fps-label">Output frame rate</InputLabel>
+            <Select<FrameGenFps>
+              labelId="fg-fps-label"
+              label="Output frame rate"
+              value={targetFps}
+              onChange={(event) => setTargetFps(event.target.value as FrameGenFps)}
             >
-              <MenuItem value={2}>2× (double)</MenuItem>
-              <MenuItem value={3}>3×</MenuItem>
-              <MenuItem value={4}>4×</MenuItem>
+              {FRAME_GEN_FPS_CHOICES.map((fps) => (
+                <MenuItem key={fps} value={fps}>
+                  {fps} fps
+                </MenuItem>
+              ))}
             </Select>
-            <FormHelperText>
-              DLSS Frame Generation. Higher than 2× needs an RTX 50 GPU. Uses the codec/quality below; the engine
-              and output-size settings do not apply.
-            </FormHelperText>
+          </FormControl>
+          <FormControl sx={{ minWidth: 300 }} disabled={!frameGenOn}>
+            <InputLabel id="fg-engine-label">Path</InputLabel>
+            <Select<FrameGenEngine>
+              labelId="fg-engine-label"
+              label="Path"
+              value={fgEngine}
+              onChange={(event) => setFgEngine(event.target.value as FrameGenEngine)}
+            >
+              {FRAME_GEN_ENGINES.map((mode) => (
+                <MenuItem key={mode} value={mode}>
+                  {mode === "auto" ? "Auto (native when possible, else cascade)" : mode === "native" ? "Native multi-frame DLSSG" : "Cascade of 2× stages"}
+                </MenuItem>
+              ))}
+            </Select>
           </FormControl>
         </Stack>
+        <FormHelperText sx={{ mt: 1 }}>
+          DLSS Frame Generation to the chosen output rate; the result keeps the source duration and audio. Auto runs one
+          native DLSSG session when output ÷ source is an exact integer the runtime supports and hardware-accelerated GPU
+          scheduling (HAGS) is on; otherwise it chains 2× stages in memory (1 stage for 2×, 2 for 4×, else 3 on an 8× grid)
+          and places the nearest frame on each output instant. 2× works without HAGS; 3× and above natively need HAGS and
+          an RTX 50. Uses the codec/quality below; the engine and output-size settings do not apply.
+        </FormHelperText>
       </Section>
 
       <Section
