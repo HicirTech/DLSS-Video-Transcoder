@@ -30,6 +30,12 @@ export const DEFAULT_FLOW_WIDTH = 640;
 const f32 = new Float32Array(1);
 const u32 = new Uint32Array(f32.buffer);
 
+/** Float16Array when the runtime provides it — Bun 1.4 does — otherwise null. */
+interface HalfArray {
+  set(values: ArrayLike<number>, offset?: number): void;
+}
+const HALF_ARRAY = (globalThis as unknown as { Float16Array?: new (buffer: ArrayBufferLike) => HalfArray }).Float16Array ?? null;
+
 /**
  * Encode one float32 as an IEEE-754 half (Uint16): normals, subnormals, signed
  * zero, overflow -> Inf and NaN, rounding the mantissa to nearest-even as
@@ -174,12 +180,6 @@ export function packFlowResizedR16G16(flow: Float32Array, inW: number, inH: numb
   }
   return out;
 }
-
-/** Float16Array when the runtime provides it — Bun 1.4 does — otherwise null. */
-interface HalfArray {
-  set(values: ArrayLike<number>, offset?: number): void;
-}
-const HALF_ARRAY = (globalThis as unknown as { Float16Array?: new (buffer: ArrayBufferLike) => HalfArray }).Float16Array ?? null;
 
 /** True when every value of the buffer is finite. */
 export function allFinite(values: Float32Array): boolean {
