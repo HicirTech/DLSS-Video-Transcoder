@@ -10,10 +10,6 @@ with a **React + Material UI** web front end. DLSS runtimes are version-switchab
 
 <sub>DLSS Neural Rendering (NGX feature 18) on a real photo — 100% crop: Original vs. the Natural and Cinematic styles.</sub>
 
-The look is tunable — the reference project's controls (model preset, style, intensity and the
-strength sliders) are all exposed. This matrix sweeps **style** (rows) against **intensity** (columns)
-on the same crop:
-
 ![DLSS Neural Rendering parameter matrix — style vs. intensity](docs/images/nr-matrix.png)
 
 <sub>Rows top→bottom: style Default / Natural / Cinematic. Columns left→right: intensity 0.0 / 0.5 /
@@ -21,11 +17,10 @@ on the same crop:
 content-dependent hint (per the reference) — Default is recommended and it showed no visible change on
 this photo.</sub>
 
-> **Status (2026-09-09).** Runs on the project's RTX 5090. The **web UI** now covers the whole
-> pipeline — DLSS Super Resolution upscaling, Neural Rendering (feature 18), Frame Generation, DLSS
-> version selection and browser upload — and the **command line** offers the same features for
-> scripting. A couple of deep items remain (GPU-resident pipelining, RTX Video SR); the
-> [Feature status](#feature-status) table documents honestly what is verified vs. still gated. DLL
+> **Status (2026-09-09).** Runs on the project's RTX 5090. The **web UI** covers the whole pipeline —
+> SR upscaling, Neural Rendering, Frame Generation, DLSS version selection and browser upload — and the
+> **command line** offers the same features for scripting. GPU-resident pipelining and RTX Video SR
+> remain open; the [Feature status](#feature-status) table says what is verified vs. still gated. DLL
 > presence alone is not proof a feature works — everything below was exercised on real hardware.
 
 ---
@@ -56,20 +51,22 @@ Open **http://localhost:4080/**. Other scripts:
 
 ```bash
 bun run typecheck   # tsc --noEmit
-bun test            # 110 unit-test cases (pure logic, no GPU needed)
+bun test            # 146 unit-test cases (pure logic, no GPU needed)
 bun run cli <command> [options]   # the DLSS command line (see below)
 ```
 
-Server environment variables: `PORT` (default **4080**), `NR_RUNTIME_DIR` (default `<repo>/runtime`),
-`NR_APPDATA` (default `<repo>/logs`), `NODE_ENV=production` (disables Bun dev bundling).
+Server environment variables: `PORT` (default **4080**), `NR_HOST` (default **127.0.0.1** — the API
+has no authentication, so it binds loopback until you opt out), `NR_RUNTIME_DIR` (default
+`<repo>/runtime`), `NR_APPDATA` (default `<repo>/logs`), `NODE_ENV=production` (disables Bun dev
+bundling).
 
 ---
 
 ## Command line
 
 `bun run cli <command> [args] [options]` (or `bun run src/cli.ts …`). Run `bun run cli help` for the
-overview, or `bun run cli help <command>` / `<command> --help` for details — the CLI is
-self-documenting and the in-code `COMMANDS` spec is its source of truth.
+overview, or `bun run cli help <command>` / `<command> --help` for details — the in-code `COMMANDS`
+spec is the source of truth for that help.
 
 | Command | What it does |
 | --- | --- |
@@ -88,23 +85,25 @@ Key per-command options (defaults in parentheses):
 
 - **`sr`** — `--factor N` (2; snapped to the nearest fixed DLSS mode: `1.0`=DLAA, `1.3`=Ultra Quality,
   `1.5`=Quality, `1.72`=Balanced, `2.0`=Performance, `3.0`=Ultra Performance), `--preset NAME` (L;
-  `A`–`F` are older CNN models, `J`–`O` are transformer models), `--dlss-version VER` (bundled DLL;
-  prefix match against `versions`).
+  `Default`, `A`–`F` are older CNN models, `J`–`O` are transformer models), `--dlss-version VER`
+  (bundled DLL; prefix match against `versions`).
 - **`nr`** — `--intensity F` (1; overall strength 0–2, 1 = default, the effect tends to plateau past ~1),
-  `--local-tone F` (1; 0–2, 1 = neutral), `--local-structure F` (1; 0–2, 1 = neutral). (`--preset`
-  exists but has no visible effect on the current driver.)
+  `--style N` (0; 0 = Default, 1 = Natural, 2 = Cinematic — strong, visible effect), `--local-tone F`
+  (1; 0–2, 1 = neutral), `--local-structure F` (1; 0–2, 1 = neutral), `--skin-structure F` (-1;
+  -1 = runtime default, otherwise 0–2, skin regions only), `--preset ID` (0; 0–3, experimental and
+  content-dependent — Default recommended), `--auto-mask` / `--ui-correction` (both off).
 - **`fg`** — `--fps RATE` (output frame rate: 23.976, 25, 29.97, 30, 50, 59.94, 60, 90, 119.88, 120,
   144, 165, 180, 240, 360, 480, or an exact `num/den`; default: source fps × `--multiplier`),
   `--multiplier N` (2; used when `--fps` is absent), `--engine MODE` (auto; `auto` = one native
   multi-frame DLSSG session when output ÷ source is an exact integer the runtime supports **and HAGS is
-  on**, otherwise a cascade of 2× stages chained in memory — 1 stage for 2×, 2 for 4×, else 3 on an 8×
-  grid — placing the nearest frame on each instant of the exact target clock; `native` / `cascade` force
-  a path; the bundled dlssg-worker synthesises only 1 frame per interval, so 3× and above run as a
-  cascade and `auto` falls back to it automatically when a native multi-frame session is refused, HAGS
-  or not), `--codec NAME`
-  (default: GPU NVENC when available, else libx264), `--quality N` (encoder quality, CRF for CPU / CQ for
-  NVENC, 0–51, lower = better, 20). The output always keeps the source duration (frame count =
-  ⌈duration × rate⌉) and the original audio, and is verified after muxing.
+  on** (2× native needs no HAGS), otherwise a cascade of 2× stages chained in memory — 1 stage for 2×,
+  2 for 4×, else 3 on an 8× grid — placing the nearest frame on each instant of the exact target clock;
+  `native` / `cascade` force a path; the bundled dlssg-worker synthesises only 1 frame per interval, so
+  3× and above run as a cascade and `auto` falls back to it automatically when a native multi-frame
+  session is refused, HAGS or not), `--codec NAME` (default: GPU NVENC when available, else libx264),
+  `--quality N` (encoder quality, CRF for CPU / CQ for NVENC, 0–51, lower = better, 20). The output
+  always keeps the source duration (frame count = ⌈duration × rate⌉) and the original audio, and is
+  verified after muxing.
 
 ## Web UI
 
@@ -115,10 +114,11 @@ http://127.0.0.1:3080/, and appending `?mock=1` uses an in-browser mock client.
 **What the UI does today:** run **image** and **video** jobs with three engines — `sr` (DLSS Super
 Resolution upscaling to the chosen output size), `nr` (DLSS Neural Rendering enhancement), and
 `bypass` (a plain GPU passthrough copy, for A/B comparison); **DLSS Frame Generation** for video
-(2×/3×/4×); **DLSS DLL version selection** per feature; **browser file upload** for the input; a live
-job queue with WebSocket progress; a before/after compare view; a hardware/runtime **probe** panel;
-and encode settings (codec incl. NVENC, quality, container, audio) for video. Optical-flow motion can
-be enabled for video.
+(pick any output rate from the 23.976–480 list and the path: auto / native / cascade); **DLSS DLL
+version selection** per feature; **browser file upload** for the input; a live job queue with
+WebSocket progress; a before/after compare view; a hardware/runtime **probe** panel; and encode
+settings for video (codec incl. NVENC, quality 0–51 with 18 as default, container mp4/mkv/mov, audio).
+Optical-flow motion can be enabled for video.
 
 **Image tab** — choose an engine (SR upscale / Neural Rendering / bypass), a DLSS version, the output
 size and the look controls:
@@ -136,9 +136,10 @@ size and the look controls:
 **Notes / honest caveats:**
 
 - The `nr` engine exposes the reference project's controls — **model preset**, **style**, **intensity**
-  (0–2), **local tone**, **local structure** and **skin structure** (skin only). Style and the strength
-  sliders have a strong, visible effect; **model preset** (0–3) is an experimental, content-dependent
-  hint (Default recommended); **global tone** is not applied by the current runtime.
+  (0–2), **local tone** (0–2), **local structure** (0–2) and **skin structure** (-1–2, -1 = runtime
+  default, skin only). Style and the strength sliders have a strong, visible effect; **model preset**
+  (0–3) is an experimental, content-dependent hint (Default recommended); **global tone** is not
+  applied by the current runtime.
 - **DLSS version selection**: the picker defaults to the bundled DLL. Loading an alternate (not
   driver-matched) DLSS DLL can intermittently fail to initialise on newer drivers (a known
   DLSS-Swapper behaviour); the job then reports a clear error and you can retry or pick another.
@@ -159,28 +160,14 @@ All JSON unless noted. Base is same-origin.
 | `GET /api/jobs` · `POST /api/jobs` | list jobs · submit a `JobRequest` → `JobStatus` (201) |
 | `GET /api/jobs/:id` · `POST /api/jobs/:id/cancel` | one job · cancel it |
 | `GET /api/file?path=<abs>` | raw bytes of a local file (previews; absolute path only) |
-| `POST /api/upload` | multipart file upload; returns `{ path }` (a saved absolute path to use as job input) |
+| `POST /api/upload` | multipart `file` upload → `{ path, name, size }` (201); `path` is the saved absolute path to use as job input |
 | `WS /ws` | server→client `WsEvent` stream (`hello` / `job` / `log`) |
 
 `JobRequest`: `{ kind: "image"|"video", input, output?, engine: "sr"|"nr"|"bypass",
-motion: "none"|"flow", settings, scale, encode?, frameGen?: { multiplier }, dllDir? }`. Payload shapes
-are defined in [`src/server/api-types.ts`](src/server/api-types.ts).
-
-## Architecture
-
-- **In-process NGX via `bun:ffi`.** `src/native/` binds D3D12/DXGI/PE/Win32; `src/ngx/` drives the
-  NGX API. NGX rejects calls whose return address is not inside a module named `nvngx.dll`, so the
-  project generates a tiny x64 shim DLL (`runtime/caller/nvngx.dll`, `src/ngx/forwarder.ts`) and
-  routes every NGX call through it.
-- **Feature 1 (SR)** uses the driver core plus `nvngx_dlss.dll`; **feature 18 (NR)** loads the
-  standalone `nvngx_dlssnr.dll` directly with a project-owned parameter object; **feature 11 (Frame
-  Generation)** runs out-of-process via NVIDIA's `dlssg-worker.exe` over a small binary protocol.
-- **Version switching** = re-init NGX with the chosen DLL on its search path
-  (`src/ngx/runtime-catalog.ts`, PE version parsing in `src/native/version-info.ts`).
-- **PNG codec** (`src/codec/png.ts`) is hand-written and uses `node:zlib` for (de)compression
-  (Bun's built-in zlib is avoided — it produced/consumed corrupt streams).
-- **Pipeline** (`src/pipeline/`): ffmpeg decode → per-frame engine → ffmpeg encode; optical-flow
-  motion estimation; a job worker; the Bun server (`src/server/`) exposes it over HTTP + WebSocket.
+motion: "none"|"flow", settings, scale, encode?, frameGen?: { targetFps?, multiplier?, engine? },
+dllDir? }`. A submitted `output` must be absolute and inside the app-data folder, the runtime folder
+or the input's own directory. Payload shapes are defined in
+[`src/server/api-types.ts`](src/server/api-types.ts).
 
 ## Runtime folder
 
@@ -197,24 +184,28 @@ runtime/
   host/, rtx_video/       out-of-process host / RTX Video assets (see status)
 ```
 
-The driver's NGX core `_nvngx.dll` is loaded from the installed driver, never from here.
+- The driver's NGX core `_nvngx.dll` is loaded from the installed driver, never from here.
+- The shim exists because NGX rejects calls whose return address is not inside a module named
+  `nvngx.dll`; every NGX call is routed through it.
+- Feature 11 runs out-of-process in NVIDIA's `dlssg-worker.exe`; features 1 and 18 run in-process.
 
 ## Tests
 
-`bun test` runs **110 unit-test cases** across 7 files — all pure logic, **no GPU required**: the
-PNG codec, ffmpeg/NVENC/NUT planning math, encoder selection, optical-flow math, the version
-catalog, the forwarder shim, and the NGX parameter object. The `tests/diag-*.ts` and `tests/run-*.ts`
-scripts are manual GPU harnesses (run individually with `bun run tests/<file>.ts`), not part of the suite.
+`bun test` runs **146 unit-test cases** across 10 files — all pure logic, **no GPU required**: the PNG
+codec, ffmpeg/NVENC/NUT planning math, encoder selection, frame-generation planning and the
+nearest-timestamp writer, optical-flow math, the version catalog, the forwarder shim, and the NGX
+parameter object. The `tests/diag-*.ts` and `tests/run-*.ts` scripts are manual GPU harnesses (run
+individually with `bun run tests/<file>.ts`), not part of the suite.
 
 ## Feature status
 
-Verified against the source on 2026-09-09.
+Verified against the source on 2026-09-10.
 
 | Capability | CLI | Web UI | Notes |
 | --- | --- | --- | --- |
 | DLSS SR upscaling (feature 1) | ✅ `sr` | ✅ (`sr` engine) | real render/output split in image & video |
 | DLSS Neural Rendering (feature 18) | ✅ `nr` (PNG) | ✅ (`nr` engine, image & video) | wired into the pipeline |
-| DLSS Frame Generation (feature 11) | ✅ `fg` (incl. 3×/4× on RTX 50) | ✅ (video tab) | no cascade needed — native multi-frame |
+| DLSS Frame Generation (feature 11) | ✅ `fg` | ✅ (video tab) | native 2× per session; 3×/4× run as a cascade of 2× stages |
 | DLSS version enumeration | ✅ `versions` | ✅ (`/api/catalog`) | shown in the version picker |
 | DLSS version selection | ✅ SR (`sr --dlss-version`) | ✅ (sr/nr) | alternate DLLs may fail to init on newer drivers |
 | Browser file upload | n/a | ✅ | POST /api/upload; stored under logs/uploads/ |
@@ -223,44 +214,21 @@ Verified against the source on 2026-09-09.
 | GPU optical flow (NVOFA) | ✅ (video/fg motion) | ✅ | hardware flow engine, ~5.7× faster than CPU, auto CPU fallback |
 | RTX Video Super Resolution / TrueHDR | ❌ | ❌ | DLLs present but no code path uses them |
 
-### Known limitations / roadmap
+### Known limitations
 
-- **Performance — threaded GPU pipeline (~2× throughput).** Video encoding now runs in-process on
-  the GPU via **NVENC** (H.264/HEVC), and ffmpeg only muxes the compressed elementary stream
-  (`-c:v copy`) — removing the uncompressed RGBA output pipe and ffmpeg's `rgba→yuv` swscale. On top of
-  that, decode, DLSS and NVENC each run on their own thread, so the synchronous GPU/FFI stages
-  (each ~4–5 ms at 1080p) overlap instead of running back-to-back on one thread. Frames move between
-  threads as zero-copy transfers, with credit-based backpressure bounding memory.
-  _Measured on an RTX 5090 at 1080p (steady-state, h264_nvenc):_
-
-  | workload | single thread | threaded | + async zero-copy |
-  | --- | --- | --- | --- |
-  | neural rendering (feature 18) | 79 fps | 163 fps | **213 fps** |
-  | bypass transcode | 108 fps | **228 fps** | — |
-
-  **GPU-resident async zero-copy (NR).** For Neural Rendering the pipeline goes further: the DLSS output
-  never leaves the GPU. DLSS renders into a **D3D12 buffer shared with CUDA** (via `CreateSharedHandle`
-  + `cuImportExternalMemory`), and NVENC encodes straight from that pointer — no readback, no re-upload.
-  Ordering across the D3D12↔CUDA boundary uses a **shared fence imported as a CUDA external semaphore**,
-  and DLSS submits **asynchronously** (a command-list/allocator + buffer pool) so DLSS (compute) and
-  NVENC (independent encoder units) run **in parallel on the GPU** — measured near-perfect overlap on
-  the 5090. This lifts NR from 163 to **213 fps** at 1080p. (A synchronous version was actually *slower*
-  than the threaded path — the CPU sync point serialized the two engines — so full async was required.)
-
-  A 3-hour 60 fps neural-rendering pass drops from ~2.3 h (single thread) to ~0.85 h. Paths are chosen
-  automatically: NR + NVENC at even, in-cap dimensions takes the async zero-copy path; other engines /
-  CPU / AV1 codecs use the threaded or single-thread rawvideo path (H.264 ≤ 4096, HEVC ≤ 8192). Also
-  done: **GPU optical flow via NVOFA** (~5.7× faster than the CPU block-matcher), in-process NVENC for
-  frame generation, exact-rational frame-gen timing, decode read-ahead. _Remaining tier (not done):_
-  input-side zero-copy (in-process NVDEC decode → CUDA, removing the decode rawvideo pipe, now the next
-  ceiling) — a large hand-rolled cuvid effort.
-- **feature 18 in the pipeline — _done_.** The `nr` engine (image and video) now runs DLSS Neural
-  Rendering and exposes the reference's controls (model preset, style, intensity, tone/structure).
-  Model preset is an experimental, content-dependent hint; global tone is not applied; feature 18 does
-  not consume motion vectors.
-- **UI feature exposure — _done_.** SR upscaling, frame generation, DLSS version selection and
-  browser upload are now in the web UI (see the table above).
-- **RTX Video Super Resolution** is not implemented (the DLLs under `runtime/rtx_video` are unused).
+- **Throughput.** Decode, DLSS and NVENC each run on their own thread, and video is encoded in-process
+  on the GPU (ffmpeg only muxes the elementary stream with `-c:v copy`). For Neural Rendering the
+  output additionally stays GPU-resident: DLSS renders into a D3D12 buffer shared with CUDA and NVENC
+  encodes from that pointer, so no readback happens. _Measured on an RTX 5090 at 1080p, h264_nvenc:_
+  neural rendering 79 fps single-thread → 163 fps threaded → **213 fps** GPU-resident; bypass
+  transcode 108 → **228 fps**. The path is chosen automatically: NR + NVENC at even, in-cap dimensions
+  takes the GPU-resident path (NVENC limits: H.264 ≤ 4096, HEVC ≤ 8192); other engines, CPU codecs and
+  AV1 use the threaded or single-thread rawvideo path.
+- **Input-side zero-copy is not done** — decoding still goes through an ffmpeg rawvideo pipe, which is
+  now the ceiling. In-process NVDEC → CUDA would remove it.
+- **RTX Video Super Resolution / TrueHDR** are not implemented (the DLLs under `runtime/rtx_video` are
+  unused).
+- Feature 18 does not consume motion vectors, so `nr` ignores the motion setting.
 
 ## License
 
