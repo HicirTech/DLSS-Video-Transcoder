@@ -85,8 +85,9 @@ Key per-command options (defaults in parentheses):
 
 - **`sr`** — `--factor N` (2; snapped to the nearest fixed DLSS mode: `1.0`=DLAA, `1.3`=Ultra Quality,
   `1.5`=Quality, `1.72`=Balanced, `2.0`=Performance, `3.0`=Ultra Performance), `--preset NAME` (L;
-  `Default`, `A`–`F` are older CNN models, `J`–`O` are transformer models), `--dlss-version VER`
-  (bundled DLL; prefix match against `versions`).
+  `Default`, `A`–`F`, `J`–`O` — which model each one selects belongs to the installed
+  `nvngx_dlss.dll`, not to this tool), `--dlss-version VER` (bundled DLL; prefix match against
+  `versions`).
 - **`nr`** — `--intensity F` (1; overall strength 0–2, 1 = default, the effect tends to plateau past ~1),
   `--style N` (0; 0 = Default, 1 = Natural, 2 = Cinematic — strong, visible effect), `--local-tone F`
   (1; 0–2, 1 = neutral), `--local-structure F` (1; 0–2, 1 = neutral), `--skin-structure F` (-1;
@@ -159,7 +160,7 @@ All JSON unless noted. Base is same-origin.
 | `GET /api/settings/defaults` | `{ settings, scale, encode }` defaults |
 | `GET /api/jobs` · `POST /api/jobs` | list jobs · submit a `JobRequest` → `JobStatus` (201) |
 | `GET /api/jobs/:id` · `POST /api/jobs/:id/cancel` | one job · cancel it |
-| `GET /api/file?path=<abs>` | raw bytes of a local file (previews; absolute path only) |
+| `GET /api/file?path=<abs>` | raw bytes of a local file (previews; absolute path only). Unauthenticated: reachable only from loopback unless you set `NR_HOST` |
 | `POST /api/upload` | multipart `file` upload → `{ path, name, size }` (201); `path` is the saved absolute path to use as job input |
 | `WS /ws` | server→client `WsEvent` stream (`hello` / `job` / `log`) |
 
