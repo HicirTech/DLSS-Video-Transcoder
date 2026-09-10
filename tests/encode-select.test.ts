@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cpuSiblingCodec, isNvenc, preferredDefaultCodec, resolveEncodeCodec } from "../src/pipeline/encode-select.ts";
+import { buildNvencProbeArgs, cpuSiblingCodec, isNvenc, preferredDefaultCodec, resolveEncodeCodec } from "../src/pipeline/encode-select.ts";
 
 describe("encode-select", () => {
   test("isNvenc identifies the hardware encoders", () => {
@@ -22,6 +22,17 @@ describe("encode-select", () => {
   test("preferredDefaultCodec picks GPU when available", () => {
     expect(preferredDefaultCodec(true)).toBe("h264_nvenc");
     expect(preferredDefaultCodec(false)).toBe("h264");
+  });
+
+  test("buildNvencProbeArgs builds the one-frame lavfi null encode", () => {
+    expect(buildNvencProbeArgs("h264_nvenc")).toEqual([
+      "-v", "error", "-f", "lavfi", "-i", "color=size=256x256:rate=1",
+      "-frames:v", "1", "-c:v", "h264_nvenc", "-f", "null", "-",
+    ]);
+    // Ordinal 0 is a real GPU index, not "unset", so it must still be emitted.
+    expect(buildNvencProbeArgs("av1_nvenc", 0)).toContain("-gpu");
+    const pinned = buildNvencProbeArgs("hevc_nvenc", 1);
+    expect(pinned.slice(pinned.indexOf("-gpu"), pinned.indexOf("-gpu") + 2)).toEqual(["-gpu", "1"]);
   });
 
   test("resolveEncodeCodec passes CPU codecs through without probing", () => {
