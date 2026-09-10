@@ -11,7 +11,7 @@ import {
   outputFrameCount,
   resolveTargetRate,
 } from "../src/pipeline/framegen-plan.ts";
-import { type Rational, ratCmp, rational } from "../src/pipeline/nut.ts";
+import { type Rational, ratCmp, rational } from "../src/pipeline/rational.ts";
 import { FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES } from "../src/server/api-types.ts";
 
 const eq = (a: Rational, b: Rational) => ratCmp(a, b) === 0;
