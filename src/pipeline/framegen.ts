@@ -231,7 +231,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
       : plan.path === "Cascade"
         ? `${plan.cascadeStages} x 2x stage(s) on a ${plan.gridMultiplier}x grid, max timing error ${ratToNumber(plan.maximumTemporalError).toFixed(4)} s`
         : "no synthesis, nearest source frame";
-  progress(0, `source ${info.width}x${info.height}${rescaled ? ` -> ${width}x${height} (4:2:0 needs even dimensions)` : ""} ${info.codec} ${formatRate(sourceRate)} fps, ${frames} frames${expectedDecoded !== frames ? ` (~${expectedDecoded} after the ${formatRate(sourceRate)} CFR decode)` : ""}; ${plan.path}: -> ${formatRate(targetRate)} fps (${detail}); HAGS ${caps.hagsEnabled ? "on" : "off"}; ~${estimatedOutput} output frames`);
+  progress(0, `source ${info.width}x${info.height}${rescaled ? ` -> ${width}x${height} (4:2:0 needs even dimensions)` : ""}${info.displayAspect ? ` (non-square pixels, display ${info.displayAspect.num}:${info.displayAspect.den})` : ""} ${info.codec} ${formatRate(sourceRate)} fps, ${frames} frames${expectedDecoded !== frames ? ` (~${expectedDecoded} after the ${formatRate(sourceRate)} CFR decode)` : ""}; ${plan.path}: -> ${formatRate(targetRate)} fps (${detail}); HAGS ${caps.hagsEnabled ? "on" : "off"}; ~${estimatedOutput} output frames`);
 
   const decoder = Bun.spawn(
     [ffmpeg, "-v", "error", "-nostdin", "-i", options.input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba",
@@ -255,6 +255,9 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
         width,
         height,
         targetRate,
+        // The even-dimension rescale above changes the pixel grid, so the source's
+        // DAR -- not its sample aspect -- is what the output must be tagged with.
+        displayAspect: info.displayAspect,
         codec: resolvedCodec.codec,
         quality: options.quality ?? 20,
         hasAudio: wantAudio,
