@@ -99,6 +99,20 @@ export type FrameGenEngine = (typeof FRAME_GEN_ENGINES)[number];
 
 // The accepted values for every constrained setting, in one place: the UI clamps
 // to these and the API rejects outside them, so the two cannot drift apart.
+/**
+ * Neural-rendering settings the installed runtime accepts but does not act on.
+ * Measured with tests/diag-nr-settings.ts against nvngx_dlssnr.dll 310.8.2.0:
+ * every value of these three produces byte-identical output, and intensity is
+ * inert above 1.0. They stay in the request shape because a later DLL may
+ * honour them; every surface that offers them says what happens today.
+ *
+ * Re-run that diagnostic after a runtime update before changing this list.
+ */
+export const NR_SETTINGS_IGNORED_BY_RUNTIME = ["preset", "skinStructure", "uiCorrection"] as const;
+
+/** Where intensity stops making a difference on the runtime measured above. */
+export const NR_INTENSITY_EFFECTIVE_MAX = 1;
+
 export const NR_PRESETS = [0, 1, 2, 3] as const;
 export const NR_STYLES = [0, 1, 2] as const;
 export const NR_PATHS = ["auto", "core", "snippet"] as const;

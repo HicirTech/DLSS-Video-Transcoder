@@ -99,11 +99,18 @@ Key per-command options (defaults in parentheses):
   `Default`, `A`–`F`, `J`–`O` — which model each one selects belongs to the installed
   `nvngx_dlss.dll`, not to this tool), `--dlss-version VER` (bundled DLL; prefix match against
   `versions`).
-- **`nr`** — `--intensity F` (1; overall strength 0–2, 1 = default, the effect tends to plateau past ~1),
-  `--style N` (0; 0 = Default, 1 = Natural, 2 = Cinematic — strong, visible effect), `--local-tone F`
-  (1; 0–2, 1 = neutral), `--local-structure F` (1; 0–2, 1 = neutral), `--skin-structure F` (-1;
-  -1 = runtime default, otherwise 0–2, skin regions only), `--preset ID` (0; 0–3, experimental and
-  content-dependent — Default recommended), `--auto-mask` / `--ui-correction` (both off).
+- **`nr`** — `--intensity F` (1; overall strength 0–2), `--style N` (0; 0 = Default, 1 = Natural,
+  2 = Cinematic — strong, visible effect), `--local-tone F` (1; 0–2, 1 = neutral),
+  `--local-structure F` (1; 0–2, 1 = neutral), `--skin-structure F` (-1; -1 = runtime default,
+  otherwise 0–2), `--preset ID` (0; 0–3), `--auto-mask` / `--ui-correction` (both off).
+
+  Not every one of those reaches the picture. Measured against the installed
+  `nvngx_dlssnr.dll` 310.8.2.0 by sweeping each setting alone and hashing the output
+  (`bun run tests/diag-nr-settings.ts`): **`--preset`, `--skin-structure` and `--ui-correction` are
+  ignored by this runtime** — every value gives a byte-identical image — and `--intensity` stops
+  responding above 1, so 1, 1.5 and 2 are the same. `--style`, `--local-tone`, `--local-structure`
+  and `--auto-mask` all work. The settings are still sent, in case a later DLL honours them; re-run
+  that diagnostic after a runtime update.
 - **`fg`** — `--fps RATE` (output frame rate: 23.976, 25, 29.97, 30, 50, 59.94, 60, 90, 119.88, 120,
   144, 165, 180, 240, 360, 480, or an exact `num/den`; default: source fps × `--multiplier`),
   `--multiplier N` (2; used when `--fps` is absent), `--engine MODE` (auto; `auto` = one native

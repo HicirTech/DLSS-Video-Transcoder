@@ -61,8 +61,9 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
             </FormControl>
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-            Style sets the overall look (strong effect). Model preset is an experimental,
-            content-dependent hint — Default is recommended.
+            Style sets the overall look (strong effect). Model preset, UI correction and skin
+            structure are sent to the runtime but the installed DLSS 5 DLL ignores them — every
+            value produces the same image. Intensity stops responding above 1.
           </Typography>
         </Box>
 
