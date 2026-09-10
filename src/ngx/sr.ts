@@ -40,7 +40,7 @@ export interface SrOptions {
   outputHeight: number;
   /** PerfQuality value (0 MaxPerf .. 5 DLAA); default 0 (Performance, 2x). */
   quality?: number;
-  /** DlssRenderPreset value; default L (transformer). */
+  /** DlssRenderPreset value; default L. Which model a preset selects belongs to the loaded nvngx_dlss.dll — see DlssRenderPreset in results.ts. */
   preset?: number;
   /** Feed the network HDR (linear) color instead of SDR. */
   hdr?: boolean;
