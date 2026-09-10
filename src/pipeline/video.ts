@@ -314,7 +314,15 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   // dimensions. motion is ignored: feature 18 consumes no motion vectors, so
   // motion="flow" would only burn optical-flow time here.
   const nrNative = options.engine === "nr" && !upscaling && options.runtimeDir ? nvencNativeTarget(encode.codec, target.width, target.height) : null;
-  if (nrNative && probeNvencCaps(options.adapterIndex ?? 0).available) {
+  // session.cudaOrdinal, not adapterIndex: see GpuSession.cudaOrdinal.
+  const cudaOrdinal = session.cudaOrdinal;
+  if (cudaOrdinal === null) {
+    // Both GPU-side fast paths (in-process NVENC, hardware optical flow) run on
+    // CUDA. Without a CUDA device for this adapter they cannot start, and the
+    // job silently takes the slower ffmpeg encode and the CPU matcher instead.
+    progress(0, `${session.adapter.info.name} has no CUDA device, so GPU encoding and hardware optical flow are unavailable; encoding through ffmpeg instead. Run \`probe\` to see which adapter to select.`);
+  }
+  if (nrNative && cudaOrdinal !== null && probeNvencCaps(cudaOrdinal).available) {
     try {
       const { num, den } = rateParts(info.fpsText);
       const layout = linearLayout(target.width, target.height, DXGI_FORMAT_R8G8B8A8_UNORM);
@@ -344,7 +352,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
         const r = await runAsyncNrEncode({
           session, nr, ffmpeg, decodeArgs, sinkArgs,
           width: target.width, height: target.height, rowPitch: layout.rowPitch, totalBytes: layout.totalBytes,
-          enc: { fpsNum: num, fpsDen: den, codec: nrNative.codec, cq: encode.quality, ordinal: options.adapterIndex ?? 0 },
+          enc: { fpsNum: num, fpsDen: den, codec: nrNative.codec, cq: encode.quality, ordinal: cudaOrdinal },
           totalFrames: info.frames, guide, onProgress: progress,
         });
         if (r.frames === 0) throw new Error("No frames were decoded from the input. The file may be empty, corrupt, or not a video ffmpeg can read.");
@@ -398,7 +406,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   let estimator: ReturnType<typeof createMotionEstimator> | null = null;
   if (options.motion === "flow") {
     try {
-      const nvof = tryCreateNvofBackend(renderWidth, renderHeight);
+      const nvof = tryCreateNvofBackend(renderWidth, renderHeight, undefined, session.cudaOrdinal ?? 0);
       estimator = createMotionEstimator(renderWidth, renderHeight, nvof.backend ? { backend: nvof.backend } : {});
       progress(0, nvof.backend ? "optical flow: NVIDIA hardware (NVOFA)" : `optical flow: CPU block matching. ${nvof.reason}`);
     } catch (error) {
@@ -424,7 +432,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   // serial. CPU/AV1 codecs, oversized frames, or an NVENC that will not come up
   // here fall through to the single-thread rawvideo path.
   const nativeTarget = nvencNativeTarget(encode.codec, outWidth, outHeight);
-  const useThreaded = nativeTarget !== null && probeNvencCaps(options.adapterIndex ?? 0).available;
+  const useThreaded = nativeTarget !== null && cudaOrdinal !== null && probeNvencCaps(cudaOrdinal).available;
 
   let frames = 0;
   let sceneCuts = 0;
@@ -448,7 +456,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
       progress(0, `encode: NVENC ${nativeTarget.codec} (threaded GPU pipeline, mux-only)`);
       const result = await runThreadedEncode({
         engine, ffmpeg, decodeArgs: decodeArgv, frameBytes, sinkArgs,
-        enc: { width: outWidth, height: outHeight, fpsNum: num, fpsDen: den, codec: nativeTarget.codec, preset: "p5", cq: encode.quality, ordinal: options.adapterIndex ?? 0 },
+        enc: { width: outWidth, height: outHeight, fpsNum: num, fpsDen: den, codec: nativeTarget.codec, preset: "p5", cq: encode.quality, ordinal: cudaOrdinal },
         totalFrames: info.frames, guide, onProgress: progress,
       });
       frames = result.frames;
