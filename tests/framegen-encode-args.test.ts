@@ -15,6 +15,7 @@ const base = {
   height: 720,
   targetRate: rational(60),
   quality: 20,
+  displayAspect: null,
 };
 
 describe("buildFrameGenEncodeArgs", () => {
@@ -60,6 +61,39 @@ describe("buildFrameGenEncodeArgs", () => {
     const open = buildFrameGenEncodeArgs({ ...base, width: 641, height: 361, codec: "h264_nvenc", hasAudio: false });
     expect(open.nvenc).toBeNull();
     expect(open.rawArgs).toContain("641x361");
+  });
+
+  // Stream copy needs both flags: -aspect tags the container, but ffmpeg copies
+  // the bitstream's own VUI unchanged, so it would still claim square pixels.
+  test("an anamorphic source tags the container and the bitstream on the copy path", () => {
+    const open = buildFrameGenEncodeArgs({ ...base, width: 720, height: 480, codec: "h264_nvenc", hasAudio: false, displayAspect: rational(4, 3) });
+    const aspect = open.nvencArgs.indexOf("-aspect");
+    const bsf = open.nvencArgs.indexOf("-bsf:v");
+    expect(open.nvencArgs[aspect + 1]).toBe("4:3");
+    expect(open.nvencArgs[bsf + 1]).toBe("h264_metadata=sample_aspect_ratio=8/9");
+    // Output options: before an -i they would bind to that input instead.
+    expect(aspect).toBeGreaterThan(open.nvencArgs.lastIndexOf("-i"));
+    expect(bsf).toBeGreaterThan(open.nvencArgs.lastIndexOf("-i"));
+  });
+
+  test("the rawvideo path tags the container only, since the encoder writes its own VUI", () => {
+    const open = buildFrameGenEncodeArgs({ ...base, width: 720, height: 480, codec: "h264", hasAudio: false, displayAspect: rational(4, 3) });
+    const aspect = open.rawArgs.indexOf("-aspect");
+    expect(open.rawArgs[aspect + 1]).toBe("4:3");
+    expect(open.rawArgs).not.toContain("-bsf:v");
+    expect(aspect).toBeGreaterThan(open.rawArgs.lastIndexOf("-i"));
+  });
+
+  test("the bitstream filter follows the copy demuxer", () => {
+    const open = buildFrameGenEncodeArgs({ ...base, width: 720, height: 480, codec: "hevc_nvenc", hasAudio: false, displayAspect: rational(4, 3) });
+    expect(open.nvencArgs).toContain("hevc_metadata=sample_aspect_ratio=8/9");
+  });
+
+  test("a square-pixel source adds no aspect argv on either path", () => {
+    const open = buildFrameGenEncodeArgs({ ...base, codec: "h264_nvenc", hasAudio: false, displayAspect: null });
+    expect(open.nvencArgs).not.toContain("-aspect");
+    expect(open.rawArgs).not.toContain("-aspect");
+    expect(open.rawArgs).not.toContain("-bsf:v");
   });
 
   test("the track timescale is the rate numerator, so one frame is a whole number of ticks", () => {
