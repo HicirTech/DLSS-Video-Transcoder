@@ -41,7 +41,17 @@ const FPS_TABLE: ReadonlyArray<readonly [string, Rational]> = [
 ];
 /** Ascending choice list. An explicit array: object key order would list the integer names ("25", "30") before "23.976". */
 export const FPS_CHOICES: readonly string[] = FPS_TABLE.map(([name]) => name);
-export const FPS_RATES: Readonly<Record<string, Rational>> = Object.fromEntries(FPS_TABLE);
+/**
+ * Null prototype: this is indexed with a raw user string (`--fps`, and the API's
+ * frameGen.targetFps). On an ordinary object FPS_RATES["toString"] returns
+ * Object.prototype.toString — truthy, so the lookup below skipped its parse
+ * branch and handed a function to the planner, which died inside the rational
+ * arithmetic with "Invalid mix of BigInt and other type in multiplication".
+ */
+export const FPS_RATES: Readonly<Record<string, Rational>> = Object.assign(
+  Object.create(null) as Record<string, Rational>,
+  Object.fromEntries(FPS_TABLE),
+);
 
 export type FrameGenEngine = "auto" | "native" | "cascade";
 export const FRAMEGEN_ENGINES: readonly FrameGenEngine[] = ["auto", "native", "cascade"];
