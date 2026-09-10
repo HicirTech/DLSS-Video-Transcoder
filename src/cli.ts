@@ -11,10 +11,10 @@ import { runProbe } from "./ngx/probe.ts";
 import { DlssNrSession } from "./ngx/nr-render.ts";
 import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
-import { DEFAULT_NR_SETTINGS, NR_PRESETS, NR_STYLES, SETTING_RANGES, type EncodeSettings } from "./server/api-types.ts";
+import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, NR_PRESETS, NR_STYLES, SETTING_RANGES } from "./server/api-types.ts";
 import { DlssRenderPreset, DLSS_RATIO } from "./ngx/results.ts";
 import { processFrameGen } from "./pipeline/framegen.ts";
-import type { FrameGenEngine } from "./pipeline/framegen-plan.ts";
+import { FRAMEGEN_ENGINES } from "./pipeline/framegen-plan.ts";
 import { openGpu } from "./pipeline/gpu.ts";
 import { evenSize } from "./pipeline/resize.ts";
 
@@ -76,6 +76,14 @@ function enumOption<T extends number>(args: string[], name: string, allowed: rea
   const value = Number(raw);
   if (!allowed.includes(value as T)) usageError(`${name} must be one of ${allowed.join(", ")}, got "${raw}"`);
   return value as T;
+}
+
+/** A named choice, rejected up front instead of failing later inside the pipeline. */
+function choiceOption<T extends string>(args: string[], name: string, allowed: readonly T[], fallback?: T): T | undefined {
+  const raw = option(args, name);
+  if (raw === undefined) return fallback;
+  if (!(allowed as readonly string[]).includes(raw)) usageError(`${name} must be one of ${allowed.join(", ")}, got "${raw}"`);
+  return raw as T;
 }
 
 /** `--adapter` as a non-negative index, or undefined when absent. */
@@ -510,11 +518,12 @@ async function main(): Promise<void> {
         input,
         output: positional[1],
         targetFps: option(args, "--fps"),
-        multiplier: Number(option(args, "--multiplier") ?? 2),
-        // chooseInterpolationPlan rejects anything but auto / native / cascade with a clear error.
-        engine: (option(args, "--engine") ?? "auto") as FrameGenEngine,
-        quality: Number(option(args, "--quality") ?? 20),
-        codec: option(args, "--codec") as EncodeSettings["codec"] | undefined,
+        // 16x is the top of the FPS table's reach from a 30 fps source (480).
+        multiplier: numberOption(args, "--multiplier", { min: 1, max: 16, integer: true, fallback: 2 }),
+        engine: choiceOption(args, "--engine", FRAMEGEN_ENGINES),
+        // The same range the API validates against and the UI clamps to.
+        quality: numberOption(args, "--quality", { ...SETTING_RANGES.quality, fallback: 20 }),
+        codec: choiceOption(args, "--codec", ENCODE_CODECS),
         runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
         onProgress: (f, m, frames) => {
           if (frames === undefined) console.log(`  ${(f * 100).toFixed(0)}%  ${m}`);
