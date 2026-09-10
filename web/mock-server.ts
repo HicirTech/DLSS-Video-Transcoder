@@ -16,8 +16,10 @@ import {
   MockJobEngine,
   createSeedJobs,
   isJobRequest,
+  mockCatalog,
   mockPreviewSvg,
   mockSettingsDefaults,
+  mockUpload,
   validateJobRequest,
 } from "./src/mock";
 
@@ -49,6 +51,15 @@ const server = Bun.serve({
       return json({ ...MOCK_PROBE, generatedAt: new Date().toISOString() });
     },
     "/api/runtime": () => json(MOCK_PROBE.runtime),
+    "/api/catalog": () => json(mockCatalog()),
+    "/api/upload": {
+      POST: async (req) => {
+        const form = await req.formData().catch(() => null);
+        const file = form?.get("file");
+        if (!(file instanceof File)) return failure(400, "Upload is missing the 'file' field.");
+        return json(mockUpload(file), 201);
+      },
+    },
     "/api/settings/defaults": () => json(mockSettingsDefaults()),
     "/api/tools": () => json(MOCK_TOOLS),
     "/api/jobs": {
