@@ -9,18 +9,8 @@
 import { RUNTIME_DIR } from "../paths.ts";
 import { registerSrEngine, type Engine, type EngineOptions } from "../pipeline/engine.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
-import { DlssRenderPreset, DLSS_RATIO } from "./results.ts";
+import { DlssRenderPreset, DLSS_RATIO, qualityForFactor } from "./results.ts";
 import { DlssSrSession } from "./sr.ts";
-
-/** Snap a desired scale factor to the PerfQuality whose fixed ratio is nearest. */
-function qualityForFactor(factor: number): number {
-  return Number(
-    Object.entries(DLSS_RATIO).reduce(
-      (best, [q, ratio]) => (Math.abs(ratio - factor) < Math.abs(DLSS_RATIO[Number(best)]! - factor) ? q : best),
-      "0",
-    ),
-  );
-}
 
 class SrEngine implements Engine {
   readonly name = "sr";

@@ -92,8 +92,10 @@ rather than a silent fall back to the default.
 Key per-command options (defaults in parentheses):
 
 - **`sr`** — `--factor N` (2; snapped to the nearest fixed DLSS mode, named as the NGX enum does:
-  `1.00`=DLAA, `1.30`=UltraQuality, `1.50`=MaxQuality, `1.72`=Balanced, `2.00`=MaxPerf,
-  `3.00`=UltraPerf — `sr` prints the mode and ratio it chose), `--preset NAME` (L;
+  `1.00`=DLAA, `1.50`=MaxQuality, `1.72`=Balanced, `2.00`=MaxPerf, `3.00`=UltraPerformance. A
+  factor above 1 never snaps to DLAA, so asking to upscale cannot return the same size, and `sr`
+  prints the mode and ratio it chose. UltraQuality is not offered: the installed runtime refuses
+  it at every ratio), `--preset NAME` (L;
   `Default`, `A`–`F`, `J`–`O` — which model each one selects belongs to the installed
   `nvngx_dlss.dll`, not to this tool), `--dlss-version VER` (bundled DLL; prefix match against
   `versions`).

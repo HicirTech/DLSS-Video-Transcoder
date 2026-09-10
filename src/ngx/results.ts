@@ -165,6 +165,32 @@ export function perfQualityName(value: number): string {
   return Object.keys(PerfQuality).find((k) => PerfQuality[k as keyof typeof PerfQuality] === value) ?? `PerfQuality ${value}`;
 }
 
+/**
+ * The fixed render/output ratio of each PerfQuality mode this runtime accepts.
+ *
+ * PerfQuality 4 (UltraQuality) is deliberately absent: nvngx_dlss.dll 310.7.129.0
+ * refuses CreateFeature with UnsupportedParameter for it at every ratio tried
+ * (1.3x, 1.5x, 2.0x), while 1.3x itself succeeds on modes 2 and 5 — so the mode
+ * is unavailable, not the ratio. Measured by tests/diag-sr-quality-modes.ts.
+ * NVIDIA has never shipped Ultra Quality in a public DLSS SR runtime.
+ */
 export const DLSS_RATIO: Record<number, number> = {
-  5: 1.0, 2: 1.5, 1: 1.7241379, 0: 2.0, 3: 3.0, 4: 1.3,
+  5: 1.0, 2: 1.5, 1: 1.7241379, 0: 2.0, 3: 3.0,
 };
+
+/**
+ * The PerfQuality whose fixed ratio is nearest `factor`. The one owner of that
+ * rule: the CLI and the job engine must agree, or a job and its command line
+ * would produce different sizes from the same number.
+ *
+ * A request to upscale never snaps to DLAA. DLAA's ratio is 1.0, so with
+ * UltraQuality gone it would be the nearest match for anything under ~1.25 —
+ * and answering "make it 1.2x bigger" with a same-size image is worse than the
+ * hard error this replaces.
+ */
+export function qualityForFactor(factor: number): number {
+  const candidates = Object.entries(DLSS_RATIO).filter(([, ratio]) => factor > 1 ? ratio > 1 : true);
+  return Number(
+    candidates.reduce((best, [quality, ratio]) => (Math.abs(ratio - factor) < Math.abs(DLSS_RATIO[Number(best)]! - factor) ? quality : best), candidates[0]![0]),
+  );
+}
