@@ -7,12 +7,12 @@
 import { basename, dirname, extname, join } from "node:path";
 import { decodePng, encodePng, isPng } from "./codec/png.ts";
 import { buildForwarderDll } from "./ngx/forwarder.ts";
-import { runProbe } from "./ngx/probe.ts";
+import { PROBE_ENTRIES, PROBE_INITS, runProbe } from "./ngx/probe.ts";
 import { DlssNrSession } from "./ngx/nr-render.ts";
 import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
 import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, NR_PRESETS, NR_STYLES, SETTING_RANGES } from "./server/api-types.ts";
-import { DlssRenderPreset, DLSS_RATIO } from "./ngx/results.ts";
+import { DlssRenderPreset, DLSS_RATIO, perfQualityName } from "./ngx/results.ts";
 import { processFrameGen } from "./pipeline/framegen.ts";
 import { FRAMEGEN_ENGINES } from "./pipeline/framegen-plan.ts";
 import { openGpu } from "./pipeline/gpu.ts";
@@ -228,7 +228,7 @@ const COMMANDS: readonly CommandSpec[] = [
       { name: "output.png", desc: "destination; defaults to <input>.dlss.png next to the input" },
     ],
     options: [
-      { flag: "--factor N", desc: "upscale factor, snapped to the nearest fixed DLSS mode: 1.0=DLAA, 1.3=UltraQuality, 1.5=Quality, 1.72=Balanced, 2.0=Performance, 3.0=UltraPerformance", def: "2" },
+      { flag: "--factor N", desc: `upscale factor, snapped to the nearest fixed DLSS mode: ${srModeList()}`, def: "2" },
       { flag: "--preset NAME", desc: "render preset: Default, A-F or J-O; the installed nvngx_dlss.dll decides which model each selects", def: "L" },
       { flag: "--dlss-version VER", desc: "use a specific installed SR DLL version (prefix match ok); list them with `versions`", def: "bundled runtime DLL" },
       RUNTIME_OPT,
@@ -287,6 +287,14 @@ const COMMANDS: readonly CommandSpec[] = [
     options: [],
   },
 ];
+
+/** "1.00=DLAA, 1.30=UltraQuality, ..." — the --factor help and the sr summary must name the same modes, so both read DLSS_RATIO. */
+function srModeList(): string {
+  return Object.entries(DLSS_RATIO)
+    .sort((a, b) => a[1] - b[1])
+    .map(([quality, ratio]) => `${ratio.toFixed(2)}=${perfQualityName(Number(quality))}`)
+    .join(", ");
+}
 
 function pad(text: string, width: number): string {
   return text.length >= width ? text : text + " ".repeat(width - text.length);
@@ -412,9 +420,10 @@ async function main(): Promise<void> {
         runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
         appDataPath: join(ROOT, "logs"),
         projectInit: flag(args, "--project-init"),
-        entry: option(args, "--entry") === "loader" ? "loader" : "core",
+        // No fallback: probe.ts owns both defaults, so repeating them here would be a second copy.
+        entry: choiceOption(args, "--entry", PROBE_ENTRIES),
         nullFeatureInfo: flag(args, "--null-feature-info"),
-        init: (option(args, "--init") as "ext" | "plain" | "spy" | undefined) ?? "ext",
+        init: choiceOption(args, "--init", PROBE_INITS),
         requirements: !flag(args, "--no-requirements"),
         debugLayer: flag(args, "--debug-layer"),
       });
@@ -501,7 +510,10 @@ async function main(): Promise<void> {
       const rgba = sr.evaluate(image.rgba, true);
       await Bun.write(output, encodePng({ width: outputWidth, height: outputHeight, rgba }, { level: 6 }));
       sr.close();
-      console.log(`DLSS SR: ${image.width}x${image.height} -> ${outputWidth}x${outputHeight} (quality ${quality}, preset ${presetKey}) in ${(performance.now() - started).toFixed(1)} ms`);
+      // The mode name and the ratio it snapped to, not the PerfQuality index: the
+      // index is meaningless to a user and its order is counter-intuitive (0 is the
+      // fastest mode, not the best), while the ratio is what --factor became.
+      console.log(`DLSS SR: ${image.width}x${image.height} -> ${outputWidth}x${outputHeight} (${perfQualityName(quality)} ${snappedRatio.toFixed(2)}x, preset ${presetKey}) in ${(performance.now() - started).toFixed(1)} ms`);
       console.log(`wrote ${output}`);
       // The driver core's Shutdown1 is skipped; exit the process to reclaim NGX.
       process.exit(0);

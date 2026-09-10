@@ -18,6 +18,14 @@ import { NgxParam, NgxParameters, NrParam } from "./params.ts";
 import { NgxFeature, featureName, ngxName, ngxOk } from "./results.ts";
 import { SpyParameter } from "./spy.ts";
 
+/** The NGX module `--entry` can enter through; ProbeOptions derives its type so the two cannot drift. */
+export const PROBE_ENTRIES = ["loader", "core"] as const;
+export type ProbeEntry = (typeof PROBE_ENTRIES)[number];
+
+/** The Init exports `--init` can exercise; see the branches in runProbe. */
+export const PROBE_INITS = ["ext", "plain", "spy"] as const;
+export type ProbeInit = (typeof PROBE_INITS)[number];
+
 export interface ProbeOptions {
   adapterIndex?: number;
   /** Folder holding user-supplied NVIDIA runtime DLLs. */
@@ -29,11 +37,11 @@ export interface ProbeOptions {
   /** Query GetFeatureRequirements (defaults to true; off to isolate crashes). */
   requirements?: boolean;
   /** Which NVIDIA module to enter through: the core itself or the driver's nvngx.dll loader. */
-  entry?: "core" | "loader";
+  entry?: ProbeEntry;
   /** Pass NULL as Init_Ext's fifth argument (only for reproducing the driver fault). */
   nullFeatureInfo?: boolean;
   /** Which init export to exercise: Init_Ext with a FeatureCommonInfo, the 4-argument Init, or Init_Ext with a spy parameter object. */
-  init?: "ext" | "plain" | "spy";
+  init?: ProbeInit;
   debugLayer?: boolean;
 }
 
