@@ -47,8 +47,8 @@ export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): OpenEncode {
   /** Second input (audio only) and the video map, identical on both paths. */
   const inputsAndMap = [...(hasAudio ? ["-i", input] : []), "-map", "0:v:0"];
   /**
-   * No -shortest: the writer emits exactly ceil(duration * rate) frames, so the
-   * video already spans the source duration and the audio track is kept whole.
+   * No -shortest: the writer emits exactly ceil(decodedDuration * rate) frames,
+   * so the video already spans the DECODED length and the audio is kept whole.
    * video_track_timescale = the rate numerator makes one frame exactly `den`
    * ticks, so the mp4 timeline is exact and ffprobe's base-rate guess comes back
    * equal to the target rather than near it.
