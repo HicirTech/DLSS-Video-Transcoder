@@ -24,6 +24,7 @@ import type { EncodeSettings } from "../server/api-types.ts";
 import { DlssgSession, probeDlssgCached } from "./dlssg.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
 import { FrameReader } from "./frame-reader.ts";
+import { verifyOutputVideo } from "./framegen-verify.ts";
 import {
   type FrameGenEngine,
   type InterpolationPlan,
@@ -35,7 +36,7 @@ import {
   resolveTargetRate,
 } from "./framegen-plan.ts";
 import type { NvencSdkCodec } from "./nvenc.ts";
-import { type Rational, formatRational, parseRational, ratAdd, ratCmp, ratDiv, ratMul, ratSub, ratToNumber, rational } from "./rational.ts";
+import { type Rational, formatRational, parseRational, ratAdd, ratDiv, ratMul, ratSub, ratToNumber, rational } from "./rational.ts";
 import { evenSize } from "./resize.ts";
 import { findTool } from "./tools.ts";
 import { encoderArgs, nvencNativeTarget, probeVideo } from "./video.ts";
@@ -604,26 +605,6 @@ async function runSequential(p: RunParams): Promise<{ decoded: number; peak: num
   return { decoded, peak: 0 };
 }
 
-/**
- * Exact frame count (packet counting, not container metadata) and rates of a
- * written video. `avgRate` = frames / duration is the timeline players follow;
- * `rate` is ffprobe's base-rate guess (r_frame_rate), kept for diagnostics.
- */
-function probeOutputVideo(ffprobe: string, path: string): { frames: number; rate: Rational; avgRate: Rational; timeBase: string } {
-  const proc = Bun.spawnSync([ffprobe, "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries", "stream=nb_read_packets,r_frame_rate,avg_frame_rate,time_base", "-of", "json", path], { stdout: "pipe", stderr: "pipe" });
-  if (proc.exitCode !== 0) throw new Error(`ffprobe could not verify the output: ${new TextDecoder().decode(proc.stderr).trim()}`);
-  const data = JSON.parse(new TextDecoder().decode(proc.stdout)) as { streams?: Array<{ nb_read_packets?: string; r_frame_rate?: string; avg_frame_rate?: string; time_base?: string }> };
-  const stream = data.streams?.[0];
-  if (!stream?.r_frame_rate) throw new Error("ffprobe found no video stream in the output.");
-  const usable = (text?: string) => (text && text !== "0/0" ? text : undefined);
-  return {
-    frames: Number(stream.nb_read_packets ?? 0),
-    rate: parseRational(stream.r_frame_rate),
-    avgRate: parseRational(usable(stream.avg_frame_rate) ?? stream.r_frame_rate),
-    timeBase: stream.time_base ?? "?",
-  };
-}
-
 async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenResult> {
   const started = performance.now();
   const progress = options.onProgress ?? (() => {});
@@ -818,19 +799,9 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   if (decodeExit !== 0) throw new Error(`ffmpeg decode failed (${decodeExit}): ${decodeErrText.trim()}`);
 
   progress(0.98, "verifying output");
-  const verified = probeOutputVideo(ffprobe, output);
-  // Packet count and base rate are exact (the track timescale is set above), so
-  // they are compared strictly. The average rate is frames / container duration,
-  // whose final-frame rounding can be a few ticks off (59.94 lands at
-  // 14520000/242237), so it only guards against a grossly wrong timeline.
-  const averageOff = Math.abs(ratToNumber(verified.avgRate) / ratToNumber(targetRate) - 1);
-  const expectedFrames = writer.outputCount; // may be below the planned outputCount when the container over-declared its frames
-  if (verified.frames !== expectedFrames || ratCmp(verified.rate, targetRate) !== 0 || averageOff > 1e-3) {
-    try { unlinkSync(output); } catch {}
-    throw new Error(
-      `Output verification found ${verified.frames} frames at base rate ${formatRational(verified.rate)} fps (average ${formatRational(verified.avgRate)}, time base ${verified.timeBase}); expected ${expectedFrames} at ${outputRate}. The file was removed.`,
-    );
-  }
+  // writer.outputCount, not the planned count: trimTo lowers it when the
+  // container over-declared how many frames it holds.
+  verifyOutputVideo(ffprobe, output, targetRate, writer.outputCount);
 
   const sceneCuts = stages.reduce((sum, stage) => sum + stage.sceneCuts, 0);
   const droppedFrames = Math.max(0, inputFrames - writer.selectedRealIds.size);
