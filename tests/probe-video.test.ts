@@ -2,11 +2,12 @@
 import { describe, expect, test } from "bun:test";
 import { videoInfoFrom, type ProbeJson } from "../src/pipeline/video.ts";
 
-const stream = (rates: { r?: string; avg?: string }, rotation?: number): ProbeJson => ({
+const stream = (rates: { r?: string; avg?: string }, rotation?: number, geometry?: { width: number; height: number; sar?: string }): ProbeJson => ({
   streams: [{
-    codec_type: "video", codec_name: "h264", width: 1920, height: 1080,
+    codec_type: "video", codec_name: "h264", width: geometry?.width ?? 1920, height: geometry?.height ?? 1080,
     r_frame_rate: rates.r, avg_frame_rate: rates.avg, nb_frames: "300",
     ...(rotation === undefined ? null : { side_data_list: [{ rotation }] }),
+    ...(geometry?.sar === undefined ? null : { sample_aspect_ratio: geometry.sar }),
   }],
   format: { duration: "10.0" },
 });
@@ -81,6 +82,30 @@ describe("videoInfoFrom", () => {
 
   test("a bare integer rate is still a rate", () => {
     expect(videoInfoFrom(stream({ r: "25", avg: "25" }), "a.mp4").fpsText).toBe("25");
+  });
+
+  // The rawvideo pipe drops the sample aspect ratio, so the display ratio is
+  // carried instead: it is what a rescale preserves and what both sinks take.
+  test("a 720x480 DVD at SAR 8:9 reports DAR 4:3", () => {
+    const info = videoInfoFrom(stream({ r: "30000/1001" }, undefined, { width: 720, height: 480, sar: "8:9" }), "dvd.mp4");
+    expect(info.displayAspect).toEqual({ num: 4n, den: 3n });
+  });
+
+  test("a 1440x1080 HDV capture at SAR 4:3 reports DAR 16:9", () => {
+    const info = videoInfoFrom(stream({ r: "30000/1001" }, undefined, { width: 1440, height: 1080, sar: "4:3" }), "hdv.mp4");
+    expect(info.displayAspect).toEqual({ num: 16n, den: 9n });
+  });
+
+  test("square pixels and unusable values report nothing to restore", () => {
+    for (const sar of ["1:1", "0:1", "N/A", undefined]) {
+      expect(videoInfoFrom(stream({ r: "30/1" }, undefined, { width: 1920, height: 1080, sar }), "a.mp4").displayAspect).toBeNull();
+    }
+  });
+
+  test("a 90-degree rotation inverts the sample aspect along with the geometry", () => {
+    const info = videoInfoFrom(stream({ r: "30000/1001" }, 90, { width: 720, height: 480, sar: "8:9" }), "portrait-dvd.mp4");
+    expect([info.width, info.height]).toEqual([480, 720]);
+    expect(info.displayAspect).toEqual({ num: 3n, den: 4n });
   });
 
   test("rejects a file with no usable video stream", () => {
