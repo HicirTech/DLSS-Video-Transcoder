@@ -102,6 +102,21 @@ describe("validateJobRequest", () => {
     expect(validateJobRequest(request({ frameGen: "fast" }))).toMatch(/frameGen must be an object/);
   });
 
+  // A rate the planner cannot resolve used to pass validation and become a
+  // queued job that failed minutes later, inside the pipeline, with a message
+  // about BigInt arithmetic.
+  test("frameGen.targetFps must be a rate the planner can actually resolve", () => {
+    expect(validateJobRequest(request({ frameGen: { targetFps: "hello" } }))).toMatch(/not a rate this build can produce/);
+    // "toString" is the prototype-chain case: it used to resolve to a function.
+    expect(validateJobRequest(request({ frameGen: { targetFps: "toString" } }))).toMatch(/not a rate this build can produce/);
+    expect(validateJobRequest(request({ frameGen: { targetFps: "120" } }))).toBeNull();
+    expect(validateJobRequest(request({ frameGen: { targetFps: "60000/1001" } }))).toBeNull();
+  });
+
+  test("frameGen is rejected on an image job, which has no frames to interpolate", () => {
+    expect(validateJobRequest(request({ kind: "image", input: "C:\\in.png", frameGen: { targetFps: "120" } }))).toMatch(/video jobs only/);
+  });
+
   test("the defaults the server advertises are themselves valid", () => {
     // A default the API would reject would make GET /api/settings/defaults a trap.
     expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS } }))).toBeNull();
