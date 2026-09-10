@@ -64,10 +64,10 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
   try {
     if (m.type === "open") {
       const nvof = tryCreateNvofBackend(m.width, m.height, undefined, m.ordinal ?? 0);
-      estimator = createMotionEstimator(m.width, m.height, nvof ? { backend: nvof } : {});
+      estimator = createMotionEstimator(m.width, m.height, nvof.backend ? { backend: nvof.backend } : {});
       detectSourceCuts = m.detectSourceCuts;
       packInline = m.packInline ?? false;
-      self.postMessage({ type: "opened", flow: nvof ? "nvof" : "cpu" });
+      self.postMessage({ type: "opened", flow: nvof.backend ? "nvof" : "cpu", flowReason: nvof.reason });
     } else if (m.type === "open-packer") {
       // The same grid the estimators compute flow on (flowGridSize default long side).
       const { flowW, flowH } = flowGridSize(m.width, m.height);

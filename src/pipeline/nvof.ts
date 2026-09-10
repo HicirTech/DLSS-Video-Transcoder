@@ -139,48 +139,63 @@ export class NvofSession {
     ckof(create(ctx, hOut.ptr), "nvCreateOpticalFlowCuda");
     const hOf = hOut.value;
 
-    // NV_OF_INIT_PARAMS (48B); offsets below name its fields.
-    const initParams = new Uint8Array(48);
-    const idv = new DataView(initParams.buffer);
-    idv.setUint32(0, width, true); // width
-    idv.setUint32(4, height, true); // height
-    idv.setUint32(8, 1, true); // outGridSize = 1: one flow vector per input pixel
-    idv.setUint32(16, MODE_OPTICALFLOW, true); // mode
-    idv.setUint32(20, perf, true); // perfLevel
-    ckof(fn(FN.init, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(hOf, ptr(initParams)), "nvOFInit");
-
+    // Everything past this point can throw, and until the session object exists
+    // nothing else owns hOf or the buffers. The CUDA primary context is retained
+    // for the life of the process, so a handle leaked here outlives the worker
+    // that made it; `created` and the catch below give it back.
     const getDev = fn(FN.getDevPtr, { args: [FFIType.u64], returns: FFIType.u64 });
     const getStride = fn(FN.getStride, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 });
     const createBuf = fn(FN.createBuf, { args: [FFIType.u64, FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 });
-    const mkBuf = (w: number, h: number, usage: number, format: number): NvofBuffer => {
-      // NV_OF_BUFFER_DESCRIPTOR: width@0, height@4, bufferUsage@8, bufferFormat@12.
-      const desc = new Uint8Array(16);
-      const d = new DataView(desc.buffer);
-      d.setUint32(0, w, true);
-      d.setUint32(4, h, true);
-      d.setUint32(8, usage, true);
-      d.setUint32(12, format, true);
-      const bOut = new OutU64();
-      ckof(createBuf(hOf, ptr(desc), CUDA_BUF_DEVPTR, bOut.ptr), "nvOFCreateGPUBufferCuda");
-      const handle = bOut.value;
-      const device = getDev(handle) as bigint;
-      // The driver picks the pitch; every copy below must use it, not w * bpp.
-      const stride = new Uint8Array(28);
-      ckof(getStride(handle, ptr(stride)), "nvOFGPUBufferGetStrideInfo");
-      const pitch = new DataView(stride.buffer).getUint32(0, true);
-      return { handle, device, pitch };
-    };
+    const destroyBuf = fn(FN.destroyBuf, { args: [FFIType.u64], returns: FFIType.i32 });
+    const destroy = fn(FN.destroy, { args: [FFIType.u64], returns: FFIType.i32 });
+    const created: bigint[] = [];
 
-    const input = mkBuf(width, height, USAGE_INPUT, FMT_GRAYSCALE8);
-    const reference = mkBuf(width, height, USAGE_INPUT, FMT_GRAYSCALE8);
-    const output = mkBuf(width, height, USAGE_OUTPUT, FMT_SHORT2);
+    try {
+      // NV_OF_INIT_PARAMS (48B); offsets below name its fields.
+      const initParams = new Uint8Array(48);
+      const idv = new DataView(initParams.buffer);
+      idv.setUint32(0, width, true); // width
+      idv.setUint32(4, height, true); // height
+      idv.setUint32(8, 1, true); // outGridSize = 1: one flow vector per input pixel
+      idv.setUint32(16, MODE_OPTICALFLOW, true); // mode
+      idv.setUint32(20, perf, true); // perfLevel
+      ckof(fn(FN.init, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(hOf, ptr(initParams)), "nvOFInit");
 
-    return new NvofSession(
-      hOf, width, height, input, reference, output,
-      fn(FN.exec, { args: [FFIType.u64, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }),
-      fn(FN.destroyBuf, { args: [FFIType.u64], returns: FFIType.i32 }),
-      fn(FN.destroy, { args: [FFIType.u64], returns: FFIType.i32 }),
-    );
+      const mkBuf = (w: number, h: number, usage: number, format: number): NvofBuffer => {
+        // NV_OF_BUFFER_DESCRIPTOR: width@0, height@4, bufferUsage@8, bufferFormat@12.
+        const desc = new Uint8Array(16);
+        const d = new DataView(desc.buffer);
+        d.setUint32(0, w, true);
+        d.setUint32(4, h, true);
+        d.setUint32(8, usage, true);
+        d.setUint32(12, format, true);
+        const bOut = new OutU64();
+        ckof(createBuf(hOf, ptr(desc), CUDA_BUF_DEVPTR, bOut.ptr), "nvOFCreateGPUBufferCuda");
+        const handle = bOut.value;
+        created.push(handle); // owned from here, before anything below can throw
+        const device = getDev(handle) as bigint;
+        // The driver picks the pitch; every copy below must use it, not w * bpp.
+        const stride = new Uint8Array(28);
+        ckof(getStride(handle, ptr(stride)), "nvOFGPUBufferGetStrideInfo");
+        const pitch = new DataView(stride.buffer).getUint32(0, true);
+        return { handle, device, pitch };
+      };
+
+      const input = mkBuf(width, height, USAGE_INPUT, FMT_GRAYSCALE8);
+      const reference = mkBuf(width, height, USAGE_INPUT, FMT_GRAYSCALE8);
+      const output = mkBuf(width, height, USAGE_OUTPUT, FMT_SHORT2);
+
+      return new NvofSession(
+        hOf, width, height, input, reference, output,
+        fn(FN.exec, { args: [FFIType.u64, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }),
+        destroyBuf,
+        destroy,
+      );
+    } catch (error) {
+      for (const handle of created.reverse()) try { destroyBuf(handle); } catch { /* best effort */ }
+      try { destroy(hOf); } catch { /* best effort */ }
+      throw error;
+    }
   }
 
   /**
@@ -263,16 +278,24 @@ function nvofBackend(session: NvofSession): FlowBackend {
   };
 }
 
+/** A hardware backend, or null plus the reason to show before falling back to the CPU matcher. */
+export interface NvofAttempt {
+  backend: FlowBackend | null;
+  reason: string | null;
+}
+
 /**
  * Try to build an NVOFA optical-flow backend for frames of `width`x`height`
- * (sized to the estimator's flow grid). Returns null if NVOFA is unavailable so
- * the caller can fall back to the CPU block matcher.
+ * (sized to the estimator's flow grid). Failing is not fatal — the CPU block
+ * matcher does the same job more slowly — but the reason is returned rather
+ * than swallowed, so someone who asked for hardware flow learns they lost it.
  */
-export function tryCreateNvofBackend(width: number, height: number, flowWidth = DEFAULT_FLOW_WIDTH, ordinal = 0): FlowBackend | null {
+export function tryCreateNvofBackend(width: number, height: number, flowWidth = DEFAULT_FLOW_WIDTH, ordinal = 0): NvofAttempt {
+  const { flowW, flowH } = flowGridSize(width, height, flowWidth);
   try {
-    const { flowW, flowH } = flowGridSize(width, height, flowWidth);
-    return nvofBackend(NvofSession.open(flowW, flowH, ordinal));
-  } catch {
-    return null;
+    return { backend: nvofBackend(NvofSession.open(flowW, flowH, ordinal)), reason: null };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { backend: null, reason: `NVOFA optical flow could not start on its ${flowW}x${flowH} grid, so this run uses the CPU matcher: ${detail}. Run \`probe\` for the flow limits this GPU reports.` };
   }
 }
