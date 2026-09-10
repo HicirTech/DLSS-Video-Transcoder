@@ -184,7 +184,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   if (!caps.available) throw new Error(`DLSS Frame Generation is not available: ${caps.detail}`);
   const nativeMultiplierMax = caps.multiFrameCountMax + 1;
 
-  const info = probeVideo(ffprobe, options.input);
+  const info = probeVideo(ffprobe, options.input, ffmpeg);
   // Every encoder here writes 4:2:0, which cannot represent an odd dimension,
   // so the whole chain runs at even sizes and the decoder scales to match --
   // the same rule video.ts and image.ts apply to their targets.

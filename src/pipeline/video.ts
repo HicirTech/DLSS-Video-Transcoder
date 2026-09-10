@@ -90,7 +90,35 @@ function parseRate(text: string | undefined): number {
   return Number.isFinite(den) && den > 0 ? num / den : 0;
 }
 
-export function probeVideo(ffprobe: string, input: string): VideoInfo {
+/**
+ * What the decode pipe will actually emit, read from the decoder rather than
+ * predicted. ffprobe prints the display-matrix angle as a truncated integer
+ * (89 for 89.99), while ffmpeg's autorotate decides from the full-precision
+ * angle with a half-degree tolerance, so no arithmetic on the printed value can
+ * reproduce its decision — a matrix in (89.5, 90.0) transposes on decode while
+ * the integer says 89, and one in (90.5, 91.0) does not while it says 90.
+ *
+ * showinfo logs at INFO, so this call must not pass `-v error`. Costs one
+ * ffmpeg start plus one frame (~65 ms here, next to the ~62 ms ffprobe already
+ * spends), which is why the caller only pays it when a rotation is present.
+ */
+function decodedFrameSize(ffmpeg: string, input: string): { width: number; height: number } | null {
+  const proc = Bun.spawnSync([ffmpeg, "-hide_banner", "-nostdin", "-i", input, "-map", "0:v:0", "-frames:v", "1", "-vf", "showinfo", "-f", "null", "-"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const shown = /\ss:(\d+)x(\d+)\s/.exec(new TextDecoder().decode(proc.stderr));
+  if (!shown) return null;
+  return { width: Number(shown[1]), height: Number(shown[2]) };
+}
+
+/**
+ * `ffmpeg` is optional: it is only spawned when the stream carries a rotation,
+ * to confirm the geometry the decoder will hand over. Without it a rotated
+ * source falls back to the angle-based guess, which is right for every exact
+ * 90/180/270 matrix — the case phone footage produces.
+ */
+export function probeVideo(ffprobe: string, input: string, ffmpeg?: string): VideoInfo {
   const proc = Bun.spawnSync(
     [
       ffprobe,
@@ -105,7 +133,13 @@ export function probeVideo(ffprobe: string, input: string): VideoInfo {
     { stdout: "pipe", stderr: "pipe" },
   );
   if (proc.exitCode !== 0) throw new Error(`ffprobe could not read this file as video: ${new TextDecoder().decode(proc.stderr).trim()}`);
-  return videoInfoFrom(JSON.parse(new TextDecoder().decode(proc.stdout)) as ProbeJson, input);
+  const info = videoInfoFrom(JSON.parse(new TextDecoder().decode(proc.stdout)) as ProbeJson, input);
+  if (info.rotation === 0 || !ffmpeg) return info;
+  const decoded = decodedFrameSize(ffmpeg, input);
+  if (!decoded || (decoded.width === info.width && decoded.height === info.height)) return info;
+  // The decoder disagreed with the angle. It is the one feeding the pipeline,
+  // so it wins; predicting its threshold is what caused the shear.
+  return { ...info, width: decoded.width, height: decoded.height };
 }
 
 export interface ProbeJson {
@@ -257,7 +291,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const resolvedCodec = resolveEncodeCodec(requestedEncode.codec, ffmpeg, options.adapterIndex);
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
   const encode: EncodeSettings = { ...requestedEncode, codec: resolvedCodec.codec };
-  const info = probeVideo(ffprobe, options.input);
+  const info = probeVideo(ffprobe, options.input, ffmpeg);
   // Every codec here encodes 4:2:0 (yuv420p / NVENC NV12), which requires even
   // width and height. resolveTargetSize leaves scale 'none' (the default) at the
   // raw source size, so an odd-sized source would only fail at encode time.
