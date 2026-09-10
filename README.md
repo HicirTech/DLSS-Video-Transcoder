@@ -70,7 +70,7 @@ spec is the source of truth for that help.
 
 | Command | What it does |
 | --- | --- |
-| `probe` | Inspect GPU / driver / NGX core / `runtime/` and report which DLSS features are ready. |
+| `probe` | Inspect GPU / driver / NGX core / `runtime/` and report which DLSS features are ready. Exits 0 only when neural rendering is ready, so a script can gate on it. |
 | `sr <in.png> [out.png]` | **DLSS Super Resolution (feature 1)** — real upscaling of a PNG. The only true upscaler. |
 | `nr <in.png> [out.png]` | **DLSS Neural Rendering (feature 18)** — enhance a PNG at the same size (no upscale). |
 | `fg <in.mp4> [out.mp4]` | **DLSS Frame Generation (feature 11)** — interpolate a video to a higher frame rate. |
@@ -78,8 +78,13 @@ spec is the source of truth for that help.
 | `forwarder` | (Re)generate the `nvngx.dll` shim NGX requires (auto-built by `sr`/`nr` when missing). |
 | `help [command]` | Overview, or per-command help. |
 
-Common options: `--adapter N` (GPU index from `probe`, default auto), `--runtime DIR`
-(default `<repo>/runtime`).
+Shared options, and which commands take them — an option a command does not declare is a usage
+error, not a silently ignored flag:
+
+- `--adapter N` (GPU index from `probe`, default auto) — `probe`, `sr`, `nr`. Frame generation has
+  no adapter selection: it runs in NVIDIA's `dlssg-worker.exe`, which always takes the default device.
+- `--runtime DIR` (default `<repo>/runtime`) — `probe`, `sr`, `nr`, `fg`. `forwarder` writes where
+  `--out` points instead.
 
 Key per-command options (defaults in parentheses):
 
