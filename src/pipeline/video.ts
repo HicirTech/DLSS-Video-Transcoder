@@ -80,9 +80,14 @@ function rateText(text: string | undefined): string | null {
 
 function parseRate(text: string | undefined): number {
   if (!text) return 0;
-  const [num, den] = text.split("/").map(Number);
-  if (!num) return 0;
-  return den ? num / den : num;
+  const [n, d] = text.split("/");
+  const num = Number(n);
+  if (!Number.isFinite(num) || num <= 0) return 0;
+  if (d === undefined) return num;
+  const den = Number(d);
+  // "1/0" is not 1: ffprobe emits it for a stream whose duration is zero, and
+  // ffmpeg rejects it as argv, so it has to fall through to the numeric default.
+  return Number.isFinite(den) && den > 0 ? num / den : 0;
 }
 
 export function probeVideo(ffprobe: string, input: string): VideoInfo {
