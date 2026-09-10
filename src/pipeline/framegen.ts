@@ -580,15 +580,9 @@ async function runOverlapped(p: RunParams): Promise<{ decoded: number; peak: num
     }
     if (done.length === 0) await new Promise<void>((resolve) => { wake = () => { wake = null; resolve(); }; });
   }
-  trimToDecoded(p, decoded);
+  p.writer.trimTo(decoded, p.sourceRate);
   await writer.finish();
   return { decoded, peak, busy };
-}
-
-/** The container may declare more frames than decode; end the output at the decoded duration instead of freezing on the last frame. */
-function trimToDecoded(p: RunParams, decoded: number): void {
-  const actual = outputFrameCount(ratDiv(rational(decoded), p.sourceRate), p.writer.targetRate);
-  if (actual < p.writer.outputCount) p.writer.outputCount = Math.max(actual, p.writer.nextIndex);
 }
 
 /** Plain in-order fallback for frames too large for the credit window (still uses the guide threads, one step at a time). */
@@ -609,7 +603,7 @@ async function runSequential(p: RunParams): Promise<{ decoded: number; peak: num
     p.onProcessed(decoded);
     p.check();
   }
-  trimToDecoded(p, decoded);
+  p.writer.trimTo(decoded, p.sourceRate);
   await p.writer.finish();
   return { decoded, peak: 0 };
 }
