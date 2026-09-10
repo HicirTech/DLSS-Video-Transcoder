@@ -12,7 +12,7 @@ import { createEngine, type Engine } from "./engine.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
 import { createMotionEstimator } from "./flow.ts";
 import { FrameReader } from "./frame-reader.ts";
-import { probeNvenc, type NvencCodec } from "./nvenc.ts";
+import { probeNvencCaps, type NvencSdkCodec } from "./nvenc.ts";
 import { runThreadedEncode } from "./threaded-encode.ts";
 import { runAsyncNrEncode } from "./async-nr-encode.ts";
 import { tryCreateNvofBackend } from "./nvof.ts";
@@ -188,7 +188,7 @@ export function encoderArgs(encode: EncodeSettings): string[] {
  * current GPUs. av1_nvenc falls through to null: nvenc.ts's CODEC_GUID only
  * carries the H.264 and HEVC GUIDs, so there is no in-process AV1 encoder.
  */
-export function nvencNativeTarget(codec: EncodeSettings["codec"], width: number, height: number): { codec: NvencCodec; demux: string } | null {
+export function nvencNativeTarget(codec: EncodeSettings["codec"], width: number, height: number): { codec: NvencSdkCodec; demux: string } | null {
   if (width % 2 !== 0 || height % 2 !== 0) return null;
   if (codec === "h264_nvenc") return width <= 4096 && height <= 4096 ? { codec: "h264", demux: "h264" } : null;
   if (codec === "hevc_nvenc") return width <= 8192 && height <= 8192 ? { codec: "hevc", demux: "hevc" } : null;
@@ -280,7 +280,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   // dimensions. motion is ignored: feature 18 consumes no motion vectors, so
   // motion="flow" would only burn optical-flow time here.
   const nrNative = options.engine === "nr" && !upscaling && options.runtimeDir ? nvencNativeTarget(encode.codec, target.width, target.height) : null;
-  if (nrNative && probeNvenc(options.adapterIndex ?? 0).available) {
+  if (nrNative && probeNvencCaps(options.adapterIndex ?? 0).available) {
     try {
       const { num, den } = rateParts(info.fpsText);
       const layout = linearLayout(target.width, target.height, DXGI_FORMAT_R8G8B8A8_UNORM);
@@ -390,7 +390,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   // serial. CPU/AV1 codecs, oversized frames, or an NVENC that will not come up
   // here fall through to the single-thread rawvideo path.
   const nativeTarget = nvencNativeTarget(encode.codec, outWidth, outHeight);
-  const useThreaded = nativeTarget !== null && probeNvenc(options.adapterIndex ?? 0).available;
+  const useThreaded = nativeTarget !== null && probeNvencCaps(options.adapterIndex ?? 0).available;
 
   let frames = 0;
   let sceneCuts = 0;

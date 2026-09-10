@@ -15,7 +15,7 @@ import { AsyncSubmit } from "../native/async-submit.ts";
 import { D3D12_HEAP_TYPE_UPLOAD, type D3D12Resource } from "../native/d3d12.ts";
 import type { DlssNrSession } from "../ngx/nr-render.ts";
 import type { GpuSession } from "./gpu.ts";
-import type { NvencCodec } from "./nvenc.ts";
+import type { NvencSdkCodec } from "./nvenc.ts";
 
 export interface AsyncNrEncodeParams {
   session: GpuSession;
@@ -27,7 +27,7 @@ export interface AsyncNrEncodeParams {
   height: number;
   rowPitch: number; // row pitch of the shared buffers: >= width*4, aligned to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256)
   totalBytes: number; // size of each shared buffer
-  enc: { fpsNum: number; fpsDen: number; codec: NvencCodec; cq: number; ordinal: number };
+  enc: { fpsNum: number; fpsDen: number; codec: NvencSdkCodec; cq: number; ordinal: number };
   totalFrames: number | null;
   /** Per-frame guide (main thread), NR takes no motion. */
   guide: (rgba: Uint8Array, index: number) => { reset: boolean; sceneCut: boolean };

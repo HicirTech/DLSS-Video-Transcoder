@@ -10,13 +10,13 @@
  * Frames are processed strictly in arrival order (a serial promise chain) so the
  * elementary stream stays in display order, matching NVENC's no-B-frame config.
  */
-import { NvencEncoder, type NvencCodec } from "../nvenc.ts";
+import { NvencEncoder, type NvencSdkCodec } from "../nvenc.ts";
 
 interface OpenMsg {
   type: "open";
   ffmpeg: string;
   sinkArgs: string[];
-  enc: { width: number; height: number; fpsNum: number; fpsDen: number; codec: NvencCodec; preset?: "p1" | "p2" | "p3" | "p4" | "p5" | "p6" | "p7"; cq?: number; ordinal?: number };
+  enc: { width: number; height: number; fpsNum: number; fpsDen: number; codec: NvencSdkCodec; preset?: "p1" | "p2" | "p3" | "p4" | "p5" | "p6" | "p7"; cq?: number; ordinal?: number };
 }
 interface FrameMsg { type: "frame"; index: number; buf: ArrayBuffer }
 interface FinishMsg { type: "finish" }
