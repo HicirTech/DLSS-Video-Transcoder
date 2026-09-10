@@ -158,7 +158,11 @@ class ExactReader {
 export interface DlssgOptions {
   width: number;
   height: number;
-  /** Total input frames (max(1, count)); a hint the worker uses to size history. */
+  /**
+   * Frames the worker should expect in total. Not merely a hint: the worker
+   * exits cleanly once it has received this many, so it must be an upper bound
+   * on what will be sent (measured: told 240, sent a 241st, EPIPE).
+   */
   frameCount: number;
   /** Frames to synthesise per interval = native multiplier - 1 (1 = 2x). */
   generatedCount: number;
@@ -170,6 +174,9 @@ export class DlssgSession {
   /** Frames for which the worker reported generation disabled (status ok, but no in-between frames). */
   disabledFrames = 0;
 
+  /** Frames handed to the worker so far; reported when it stops accepting them. */
+  private framesSent = 0;
+
   private constructor(
     private readonly proc: ReturnType<typeof Bun.spawn>,
     private readonly reader: ExactReader,
@@ -177,6 +184,8 @@ export class DlssgSession {
     readonly width: number,
     readonly height: number,
     readonly generatedCount: number,
+    /** What setup told the worker to expect; the number it will exit after. */
+    readonly declaredFrameCount: number,
   ) {}
 
   static async open(workerDir: string, opts: DlssgOptions): Promise<DlssgSession> {
@@ -214,7 +223,7 @@ export class DlssgSession {
       if (status !== 0) throw new Error(`DLSS Frame Generation could not be set up (status ${status}). Check the runtime folder and that your GPU driver is up to date.`);
       const maximum = reply.getUint32(8, true);
       if (opts.generatedCount > maximum) throw new Error(`This GPU/runtime can generate at most ${maximum} in-between frame(s) per source frame; ${opts.generatedCount} was requested. Use a lower multiplier.`);
-      return new DlssgSession(proc, reader, maximum, opts.width, opts.height, opts.generatedCount);
+      return new DlssgSession(proc, reader, maximum, opts.width, opts.height, opts.generatedCount, Math.max(1, opts.frameCount));
     } catch (error) {
       try { proc.kill(); } catch { /* already gone */ }
       await proc.exited.catch(() => 0);
@@ -236,10 +245,21 @@ export class DlssgSession {
     header.setBigInt64(16, tsNum, true);
     header.setBigInt64(24, tsDen, true);
     const stdin = this.proc.stdin as { write(b: Uint8Array): unknown; flush(): number | Promise<number> };
-    stdin.write(new Uint8Array(header.buffer));
-    stdin.write(rgba);
-    stdin.write(new Uint8Array(motion.buffer, motion.byteOffset, motion.byteLength));
-    await stdin.flush();
+    try {
+      stdin.write(new Uint8Array(header.buffer));
+      stdin.write(rgba);
+      stdin.write(new Uint8Array(motion.buffer, motion.byteOffset, motion.byteLength));
+      await stdin.flush();
+    } catch (error) {
+      // A closed pipe here almost always means the worker reached the frame
+      // count it was told at setup and exited on its own, which a bare EPIPE
+      // does not say. Name both numbers so the cause is readable.
+      if ((error as { code?: string }).code !== "EPIPE") throw error;
+      throw new Error(
+        `dlssg-worker.exe stopped accepting frames after ${this.framesSent} of the ${this.declaredFrameCount} it was told to expect. The decoder produced more frames than the source's declared duration accounts for; the container's duration or frame count is understated.`,
+      );
+    }
+    this.framesSent++;
 
     const replyBytes = await this.reader.read(16);
     const reply = new DataView(replyBytes.buffer, replyBytes.byteOffset, 16);
