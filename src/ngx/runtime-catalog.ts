@@ -116,26 +116,46 @@ function subdirs(dir: string): string[] {
   }
 }
 
+/** One place a runtime DLL was found, before anything has been read out of it. */
+export interface RuntimeDllCandidate {
+  path: string;
+  /** Directory that directly contains the DLL; this is what goes on the NGX search path. */
+  dir: string;
+  source: VersionSource;
+  /** Version taken from the folder name, for a DLL stripped of its version resource. */
+  folderHint: string | null;
+}
+
 /**
- * Both runtime/ layouts are enumerated: the flat legacy one
- * (runtime/<subdir>/<dll>, reported as "installed") and the per-version one
- * (runtime/<subdir>/<version>/<dll>, reported as "runtime").
+ * The only definition of where a feature's DLL may sit under runtime/: the flat
+ * per-feature folder (runtime/<subdir>/<dll>, reported as "installed") and one
+ * folder per version (runtime/<subdir>/<version>/<dll>, reported as "runtime").
+ * The probe's inventory reads this same list, so the report can never call a DLL
+ * missing that the version list offers.
+ *
+ * The flat copy comes first because it is the one a job with no dllDir loads —
+ * nr-render.ts and sr.ts both pass join(runtimeDir, <subdir>) as the NGX search
+ * path. Only existence is checked here; nothing is opened.
  */
-export function enumerateRuntimeFeature(runtimeDir: string, feature: FeatureDescriptor): VersionEntry[] {
-  const out: VersionEntry[] = [];
+export function runtimeDllCandidates(runtimeDir: string, feature: FeatureDescriptor): RuntimeDllCandidate[] {
+  const out: RuntimeDllCandidate[] = [];
   const base = join(runtimeDir, feature.runtimeSubdir);
   const flat = join(base, feature.dllName);
-  if (existsSync(flat)) {
-    const entry = describeDll(flat, base, "installed", null);
-    if (entry) out.push(entry);
-  }
+  if (existsSync(flat)) out.push({ path: flat, dir: base, source: "installed", folderHint: null });
   for (const name of subdirs(base)) {
     const dir = join(base, name);
     const candidate = join(dir, feature.dllName);
-    if (existsSync(candidate)) {
-      const entry = describeDll(candidate, dir, "runtime", parseVersionFromDirName(name));
-      if (entry) out.push(entry);
-    }
+    if (existsSync(candidate)) out.push({ path: candidate, dir, source: "runtime", folderHint: parseVersionFromDirName(name) });
+  }
+  return out;
+}
+
+/** Every version of one feature installed under runtime/, in candidate order. */
+export function enumerateRuntimeFeature(runtimeDir: string, feature: FeatureDescriptor): VersionEntry[] {
+  const out: VersionEntry[] = [];
+  for (const found of runtimeDllCandidates(runtimeDir, feature)) {
+    const entry = describeDll(found.path, found.dir, found.source, found.folderHint);
+    if (entry) out.push(entry);
   }
   return out;
 }
