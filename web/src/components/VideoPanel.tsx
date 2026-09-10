@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Alert, Box, Button, Chip, FormControl, FormControlLabel, FormHelperText, InputLabel, Link, MenuItem, Select, Stack, Switch, Typography } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import type { EngineKind, FrameGenEngine, FrameGenFps, JobRequest, JobStatus, MotionKind, ToolsReport } from "../../../src/server/api-types";
@@ -59,6 +59,10 @@ function ToolsBanner({ tools, toolsError }: { tools: ToolsReport | null; toolsEr
 }
 
 export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
+  // useId, not a constant: every tab stays mounted, so two panels can render
+  // this component at once and a fixed id would appear twice in one document.
+  const fpsLabelId = useId();
+  const pathLabelId = useId();
   const { settings, setNr, setScale, setEncode } = useSettings();
   const runner = useJobRunner(jobs);
   const [input, setInput] = useState("");
@@ -117,9 +121,9 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
             label="Interpolate to a higher frame rate"
           />
           <FormControl sx={{ minWidth: 180 }} disabled={!frameGenOn}>
-            <InputLabel id="fg-fps-label">Output frame rate</InputLabel>
+            <InputLabel id={fpsLabelId}>Output frame rate</InputLabel>
             <Select<FrameGenFps>
-              labelId="fg-fps-label"
+              labelId={fpsLabelId}
               label="Output frame rate"
               value={targetFps}
               onChange={(event) => setTargetFps(event.target.value as FrameGenFps)}
@@ -132,9 +136,9 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
             </Select>
           </FormControl>
           <FormControl sx={{ minWidth: 300 }} disabled={!frameGenOn}>
-            <InputLabel id="fg-engine-label">Path</InputLabel>
+            <InputLabel id={pathLabelId}>Path</InputLabel>
             <Select<FrameGenEngine>
-              labelId="fg-engine-label"
+              labelId={pathLabelId}
               label="Path"
               value={fgEngine}
               onChange={(event) => setFgEngine(event.target.value as FrameGenEngine)}

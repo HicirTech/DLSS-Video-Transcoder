@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { FormControl, InputLabel, MenuItem, Select, Stack } from "@mui/material";
 import type { ScaleSettings } from "../../../src/server/api-types";
 import { NumberField } from "./NumberField";
@@ -8,14 +9,17 @@ interface ScaleSettingsEditorProps {
 }
 
 export function ScaleSettingsEditor({ value, onChange }: ScaleSettingsEditorProps) {
+  // useId, not a constant: every tab stays mounted, so two panels can render
+  // this component at once and a fixed id would appear twice in one document.
+  const modeLabelId = useId();
   const update = (patch: Partial<ScaleSettings>): void => onChange({ ...value, ...patch });
 
   return (
     <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
       <FormControl sx={{ minWidth: 200 }}>
-        <InputLabel id="scale-mode-label">Output size</InputLabel>
+        <InputLabel id={modeLabelId}>Output size</InputLabel>
         <Select<ScaleSettings["mode"]>
-          labelId="scale-mode-label"
+          labelId={modeLabelId}
           label="Output size"
           value={value.mode}
           onChange={(event) => update({ mode: event.target.value })}

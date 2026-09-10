@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { FormControl, FormHelperText, InputLabel, MenuItem, Select } from "@mui/material";
 import type { RuntimeManifest } from "../../../src/ngx/runtime-catalog";
 import { api } from "../api";
@@ -15,6 +15,9 @@ interface VersionSelectProps {
 
 /** Lets the user pick a specific installed DLSS DLL version (or the bundled default) for a feature. */
 export function VersionSelect({ featureId, value, disabled, onChange }: VersionSelectProps) {
+  // Per instance, not per feature: the image and video panels both render the
+  // version picker for the same feature, so a feature-keyed id appears twice.
+  const labelId = useId();
   const [catalog, setCatalog] = useState<RuntimeManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,9 +36,9 @@ export function VersionSelect({ featureId, value, disabled, onChange }: VersionS
 
   return (
     <FormControl sx={{ minWidth: 220 }} disabled={disabled}>
-      <InputLabel id={`ver-${featureId}-label`}>DLSS version</InputLabel>
+      <InputLabel id={labelId}>DLSS version</InputLabel>
       <Select<string>
-        labelId={`ver-${featureId}-label`}
+        labelId={labelId}
         label="DLSS version"
         value={value}
         onChange={(event) => onChange(String(event.target.value))}
