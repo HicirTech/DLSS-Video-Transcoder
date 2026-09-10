@@ -12,7 +12,7 @@ import { DlssNrSession } from "./ngx/nr-render.ts";
 import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
 import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, NR_PRESETS, NR_STYLES, SETTING_RANGES } from "./server/api-types.ts";
-import { DlssRenderPreset, DLSS_RATIO, perfQualityName } from "./ngx/results.ts";
+import { DlssRenderPreset, DLSS_RATIO, perfQualityName, qualityForFactor } from "./ngx/results.ts";
 import { processFrameGen } from "./pipeline/framegen.ts";
 import { FRAMEGEN_ENGINES } from "./pipeline/framegen-plan.ts";
 import { openGpu } from "./pipeline/gpu.ts";
@@ -463,11 +463,7 @@ async function main(): Promise<void> {
       }
       const image = decodePng(bytes);
       const factor = numberOption(args, "--factor", { min: 0.1, max: 8, fallback: 2 });
-      // Pick the DLSS PerfQuality whose fixed ratio is nearest the requested factor.
-      const quality = Number(
-        Object.entries(DLSS_RATIO).reduce((best, [q, ratio]) =>
-          Math.abs(ratio - factor) < Math.abs(DLSS_RATIO[Number(best)]! - factor) ? q : best, "0"),
-      );
+      const quality = qualityForFactor(factor);
       // DlssRenderPreset keys are mixed case ("Default", not "DEFAULT"), so match
       // case-insensitively; an unknown name is an error, not a silent fallback to L.
       const presetInput = option(args, "--preset") ?? "L";
