@@ -2,8 +2,12 @@
 import { describe, expect, test } from "bun:test";
 import { videoInfoFrom, type ProbeJson } from "../src/pipeline/video.ts";
 
-const stream = (rates: { r?: string; avg?: string }): ProbeJson => ({
-  streams: [{ codec_type: "video", codec_name: "h264", width: 1920, height: 1080, r_frame_rate: rates.r, avg_frame_rate: rates.avg, nb_frames: "300" }],
+const stream = (rates: { r?: string; avg?: string }, rotation?: number): ProbeJson => ({
+  streams: [{
+    codec_type: "video", codec_name: "h264", width: 1920, height: 1080,
+    r_frame_rate: rates.r, avg_frame_rate: rates.avg, nb_frames: "300",
+    ...(rotation === undefined ? null : { side_data_list: [{ rotation }] }),
+  }],
   format: { duration: "10.0" },
 });
 
@@ -37,6 +41,31 @@ describe("videoInfoFrom", () => {
     expect(videoInfoFrom(stream({ r: "30/1", avg: "30/1" }), "in.mp4").frames).toBe(300);
     const noCount: ProbeJson = { streams: [{ codec_type: "video", width: 640, height: 480, r_frame_rate: "25/1", nb_frames: "N/A" }], format: { duration: "4.0" } };
     expect(videoInfoFrom(noCount, "in.mp4").frames).toBe(100);
+  });
+
+  // ffmpeg autorotates on decode, so a portrait clip coded 1920x1080 with a
+  // 90-degree matrix arrives as 1080x1920. width*height is unchanged, so nothing
+  // downstream can detect the transposition on its own.
+  test("reports display geometry for a rotated stream", () => {
+    for (const deg of [90, -90, 270, -270, 450]) {
+      const info = videoInfoFrom(stream({ r: "30/1" }, deg), "portrait.mp4");
+      expect([info.width, info.height]).toEqual([1080, 1920]);
+    }
+  });
+
+  test("leaves geometry alone for 0 and 180 degrees, and when there is no side data", () => {
+    for (const deg of [0, 180, -180, 360]) {
+      const info = videoInfoFrom(stream({ r: "30/1" }, deg), "landscape.mp4");
+      expect([info.width, info.height]).toEqual([1920, 1080]);
+    }
+    expect(videoInfoFrom(stream({ r: "30/1" }), "plain.mp4").width).toBe(1920);
+  });
+
+  test("normalises the reported rotation to (-180, 180]", () => {
+    expect(videoInfoFrom(stream({ r: "30/1" }, 270), "a.mp4").rotation).toBe(-90);
+    expect(videoInfoFrom(stream({ r: "30/1" }, -90), "a.mp4").rotation).toBe(-90);
+    expect(videoInfoFrom(stream({ r: "30/1" }, 90), "a.mp4").rotation).toBe(90);
+    expect(videoInfoFrom(stream({ r: "30/1" }), "a.mp4").rotation).toBe(0);
   });
 
   test("rejects a file with no usable video stream", () => {
