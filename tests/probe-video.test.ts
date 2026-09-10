@@ -68,6 +68,21 @@ describe("videoInfoFrom", () => {
     expect(videoInfoFrom(stream({ r: "30/1" }), "a.mp4").rotation).toBe(0);
   });
 
+  // ffprobe emits r_frame_rate="1/0" for a stream whose track duration is zero;
+  // ffmpeg then rejects "-framerate 1/0" outright.
+  test("treats a zero or unparseable denominator as no rate at all", () => {
+    for (const bad of ["1/0", "30/x", "x/1", "-30/1", "0/1"]) {
+      const info = videoInfoFrom(stream({ r: bad, avg: bad }), "odd.mp4");
+      expect(info.fpsText).toBe("30");
+      expect(info.nominalFpsText).toBe("30");
+      expect(info.fps).toBe(30);
+    }
+  });
+
+  test("a bare integer rate is still a rate", () => {
+    expect(videoInfoFrom(stream({ r: "25", avg: "25" }), "a.mp4").fpsText).toBe("25");
+  });
+
   test("rejects a file with no usable video stream", () => {
     expect(() => videoInfoFrom({ streams: [{ codec_type: "audio" }] }, "song.mp3")).toThrow(/no video stream/);
   });
