@@ -132,8 +132,15 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     }));
     adapter = selectAdapter(adapters, options.adapterIndex);
     if (!adapter) {
-      reasons.push("No NVIDIA GPU was found. DLSS requires an NVIDIA RTX GPU.");
-      say("no NVIDIA adapter");
+      // An index the caller chose that does not exist is a different problem from
+      // having no NVIDIA GPU at all, and the report has to say which one it is.
+      const listed = report.adapters.map((a) => `${a.index}: ${a.name}`).join(", ") || "none";
+      reasons.push(
+        options.adapterIndex !== undefined
+          ? `No adapter at index ${options.adapterIndex}. Available adapters: ${listed}.`
+          : "No NVIDIA GPU was found. DLSS requires an NVIDIA RTX GPU.",
+      );
+      say(options.adapterIndex !== undefined ? `no adapter at index ${options.adapterIndex}` : "no NVIDIA adapter");
     } else {
       report.selectedAdapter = adapter.info.index;
       say(`selected adapter ${adapter.info.index}: ${adapter.info.name}`);
