@@ -89,6 +89,8 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     log.push(line);
     trace(line);
   };
+  // Blocking failures only. The verdict carries this array, so every line in it
+  // must be a reason neural rendering is NOT ready; advisory notes go to say().
   const reasons: string[] = [];
   const runtimeDir = resolve(options.runtimeDir);
   const appDataPath = resolve(options.appDataPath);
@@ -144,6 +146,11 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     } else {
       report.selectedAdapter = adapter.info.index;
       say(`selected adapter ${adapter.info.index}: ${adapter.info.name}`);
+      // selectAdapter honours an explicit index without checking the vendor, and
+      // D3D12 will create a device on an Intel or software adapter just fine. NGX
+      // then fails with a bare status code, so name the real problem here.
+      if (!adapter.info.isNvidia)
+        reasons.push(`Adapter ${adapter.info.index} (${adapter.info.name}) is not an NVIDIA GPU, and DLSS runs only on NVIDIA. Re-run without --adapter, or pass the index of an NVIDIA adapter.`);
       try {
         trace("D3D12CreateDevice");
         device = D3D12Device.create(adapter, { debugLayer: options.debugLayer });
@@ -283,7 +290,8 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
         say("skipping capability reads: the parameter memory layout could not be confirmed");
       }
     } catch (error) {
-      reasons.push(`DLSS capability query failed: ${(error as Error).message}`);
+      // Advisory: these parameters describe the runtime, they do not gate it.
+      say(`capability query failed: ${(error as Error).message}`);
     }
   }
 
@@ -328,11 +336,15 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   // loaded and passed its self-test (a loaded-but-broken shim cannot reach the
   // driver). CreateFeature(18) itself is left to the nr command and the pipeline:
   // running it in-process can destabilise a long-lived server.
+  // Init belongs here: it runs whenever core and device exist, and leaving it out
+  // let the report say YES while listing an Init failure underneath.
   const forwarderOk = report.forwarder.loaded && Boolean(report.forwarder.selfTest?.startsWith("ok"));
-  report.verdict.neuralRenderingReady =
-    Boolean(dlssnr?.present) && forwarderOk && report.device.created && core !== null;
-  if (!report.verdict.neuralRenderingReady && report.device.created && core !== null && dlssnr?.present && !forwarderOk)
-    reasons.push("The DLSS runtime caller shim could not be loaded or failed its self-test.");
+  const prerequisites =
+    Boolean(dlssnr?.present) && forwarderOk && report.device.created && core !== null && report.ngxInit.ok;
+  // Both halves: the prerequisites are what readiness means, and an empty reason
+  // list is what makes the verdict and the text under it agree. A failure that
+  // pushes a reason without clearing a prerequisite still blocks.
+  report.verdict.neuralRenderingReady = prerequisites && reasons.length === 0;
   report.ok = report.device.created && core !== null;
 
   // --- teardown ---
