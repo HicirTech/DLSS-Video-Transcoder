@@ -3,7 +3,7 @@
  *
  *   - guide ("open"): owns one stage's motion-guide history — the optical-flow
  *     estimator with its own NVOFA session on this thread, the previous frame's
- *     segment/timestamp, and the scene-cut / duplicate counters.
+ *     segment/timestamp, and the scene-cut counter.
  *   - packer ("open-packer"): upsamples a stage's grid flow to render
  *     resolution, scales it and packs it as R16G16_FLOAT halves.
  *
@@ -55,7 +55,6 @@ let estimator: MotionEstimator | null = null;
 let detectSourceCuts = false;
 let previous: { segment: number; tsNum: bigint; tsDen: bigint } | null = null;
 let sceneCuts = 0;
-let duplicates = 0;
 let packInline = false;
 let packer: { width: number; height: number; flowW: number; flowH: number } | null = null;
 
@@ -89,7 +88,6 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
         forceReset = true;
         sceneCuts++;
       }
-      if (previous !== null && guide.duplicate) duplicates++;
       const reset = previous === null || forceReset || guide.reset;
       const before = previous;
       previous = { segment, tsNum: m.tsNum, tsDen: m.tsDen };
@@ -110,7 +108,6 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
           small: small ? small.buffer : null,
           half: half ? half.buffer : null,
           sceneCuts,
-          duplicates,
         },
         transfer,
       );
