@@ -14,7 +14,7 @@
  * Ported from the reference project's frame_interpolation/scheduler.py,
  * models.py (FPS table) and the NearestTimestampWriter in processor.py.
  */
-import { parseRational, type Rational, ratAbs, ratAdd, ratCeil, ratCmp, ratDiv, ratMul, ratSub, rational } from "./nut.ts";
+import { parseRational, type Rational, ratAbs, ratAdd, ratCeil, ratCmp, ratDiv, ratMul, ratSub, rational } from "./rational.ts";
 
 // ---------------------------------------------------------------------------
 // Target rates
