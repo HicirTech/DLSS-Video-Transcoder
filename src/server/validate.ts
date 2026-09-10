@@ -6,6 +6,7 @@
  * value the UI accepts is never rejected here and vice versa.
  */
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { resolveTargetRate } from "../pipeline/framegen-plan.ts";
 import {
   ENCODE_CODECS,
   ENCODE_CONTAINERS,
@@ -95,7 +96,17 @@ function checkEncode(v: Record<string, unknown>): string | null {
 function checkFrameGen(v: Record<string, unknown>): string | null {
   if (v.multiplier === undefined && v.targetFps === undefined) return "frameGen needs targetFps or multiplier — otherwise the job has no output rate to aim for.";
   if (v.multiplier !== undefined && (typeof v.multiplier !== "number" || !Number.isFinite(v.multiplier) || v.multiplier < 1)) return "frameGen.multiplier must be a finite number of at least 1.";
-  if (v.targetFps !== undefined && typeof v.targetFps !== "string") return "frameGen.targetFps must be a string, e.g. \"120\" or \"60000/1001\".";
+  if (v.targetFps !== undefined) {
+    if (typeof v.targetFps !== "string") return "frameGen.targetFps must be a string, e.g. \"120\" or \"60000/1001\".";
+    // Resolved here rather than at typeof: the planner owns which rates exist,
+    // and rejecting a bad one now beats queueing a job that fails minutes later
+    // inside the pipeline with a message about BigInt arithmetic.
+    try {
+      resolveTargetRate(v.targetFps);
+    } catch (error) {
+      return `frameGen.targetFps is not a rate this build can produce: ${(error as Error).message}`;
+    }
+  }
   if (v.engine !== undefined) return checkEnum(v.engine, FRAME_GEN_ENGINES, "frameGen.engine");
   return null;
 }
@@ -120,6 +131,9 @@ export function validateJobRequest(value: unknown): string | null {
     checkNrSettings(v.settings),
     checkScale(v.scale),
     v.encode === undefined ? null : isObject(v.encode) ? checkEncode(v.encode) : "encode must be an object when present.",
+    // A still image has no frames to interpolate between, and the image worker
+    // never reads frameGen, so accepting it would silently drop the request.
+    v.frameGen !== undefined && v.kind !== "video" ? "frameGen applies to video jobs only." : null,
     v.frameGen === undefined ? null : isObject(v.frameGen) ? checkFrameGen(v.frameGen) : "frameGen must be an object when present.",
   );
   return problem;
