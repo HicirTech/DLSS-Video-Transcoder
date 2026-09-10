@@ -156,9 +156,45 @@ export class Stage {
   }
 
   async close(): Promise<void> {
-    try { this.guide.terminate(); } catch {}
+    // The guide thread owns an NVOFA session on the process-wide CUDA primary
+    // context, so terminating the thread does not release it. Ask it to close,
+    // then terminate whatever is left. The packer thread holds no such session.
+    await releaseGuideThread(this.guide);
     if (this.packer) try { this.packer.terminate(); } catch {}
     await this.session.close();
+  }
+}
+
+/**
+ * How long to wait for a guide thread to report its NVOFA session released
+ * before terminating it anyway. A thread wedged inside a driver call must not
+ * hold up the rest of the teardown; leaking one session at process exit is the
+ * lesser cost, and the process is ending in that case regardless.
+ */
+const GUIDE_CLOSE_TIMEOUT_MS = 2000;
+
+/** Ask a guide thread to release its NVOFA session, then terminate it either way. */
+async function releaseGuideThread(guide: Worker): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      guide.onmessage = null;
+      resolve();
+    };
+    const timer = setTimeout(done, GUIDE_CLOSE_TIMEOUT_MS);
+    guide.onmessage = (event: MessageEvent) => {
+      if ((event.data as { type?: string }).type === "closed") done();
+    };
+    try {
+      guide.postMessage({ type: "close" });
+    } catch {
+      done(); // already gone
+    }
+  });
+  try {
+    guide.terminate();
+  } catch {
+    /* already gone */
   }
 }
 
