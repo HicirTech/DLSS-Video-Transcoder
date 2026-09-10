@@ -42,7 +42,7 @@ export function RuntimeFilesTable({ folder, files }: RuntimeFilesTableProps) {
                 <TableCell align="right">{formatMB(file.sizeMB)}</TableCell>
                 <TableCell>
                   {file.exports && file.exports.length > 0 ? (
-                    <Tooltip title={<Mono>{file.exports.join("\n")}</Mono>} placement="left">
+                    <Tooltip title={<Mono pre>{file.exports.join("\n")}</Mono>} placement="left">
                       <span style={{ cursor: "help", textDecoration: "underline dotted" }}>{file.exports.length}</span>
                     </Tooltip>
                   ) : (
