@@ -186,7 +186,7 @@ const COMMANDS: readonly CommandSpec[] = [
     ],
     options: [
       { flag: "--factor N", desc: "upscale factor, snapped to the nearest fixed DLSS mode: 1.0=DLAA, 1.3=UltraQuality, 1.5=Quality, 1.72=Balanced, 2.0=Performance, 3.0=UltraPerformance", def: "2" },
-      { flag: "--preset NAME", desc: "render preset: Default, A-F (older CNN models) or J-O (transformer models)", def: "L" },
+      { flag: "--preset NAME", desc: "render preset: Default, A-F or J-O; the installed nvngx_dlss.dll decides which model each selects", def: "L" },
       { flag: "--dlss-version VER", desc: "use a specific installed SR DLL version (prefix match ok); list them with `versions`", def: "bundled runtime DLL" },
       RUNTIME_OPT,
       ADAPTER_OPT,
