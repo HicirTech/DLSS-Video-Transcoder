@@ -11,10 +11,11 @@
  *     2^stages grid. This is what reaches 4x/8x on runtimes that only do 2x,
  *     and any non-integer ratio (30 -> 144).
  *
- * The output frame count comes from the source DURATION, never from how many
- * frames the worker returned, so the result matches the source length whatever
- * was synthesised. The muxed file is verified (frame count + rate) before the
- * job reports success.
+ * The output frame count comes from the DECODED length — the frames ffmpeg
+ * actually handed the pipeline, counted in the same clock as their timestamps —
+ * never from a container frame count and never from how many frames the worker
+ * returned, so the result matches the source length whatever was synthesised.
+ * The muxed file is verified (frame count + rate) before the job reports success.
  *
  * Ported from the reference project's frame_interpolation package.
  */
@@ -34,7 +35,6 @@ import {
   NearestTimestampWriter,
   chooseInterpolationPlan,
   formatRate,
-  outputFrameCount,
   resolveTargetRate,
 } from "./framegen-plan.ts";
 import type { NvencSdkCodec } from "./nvenc.ts";
@@ -116,6 +116,9 @@ export function failedRunOwnsOutput(framesWritten: number, outputExisted: boolea
   return framesWritten > 0 || !outputExisted;
 }
 
+/** Frames the decoder may emit beyond the container's duration x rate: its CFR resample rounds at the tail. */
+const DECODE_TAIL_MARGIN = 8;
+
 /** Real inter-frame intervals to tolerate with zero synthesised frames before concluding generation is disabled. */
 const FG_PROBE_INTERVALS = 8;
 const DEFAULT_BUFFER_LIMIT = 1 << 30;
@@ -193,15 +196,31 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   const rescaled = width !== info.width || height !== info.height;
   const frameBytes = width * height * 4;
   if (info.frames === null || info.frames <= 0)
-    throw new Error("Could not determine the source frame count, which fixes the output length. Re-mux the file (e.g. `ffmpeg -i in -c copy out.mp4`) so ffprobe can read it.");
+    throw new Error("Could not determine the source frame count, which the frame-generation worker needs to size its frame history. Re-mux the file (e.g. `ffmpeg -i in -c copy out.mp4`) so ffprobe can read it.");
   const frames = info.frames;
   // The nominal CFR clock, not the measured average: planning needs exact ratios (30 -> 60 must be 2x).
   const sourceRate = parseRational(info.nominalFpsText ?? info.fpsText);
   const multiplier = Math.max(1, Math.round(options.multiplier ?? 2));
   const targetRate = options.targetFps !== undefined ? resolveTargetRate(options.targetFps) : ratMul(sourceRate, rational(multiplier));
   const plan = chooseInterpolationPlan(sourceRate, targetRate, options.engine ?? "auto", nativeMultiplierMax, { cfr: true, hagsEnabled: caps.hagsEnabled });
-  const duration = ratDiv(rational(frames), sourceRate);
-  const outputCount = outputFrameCount(duration, targetRate);
+  // Estimates for the progress report only; the exact output length is set
+  // from the decoded count by writer.endAt() at end of stream. `frames` is
+  // nb_frames (or duration x avg_frame_rate), counted in the MEASURED clock, so
+  // it pairs with info.fps — the same measured rate — to give seconds. Dividing
+  // it by sourceRate (r_frame_rate, the clock the decoder resamples to) is what
+  // truncated the output by the ratio of the two rates.
+  const sourceSeconds = frames / info.fps;
+  const expectedDecoded = Math.max(1, Math.round(sourceSeconds * ratToNumber(sourceRate)));
+  const estimatedOutput = Math.ceil(sourceSeconds * ratToNumber(targetRate));
+  // The worker exits once it has received the frame count it was told at setup,
+  // so that number has to be an UPPER bound on what the decoder will emit, in the
+  // decoder's own clock. The CFR resample lands within a frame of the container
+  // duration (measured: estimate 299, decoder 300 on the telecine fixture); the
+  // margin covers that rounding without inflating the worker's history much. A
+  // container that under-declares its duration can still exceed this, and
+  // DlssgSession then says so instead of surfacing a bare EPIPE.
+  const declaredSeconds = Math.max(sourceSeconds, info.duration ?? 0);
+  const decodedUpperBound = Math.ceil(declaredSeconds * ratToNumber(sourceRate)) + DECODE_TAIL_MARGIN;
   const expectsGeneration = plan.generatedPerInterval > 0;
   const output = options.output ?? defaultFrameGenOutput(options.input);
   // Read before anything can write there: it decides what the failure path may delete.
@@ -212,7 +231,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
       : plan.path === "Cascade"
         ? `${plan.cascadeStages} x 2x stage(s) on a ${plan.gridMultiplier}x grid, max timing error ${ratToNumber(plan.maximumTemporalError).toFixed(4)} s`
         : "no synthesis, nearest source frame";
-  progress(0, `source ${info.width}x${info.height}${rescaled ? ` -> ${width}x${height} (4:2:0 needs even dimensions)` : ""} ${info.codec} ${formatRate(sourceRate)} fps, ${frames} frames; ${plan.path}: -> ${formatRate(targetRate)} fps (${detail}); HAGS ${caps.hagsEnabled ? "on" : "off"}; ${outputCount} output frames`);
+  progress(0, `source ${info.width}x${info.height}${rescaled ? ` -> ${width}x${height} (4:2:0 needs even dimensions)` : ""} ${info.codec} ${formatRate(sourceRate)} fps, ${frames} frames${expectedDecoded !== frames ? ` (~${expectedDecoded} after the ${formatRate(sourceRate)} CFR decode)` : ""}; ${plan.path}: -> ${formatRate(targetRate)} fps (${detail}); HAGS ${caps.hagsEnabled ? "on" : "off"}; ~${estimatedOutput} output frames`);
 
   const decoder = Bun.spawn(
     [ffmpeg, "-v", "error", "-nostdin", "-i", options.input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba",
@@ -256,7 +275,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   // Decoded and generated frames live in SharedArrayBuffers so the guide and
   // encode threads read them without copies.
   const reader = new FrameReader(decoder.stdout as ReadableStream<Uint8Array>, true);
-  const writer = new NearestTimestampWriter((frame) => sink.write(frame), targetRate, outputCount);
+  const writer = new NearestTimestampWriter((frame) => sink.write(frame), targetRate);
   const zeros = new Uint16Array(width * height * 2);
   const stages: Stage[] = [];
   const capacity = Math.floor(DEFAULT_BUFFER_LIMIT / frameBytes);
@@ -273,8 +292,9 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     // brings up its own D3D12/NGX or CUDA/NVOFA context, ~1 s of fixed cost
     // that would otherwise be paid stage by stage.
     const openStage = async (index: number, generatedCount: number): Promise<Stage> => {
-      // Stage k sees (frames-1)*2^k + 1 frames: a size hint for the worker's history.
-      const frameCount = plan.path === "Cascade" ? Math.max(1, (frames - 1) * (1 << index) + 1) : frames;
+      // Stage k sees (n-1)*2^k + 1 frames for n decoded. The worker exits after
+      // exactly this many, so n is the decoded UPPER BOUND, never nb_frames.
+      const frameCount = plan.path === "Cascade" ? Math.max(1, (decodedUpperBound - 1) * (1 << index) + 1) : decodedUpperBound;
       // Only the last stage — 2^(stages-1) evaluations per source frame, the
       // bottleneck — gets a packer thread; the others pack inline so the machine
       // is not oversubscribed.
@@ -318,7 +338,8 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
       stages,
       writer,
       capacity,
-      onProcessed: (count) => progress(Math.min(0.96, count / frames), `frame ${count}/${frames}`, count),
+      // expectedDecoded, not nb_frames: the decode is CFR-resampled, so the container count can be short and the bar would pass 100 %.
+      onProcessed: (count) => progress(Math.min(0.96, count / expectedDecoded), `frame ${count}/~${expectedDecoded}`, count),
       check,
     };
     const maxGenerated = Math.max(0, ...stages.map((s) => s.generatedCount));
@@ -362,8 +383,8 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   if (decodeExit !== 0) throw new Error(`ffmpeg decode failed (${decodeExit}): ${decodeErrText.trim()}`);
 
   progress(0.98, "verifying output");
-  // writer.outputCount, not the planned count: trimTo lowers it when the
-  // container over-declared how many frames it holds.
+  // writer.outputCount: fixed by endAt() from the decoded count, so it is the
+  // length that was actually written, whatever the container declared.
   verifyOutputVideo(ffprobe, output, targetRate, writer.outputCount);
 
   const sceneCuts = stages.reduce((sum, stage) => sum + stage.sceneCuts, 0);
