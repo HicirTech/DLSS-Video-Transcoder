@@ -24,9 +24,17 @@ export function openGpu(options: GpuOptions = {}): GpuSession {
   const adapters = factory.enumerate();
   const adapter = selectAdapter(adapters, options.adapterIndex);
   if (!adapter) {
+    // Name what is actually present: "no NVIDIA adapter found" is misleading when
+    // the caller asked for an index that simply does not exist.
+    const listed = adapters.map((a) => `${a.info.index}: ${a.info.name}`).join(", ") || "none";
+    const asked = options.adapterIndex;
     for (const a of adapters) a.release();
     factory.release();
-    throw new Error("No NVIDIA adapter found (use --adapter to pick one explicitly)");
+    throw new Error(
+      asked !== undefined
+        ? `No adapter at index ${asked}. Available adapters: ${listed}. Run \`probe\` to list them.`
+        : `No NVIDIA adapter found. Available adapters: ${listed}. Pass --adapter <index> to choose one explicitly.`,
+    );
   }
   let device: D3D12Device | null = null;
   let gpu: GpuContext;
