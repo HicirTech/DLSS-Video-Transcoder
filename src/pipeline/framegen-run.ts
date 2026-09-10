@@ -152,7 +152,7 @@ export async function runOverlapped(p: RunParams): Promise<RunResult> {
     }
     if (done.length === 0) await new Promise<void>((resolve) => { wake = () => { wake = null; resolve(); }; });
   }
-  p.writer.trimTo(decoded, p.sourceRate);
+  p.writer.endAt(decoded, p.sourceRate);
   await writer.finish();
   return { decoded, peak, busy };
 }
@@ -175,7 +175,7 @@ export async function runSequential(p: RunParams): Promise<RunResult> {
     p.onProcessed(decoded);
     p.check();
   }
-  p.writer.trimTo(decoded, p.sourceRate);
+  p.writer.endAt(decoded, p.sourceRate);
   await p.writer.finish();
   // null, not 0: this runner holds frames without a credit ledger, so its peak
   // is unmeasured rather than zero. Reporting 0 put a number nobody measured
