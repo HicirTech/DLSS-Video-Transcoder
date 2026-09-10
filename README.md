@@ -85,9 +85,9 @@ Shared options, and which commands take them:
 - `--runtime DIR` (default `<repo>/runtime`) — `probe`, `sr`, `nr`, `fg`, `versions`. `forwarder`
   writes where `--out` points instead.
 
-`sr`, `nr` and `fg` reject an option they do not declare and print that command's help. `probe`,
-`versions` and `forwarder` do not yet check, so a misspelled flag there is ignored and the default
-is used instead — see issue #53.
+Every command rejects an option it does not declare, single dash included, and prints that
+command's help. A declared flag whose value is missing, empty or another flag is a usage error too,
+rather than a silent fall back to the default.
 
 Key per-command options (defaults in parentheses):
 
