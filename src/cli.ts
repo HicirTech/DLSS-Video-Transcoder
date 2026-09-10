@@ -11,7 +11,7 @@ import { runProbe } from "./ngx/probe.ts";
 import { DlssNrSession } from "./ngx/nr-render.ts";
 import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
-import { DEFAULT_NR_SETTINGS, type EncodeSettings } from "./server/api-types.ts";
+import { DEFAULT_NR_SETTINGS, NR_PRESETS, NR_STYLES, SETTING_RANGES, type EncodeSettings } from "./server/api-types.ts";
 import { DlssRenderPreset, DLSS_RATIO } from "./ngx/results.ts";
 import { processFrameGen } from "./pipeline/framegen.ts";
 import type { FrameGenEngine } from "./pipeline/framegen-plan.ts";
@@ -29,6 +29,63 @@ function option(args: string[], name: string): string | undefined {
   return i >= 0 ? args[i + 1] : undefined;
 }
 
+/** Exits with a usage error; every bad-argument path goes through here so the wording stays consistent. */
+function usageError(message: string): never {
+  console.error(`error: ${message}`);
+  process.exit(2);
+}
+
+interface NumberOptionSpec {
+  min?: number;
+  max?: number;
+  integer?: boolean;
+  /** Used when the flag is absent. */
+  fallback: number;
+}
+
+/**
+ * Reads a numeric option, rejecting anything that is not a number in range
+ * instead of letting NaN reach the runtime. `--factor abc` used to snap
+ * silently to 2x, and out-of-range neural-rendering values were passed straight
+ * to the DLL.
+ */
+function numberOption(args: string[], name: string, spec: NumberOptionSpec): number {
+  const raw = option(args, name);
+  if (raw === undefined) return spec.fallback;
+  const value = Number(raw);
+  const noun = spec.integer ? "a whole number" : "a number";
+  const range =
+    spec.min !== undefined && spec.max !== undefined
+      ? `between ${spec.min} and ${spec.max}`
+      : spec.min !== undefined
+        ? `of at least ${spec.min}`
+        : "";
+  const expected = range ? `${noun} ${range}` : noun;
+  if (!Number.isFinite(value)) usageError(`${name} expects ${expected}, got "${raw}"`);
+  if (spec.integer && !Number.isInteger(value)) usageError(`${name} expects ${expected}, got "${raw}"`);
+  if ((spec.min !== undefined && value < spec.min) || (spec.max !== undefined && value > spec.max)) {
+    usageError(`${name} must be ${range}, got ${value}`);
+  }
+  return value;
+}
+
+/** Reads an option that must be one of `allowed`, keeping the literal type of the default. */
+function enumOption<T extends number>(args: string[], name: string, allowed: readonly T[], fallback: T): T {
+  const raw = option(args, name);
+  if (raw === undefined) return fallback;
+  const value = Number(raw);
+  if (!allowed.includes(value as T)) usageError(`${name} must be one of ${allowed.join(", ")}, got "${raw}"`);
+  return value as T;
+}
+
+/** `--adapter` as a non-negative index, or undefined when absent. */
+function adapterOption(args: string[]): number | undefined {
+  const raw = option(args, "--adapter");
+  if (raw === undefined) return undefined;
+  if (!/^\d+$/.test(raw)) usageError(`--adapter expects a non-negative index from \`probe\`, got "${raw}"`);
+  return Number(raw);
+}
+
 /** Flag names that consume a following value token, derived from a command spec ("--factor N" does, "--json" does not). */
 function valueFlagNames(spec: CommandSpec): Set<string> {
   const s = new Set<string>();
@@ -39,16 +96,32 @@ function valueFlagNames(spec: CommandSpec): Set<string> {
   return s;
 }
 
+/** Every flag this command declares, value-bearing or not. */
+function flagNames(spec: CommandSpec): Set<string> {
+  return new Set(spec.options.map((o) => o.flag.split(/\s+/)[0]!));
+}
+
 /**
- * Positional arguments only. A value-bearing flag's value token is skipped as well:
- * without that, the `3` in `sr in.png --factor 3` would be read as the output path.
+ * Positional arguments only. A value-bearing flag's value token is skipped as
+ * well: without that, the `3` in `sr in.png --factor 3` would be read as the
+ * output path.
+ *
+ * An undeclared flag is rejected rather than ignored. Silently skipping it left
+ * its value token to be captured as a path, so `fg movie.mp4 --adapter 0` wrote
+ * to a file named `0`, and a typo like `--dlss-ver` quietly redirected the output.
  */
 function positionalArgs(args: string[], spec: CommandSpec): string[] {
   const valued = valueFlagNames(spec);
+  const known = flagNames(spec);
   const out: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     if (a.startsWith("--")) {
+      if (!known.has(a)) {
+        console.error(`error: unknown option '${a}' for ${spec.name}`);
+        printHelp(spec.name);
+        process.exit(2);
+      }
       if (valued.has(a)) i++; // skip this flag's value token
       continue;
     }
@@ -187,7 +260,9 @@ function printOverview(): void {
   const width = Math.max(...COMMANDS.map((c) => c.name.length));
   for (const c of COMMANDS) lines.push(`  ${pad(c.name, width)}  ${c.summary}`);
   lines.push("");
-  lines.push("common options (accepted where relevant):");
+  // Only the commands whose own help lists these accept them; anything else is a
+  // usage error, so do not promise them everywhere.
+  lines.push("common options (each command's help lists the ones it accepts):");
   lines.push(`  ${pad(ADAPTER_OPT.flag, 20)} ${ADAPTER_OPT.desc} (default ${ADAPTER_OPT.def})`);
   lines.push(`  ${pad(RUNTIME_OPT.flag, 20)} ${RUNTIME_OPT.desc} (default ${RUNTIME_OPT.def})`);
   lines.push(`  ${pad("--help, -h", 20)} show help for the CLI or the given command`);
@@ -288,7 +363,7 @@ async function main(): Promise<void> {
   switch (command) {
     case "probe": {
       const report = await runProbe({
-        adapterIndex: option(args, "--adapter") !== undefined ? Number(option(args, "--adapter")) : undefined,
+        adapterIndex: adapterOption(args),
         runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
         appDataPath: join(ROOT, "logs"),
         projectInit: flag(args, "--project-init"),
@@ -325,7 +400,7 @@ async function main(): Promise<void> {
         process.exit(1);
       }
       const image = decodePng(bytes);
-      const factor = Number(option(args, "--factor") ?? 2);
+      const factor = numberOption(args, "--factor", { min: 0.1, max: 8, fallback: 2 });
       // Pick the DLSS PerfQuality whose fixed ratio is nearest the requested factor.
       const quality = Number(
         Object.entries(DLSS_RATIO).reduce((best, [q, ratio]) =>
@@ -362,7 +437,7 @@ async function main(): Promise<void> {
         console.log(`using DLSS SR ${match.version} (${match.source}) from ${match.dir}`);
       }
 
-      const session = openGpu({ adapterIndex: option(args, "--adapter") !== undefined ? Number(option(args, "--adapter")) : undefined });
+      const session = openGpu({ adapterIndex: adapterOption(args) });
       const started = performance.now();
       const sr = DlssSrSession.open(session, {
         renderWidth: image.width,
@@ -399,16 +474,16 @@ async function main(): Promise<void> {
       const output = positional[1] ?? join(dirname(input), `${basename(input, extname(input))}.nr.png`);
       const settings = {
         ...DEFAULT_NR_SETTINGS,
-        intensity: Number(option(args, "--intensity") ?? DEFAULT_NR_SETTINGS.intensity),
-        style: Number(option(args, "--style") ?? DEFAULT_NR_SETTINGS.style) as 0 | 1 | 2,
-        preset: Number(option(args, "--preset") ?? DEFAULT_NR_SETTINGS.preset) as 0 | 1 | 2 | 3,
-        localTone: Number(option(args, "--local-tone") ?? DEFAULT_NR_SETTINGS.localTone),
-        localStructure: Number(option(args, "--local-structure") ?? DEFAULT_NR_SETTINGS.localStructure),
-        skinStructure: Number(option(args, "--skin-structure") ?? DEFAULT_NR_SETTINGS.skinStructure),
+        intensity: numberOption(args, "--intensity", { ...SETTING_RANGES.intensity, fallback: DEFAULT_NR_SETTINGS.intensity }),
+        style: enumOption(args, "--style", NR_STYLES, DEFAULT_NR_SETTINGS.style),
+        preset: enumOption(args, "--preset", NR_PRESETS, DEFAULT_NR_SETTINGS.preset),
+        localTone: numberOption(args, "--local-tone", { ...SETTING_RANGES.localTone, fallback: DEFAULT_NR_SETTINGS.localTone }),
+        localStructure: numberOption(args, "--local-structure", { ...SETTING_RANGES.localStructure, fallback: DEFAULT_NR_SETTINGS.localStructure }),
+        skinStructure: numberOption(args, "--skin-structure", { ...SETTING_RANGES.skinStructure, fallback: DEFAULT_NR_SETTINGS.skinStructure }),
         autoMask: flag(args, "--auto-mask") || DEFAULT_NR_SETTINGS.autoMask,
         uiCorrection: flag(args, "--ui-correction") || DEFAULT_NR_SETTINGS.uiCorrection,
       };
-      const session = openGpu({ adapterIndex: option(args, "--adapter") !== undefined ? Number(option(args, "--adapter")) : undefined });
+      const session = openGpu({ adapterIndex: adapterOption(args) });
       const started = performance.now();
       const nr = DlssNrSession.open(session, {
         width: image.width,
@@ -471,4 +546,12 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+// A failed run should tell the user what to do, not print a stack trace through
+// them. NR_DEBUG=1 keeps the stack for diagnosing the tool itself.
+try {
+  await main();
+} catch (error) {
+  if (process.env.NR_DEBUG) throw error;
+  console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
