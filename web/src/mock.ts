@@ -1,3 +1,4 @@
+import type { RuntimeManifest } from "../../src/ngx/runtime-catalog";
 import type { JobRequest, JobStatus, ProbeReport, ToolsReport, WsEvent } from "../../src/server/api-types";
 import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS } from "../../src/server/api-types";
 import type { ApiClient, JobEventSource, SettingsDefaults } from "./api";
@@ -214,6 +215,26 @@ export const MOCK_TOOLS: ToolsReport = {
   ffprobe: { path: null, version: null },
   nvenc: null,
 };
+
+/** Installed DLSS runtimes, as GET /api/catalog would report them. Shared by both mock modes. */
+export function mockCatalog(): RuntimeManifest {
+  return {
+    features: [
+      { id: 1, name: "DLSS Super Resolution", dllName: "nvngx_dlss.dll", versions: [
+        { version: "310.7.0.0", path: "C:\\mock\\dlss\\nvngx_dlss.dll", sizeMB: 70.8, dir: "C:\\mock\\dlss", source: "runtime", sortKey: "0" },
+        { version: "310.6.0.0", path: "C:\\mock\\swapper\\nvngx_dlss.dll", sizeMB: 70.1, dir: "C:\\mock\\swapper", source: "swapper", sortKey: "0" },
+      ] },
+      { id: 18, name: "DLSS Neural Rendering", dllName: "nvngx_dlssnr.dll", versions: [
+        { version: "1.0.0.0", path: "C:\\mock\\dlssnr\\nvngx_dlssnr.dll", sizeMB: 158, dir: "C:\\mock\\dlssnr", source: "runtime", sortKey: "0" },
+      ] },
+    ],
+  };
+}
+
+/** What POST /api/upload answers. The real server renames the file; the mock only has to be shaped like it. */
+export function mockUpload(file: File): { path: string; name: string; size: number } {
+  return { path: `C:\\mock\\uploads\\${file.name}`, name: file.name, size: file.size };
+}
 
 export function mockSettingsDefaults(): SettingsDefaults {
   return {
@@ -606,17 +627,7 @@ export function createMockBackend(): { client: ApiClient; events: JobEventSource
     runtime: async () => structuredClone(MOCK_PROBE.runtime),
     settingsDefaults: async () => mockSettingsDefaults(),
     tools: async () => structuredClone(MOCK_TOOLS),
-    catalog: async () => ({
-      features: [
-        { id: 1, name: "DLSS Super Resolution", dllName: "nvngx_dlss.dll", versions: [
-          { version: "310.7.0.0", path: "C:\\mock\\dlss\\nvngx_dlss.dll", sizeMB: 70.8, dir: "C:\\mock\\dlss", source: "runtime", sortKey: "0" },
-          { version: "310.6.0.0", path: "C:\\mock\\swapper\\nvngx_dlss.dll", sizeMB: 70.1, dir: "C:\\mock\\swapper", source: "swapper", sortKey: "0" },
-        ] },
-        { id: 18, name: "DLSS Neural Rendering", dllName: "nvngx_dlssnr.dll", versions: [
-          { version: "1.0.0.0", path: "C:\\mock\\dlssnr\\nvngx_dlssnr.dll", sizeMB: 158, dir: "C:\\mock\\dlssnr", source: "runtime", sortKey: "0" },
-        ] },
-      ],
-    }),
+    catalog: async () => mockCatalog(),
     listJobs: async () => engine.list(),
     getJob: async (id) => {
       const job = engine.get(id);
@@ -635,7 +646,7 @@ export function createMockBackend(): { client: ApiClient; events: JobEventSource
     },
     uploadFile: async (file) => {
       await delay(150);
-      return { path: `C:\\mock\\uploads\\${file.name}`, name: file.name, size: file.size };
+      return mockUpload(file);
     },
     fileUrl: (path) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(mockPreviewSvg(path))}`,
   };
