@@ -36,6 +36,7 @@ import {
 } from "./framegen-plan.ts";
 import type { NvencCodec } from "./nvenc.ts";
 import { type Rational, formatRational, parseRational, ratAdd, ratCmp, ratDiv, ratMul, ratSub, ratToNumber, rational } from "./nut.ts";
+import { evenSize } from "./resize.ts";
 import { findTool } from "./tools.ts";
 import { encoderArgs, nvencNativeTarget, probeVideo } from "./video.ts";
 
@@ -645,7 +646,12 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   const nativeMultiplierMax = caps.multiFrameCountMax + 1;
 
   const info = probeVideo(ffprobe, options.input);
-  const { width, height } = info;
+  // Every encoder here writes 4:2:0, which cannot represent an odd dimension,
+  // so the whole chain runs at even sizes and the decoder scales to match --
+  // the same rule video.ts and image.ts apply to their targets.
+  const width = evenSize(info.width);
+  const height = evenSize(info.height);
+  const rescaled = width !== info.width || height !== info.height;
   const frameBytes = width * height * 4;
   if (info.frames === null || info.frames <= 0)
     throw new Error("Could not determine the source frame count, which fixes the output length. Re-mux the file (e.g. `ffmpeg -i in -c copy out.mp4`) so ffprobe can read it.");
@@ -665,9 +671,14 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
       : plan.path === "Cascade"
         ? `${plan.cascadeStages} x 2x stage(s) on a ${plan.gridMultiplier}x grid, max timing error ${ratToNumber(plan.maximumTemporalError).toFixed(4)} s`
         : "no synthesis, nearest source frame";
-  progress(0, `source ${width}x${height} ${info.codec} ${formatRate(sourceRate)} fps, ${frames} frames; ${plan.path}: -> ${formatRate(targetRate)} fps (${detail}); HAGS ${caps.hagsEnabled ? "on" : "off"}; ${outputCount} output frames`);
+  progress(0, `source ${info.width}x${info.height}${rescaled ? ` -> ${width}x${height} (4:2:0 needs even dimensions)` : ""} ${info.codec} ${formatRate(sourceRate)} fps, ${frames} frames; ${plan.path}: -> ${formatRate(targetRate)} fps (${detail}); HAGS ${caps.hagsEnabled ? "on" : "off"}; ${outputCount} output frames`);
 
-  const decoder = Bun.spawn([ffmpeg, "-v", "error", "-nostdin", "-i", options.input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const decoder = Bun.spawn(
+    [ffmpeg, "-v", "error", "-nostdin", "-i", options.input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba",
+      ...(rescaled ? ["-vf", `scale=${width}:${height}:flags=lanczos`] : []),
+      "pipe:1"],
+    { stdout: "pipe", stderr: "pipe", stdin: "ignore" },
+  );
   // Only re-open the source as a second input when it actually has audio to carry;
   // otherwise ffmpeg needlessly demuxes/decodes the whole source again.
   const wantAudio = info.hasAudio;
