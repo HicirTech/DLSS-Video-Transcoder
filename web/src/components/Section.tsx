@@ -60,12 +60,17 @@ export function KeyValueList({ rows, labelWidth = 150 }: KeyValueListProps) {
   );
 }
 
-/** Monospace inline text for paths, versions and identifiers. */
-export function Mono({ children, dim }: { children: ReactNode; dim?: boolean }) {
+/** Monospace inline text for paths, versions and identifiers. `pre` keeps newlines, which the default white-space collapses. */
+export function Mono({ children, dim, pre }: { children: ReactNode; dim?: boolean; pre?: boolean }) {
   return (
     <Box
       component="span"
-      sx={{ fontFamily: "Consolas, 'Cascadia Mono', monospace", fontSize: 12, color: dim ? "text.disabled" : "inherit" }}
+      sx={{
+        fontFamily: "Consolas, 'Cascadia Mono', monospace",
+        fontSize: 12,
+        color: dim ? "text.disabled" : "inherit",
+        ...(pre ? { whiteSpace: "pre" } : null),
+      }}
     >
       {children}
     </Box>
