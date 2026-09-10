@@ -43,7 +43,11 @@ const V = {
 const CODEC_H264 = guid("{6BC82762-4E63-4CA4-AA85-1E50F321F6BF}");
 const CODEC_HEVC = guid("{790CDC88-4522-4D7B-9425-BDA9975F7603}");
 const CODEC_GUID = { h264: CODEC_H264, hevc: CODEC_HEVC } as const;
-export type NvencCodec = keyof typeof CODEC_GUID;
+/**
+ * The codecs the in-process NVENC SDK can open. A different set from ffmpeg's
+ * encoder names in encode-select.ts: "h264" here is "h264_nvenc" there.
+ */
+export type NvencSdkCodec = keyof typeof CODEC_GUID;
 
 /** P1 (fastest) .. P7 (slowest / best quality). */
 const PRESET_GUID = {
@@ -168,7 +172,7 @@ export interface NvencCaps {
  * session, query a few H.264 caps, and tear down. Proves the whole
  * CUDA + NVENC FFI/ABI chain without encoding a frame.
  */
-export function probeNvenc(ordinal = 0): NvencCaps {
+export function probeNvencCaps(ordinal = 0): NvencCaps {
   const ver = nvencMaxSupportedVersion();
   let encoder = 0n;
   try {
@@ -229,7 +233,7 @@ export interface NvencEncoderOptions {
   height: number;
   fpsNum: number;
   fpsDen: number;
-  codec?: NvencCodec; // default h264
+  codec?: NvencSdkCodec; // default h264
   preset?: NvencPreset; // default p4 (balanced)
   /** Constant-quality target (H.264/HEVC 0..51, lower = better). Default 20. */
   cq?: number;
@@ -257,7 +261,7 @@ export class NvencEncoder {
     private readonly enc: bigint,
     readonly width: number,
     readonly height: number,
-    readonly codec: NvencCodec,
+    readonly codec: NvencSdkCodec,
     private readonly device: bigint, // owned CUDA input buffer (0n when using external pool)
     private readonly pitch: number, // bytes per row of each input buffer
     private readonly ownsDevice: boolean, // false when inputs are external (shared) pointers
@@ -281,7 +285,7 @@ export class NvencEncoder {
   static open(opts: NvencEncoderOptions): NvencEncoder {
     const width = opts.width;
     const height = opts.height;
-    const codec: NvencCodec = opts.codec ?? "h264";
+    const codec: NvencSdkCodec = opts.codec ?? "h264";
     const preset: NvencPreset = opts.preset ?? "p4";
     const cq = Math.max(0, Math.min(51, opts.cq ?? 20));
     const codecGuid = CODEC_GUID[codec];
@@ -292,7 +296,7 @@ export class NvencEncoder {
 
     const ctx = cudaCreateContext(opts.ordinal ?? 0);
 
-    // NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS, laid out as in probeNvenc().
+    // NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS, laid out as in probeNvencCaps().
     const open = new Uint8Array(1552);
     const odv = new DataView(open.buffer);
     odv.setUint32(0, V.OPEN_SESSION_EX, true);

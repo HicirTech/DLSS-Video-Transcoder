@@ -9,7 +9,7 @@
  * to the mux ffmpeg. The CPU wait is on THIS thread, so the DLSS thread never
  * blocks and DLSS frame i+1 overlaps NVENC frame i on the GPU.
  */
-import { NvencEncoder, type NvencCodec } from "../nvenc.ts";
+import { NvencEncoder, type NvencSdkCodec } from "../nvenc.ts";
 import { importD3D12Buffer, importD3D12Fence, waitExternalSemaphore, destroyExternalMemory, destroyExternalSemaphore, closeHandle } from "../../native/cuda-interop.ts";
 import { cudaCreateContext, cudaSynchronize } from "../../native/cuda.ts";
 
@@ -17,7 +17,7 @@ interface OpenMsg {
   type: "open";
   ffmpeg: string; sinkArgs: string[];
   bufHandles: number[]; fenceHandle: number; size: number;
-  width: number; height: number; pitch: number; fpsNum: number; fpsDen: number; codec: NvencCodec; cq: number; ordinal: number;
+  width: number; height: number; pitch: number; fpsNum: number; fpsDen: number; codec: NvencSdkCodec; cq: number; ordinal: number;
 }
 type InMsg = OpenMsg | { type: "frame"; slot: number; value: bigint } | { type: "finish" };
 

@@ -34,7 +34,7 @@ import {
   outputFrameCount,
   resolveTargetRate,
 } from "./framegen-plan.ts";
-import type { NvencCodec } from "./nvenc.ts";
+import type { NvencSdkCodec } from "./nvenc.ts";
 import { type Rational, formatRational, parseRational, ratAdd, ratCmp, ratDiv, ratMul, ratSub, ratToNumber, rational } from "./rational.ts";
 import { evenSize } from "./resize.ts";
 import { findTool } from "./tools.ts";
@@ -335,7 +335,7 @@ interface OpenEncode {
   ffmpeg: string;
   nvencArgs: string[];
   rawArgs: string[];
-  nvenc: { width: number; height: number; fpsNum: number; fpsDen: number; codec: NvencCodec; cq: number } | null;
+  nvenc: { width: number; height: number; fpsNum: number; fpsDen: number; codec: NvencSdkCodec; cq: number } | null;
 }
 
 /**
