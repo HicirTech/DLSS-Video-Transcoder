@@ -13,6 +13,8 @@ const cuda = dlopen("nvcuda.dll", {
   cuInit: { args: [FFIType.u32], returns: FFIType.i32 },
   cuDeviceGetCount: { args: [FFIType.ptr], returns: FFIType.i32 },
   cuDeviceGet: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
+  // CUdevice_luid is 8 bytes, matching DXGI's LUID; the node mask is ignored here.
+  cuDeviceGetLuid: { args: [FFIType.ptr, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
   cuDevicePrimaryCtxRetain: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
   cuCtxPushCurrent_v2: { args: [FFIType.u64], returns: FFIType.i32 },
   cuCtxPopCurrent_v2: { args: [FFIType.ptr], returns: FFIType.i32 },
@@ -49,6 +51,43 @@ export function cudaCreateContext(ordinal = 0): bigint {
   ck(cuda.symbols.cuDevicePrimaryCtxRetain(ctx.ptr, dev.value | 0) as number, "cuDevicePrimaryCtxRetain");
   ck(cuda.symbols.cuCtxPushCurrent_v2(ctx.value) as number, "cuCtxPushCurrent");
   return ctx.value;
+}
+
+/**
+ * The CUDA ordinal for the adapter D3D12 chose, matched by LUID, or null when no
+ * CUDA device carries it.
+ *
+ * The two enumerations are unrelated: on this machine DXGI lists three entries
+ * named "RTX 5090" with different LUIDs while CUDA reports one device, so
+ * assuming ordinal 0 is the selected adapter is a guess that happens to hold
+ * only while exactly one NVIDIA GPU is visible to CUDA. A mismatch would put the
+ * encoder or the flow engine on a different GPU than the renderer, and the
+ * shared-resource paths between them would fail or silently fall back.
+ */
+export function cudaOrdinalForLuid(luidLow: number, luidHigh: number): number | null {
+  if (!initialised) {
+    ck(cuda.symbols.cuInit(0) as number, "cuInit");
+    initialised = true;
+  }
+  const wanted = new Uint8Array(8);
+  const view = new DataView(wanted.buffer);
+  view.setUint32(0, luidLow >>> 0, true);
+  view.setInt32(4, luidHigh, true);
+
+  const count = cudaDeviceCount();
+  const luid = new Uint8Array(8);
+  const nodeMask = new Uint32Array(1);
+  for (let ordinal = 0; ordinal < count; ordinal++) {
+    const dev = new OutU32();
+    ck(cuda.symbols.cuDeviceGet(dev.ptr, ordinal) as number, "cuDeviceGet");
+    luid.fill(0);
+    // Not every driver/device pair supports the query; a failure just means this
+    // device cannot be matched, not that the whole lookup failed.
+    const status = cuda.symbols.cuDeviceGetLuid(ptr(luid), ptr(nodeMask), dev.value | 0) as number;
+    if (status !== 0) continue;
+    if (luid.every((byte, i) => byte === wanted[i])) return ordinal;
+  }
+  return null;
 }
 
 export function cudaDeviceCount(): number {

@@ -2,6 +2,7 @@
  * One GPU session per job: adapter choice, D3D12 device and a synchronous
  * record/submit/wait context.
  */
+import { cudaOrdinalForLuid } from "../native/cuda.ts";
 import { D3D12Device, GpuContext } from "../native/d3d12.ts";
 import { DxgiFactory, selectAdapter, type DxgiAdapter } from "../native/dxgi.ts";
 
@@ -16,6 +17,15 @@ export interface GpuSession {
   readonly adapter: DxgiAdapter;
   readonly device: D3D12Device;
   readonly gpu: GpuContext;
+  /**
+   * The CUDA ordinal for THIS adapter, matched by LUID, or null when CUDA does
+   * not know it. Never the DXGI index: the two enumerations are unrelated, and
+   * on a machine with mirrored or virtual display adapters several DXGI entries
+   * can share a GPU name while only one has a CUDA device behind it. NVENC and
+   * NVOFA must use this, or they run on a different GPU than the renderer and
+   * the shared-resource paths between them fail.
+   */
+  readonly cudaOrdinal: number | null;
   close(): void;
 }
 
@@ -47,6 +57,15 @@ export function openGpu(options: GpuOptions = {}): GpuSession {
     factory.release();
     throw error;
   }
+  // Resolved once here rather than at every CUDA call: cuInit plus a LUID read
+  // per device, and the answer cannot change while the session is open.
+  let cudaOrdinal: number | null = null;
+  try {
+    cudaOrdinal = cudaOrdinalForLuid(adapter.info.luidLow, adapter.info.luidHigh);
+  } catch {
+    // No CUDA at all (no driver, or a non-NVIDIA adapter). The CUDA-backed paths
+    // check for null and fall back; the D3D12 work does not need it.
+  }
   let closed = false;
   return {
     factory,
@@ -54,6 +73,7 @@ export function openGpu(options: GpuOptions = {}): GpuSession {
     adapter,
     device,
     gpu,
+    cudaOrdinal,
     close() {
       if (closed) return;
       closed = true;
