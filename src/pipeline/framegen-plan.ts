@@ -7,7 +7,7 @@
  * Why a nearest-timestamp writer rather than "multiply the frame rate": the
  * worker legitimately emits no in-between frames across scene cuts and resets,
  * and none at all when the runtime disables generation. Taking the output frame
- * count from the source DURATION and filling each instant with the nearest
+ * count from the DECODED duration and filling each instant with the nearest
  * available frame keeps the output the same length as the source whatever came
  * back, so audio never drifts and the video can never play too fast.
  *
@@ -246,27 +246,32 @@ export class NearestTimestampWriter {
   private tieLate = false;
 
   /**
-   * Frames to emit. Planned from the container's frame count up front, then
-   * lowered by trimTo() at end of stream. Never raised after pushes began.
+   * Frames to emit: unbounded until endAt() fixes it at end of stream. There is
+   * deliberately no planned count. push() only writes instants before the
+   * midpoint of the two frames it holds, so a cap can never make it emit MORE —
+   * it can only cut the output short. A cap planned from the container's frame
+   * count did exactly that: nb_frames is counted in the avg_frame_rate clock,
+   * while the decoder hands this writer a stream resampled to r_frame_rate
+   * (measured: a 240-frame 23.976-in-29.97 clip decodes to 300 frames, so the
+   * plan covered 80 % of the file).
    */
-  outputCount: number;
+  outputCount = Number.POSITIVE_INFINITY;
 
   constructor(
     private readonly sink: (rgba: Uint8Array) => Promise<void> | void,
     readonly targetRate: Rational,
-    outputCount: number,
-  ) {
-    this.outputCount = outputCount;
-  }
+  ) {}
 
   /**
-   * End the output at the duration actually decoded. A container that declares
-   * more frames than it can decode would otherwise finish on a short freeze.
-   * Never lowers below what has already been written.
+   * Fix the output length from the frames actually decoded, in either
+   * direction. `decodedFrames` is the only count measured in the same clock as
+   * `sourceRate`, so decodedFrames / sourceRate is the decoded duration
+   * exactly, whatever the container declared — more frames than it said, or
+   * fewer. Never lowers below what has already been written.
    */
-  trimTo(decodedFrames: number, sourceRate: Rational): void {
+  endAt(decodedFrames: number, sourceRate: Rational): void {
     const actual = outputFrameCount(ratDiv(rational(decodedFrames), sourceRate), this.targetRate);
-    if (actual < this.outputCount) this.outputCount = Math.max(actual, this.nextIndex);
+    this.outputCount = Math.max(actual, this.nextIndex);
   }
 
   private ideal(index: number): Rational {
@@ -306,6 +311,8 @@ export class NearestTimestampWriter {
 
   async finish(): Promise<void> {
     if (this.previous === null) throw new Error("The input video contains no decodable frames.");
+    // Unbounded means endAt() was skipped; padding to infinity would hang, not fail.
+    if (!Number.isFinite(this.outputCount)) throw new Error("NearestTimestampWriter.finish() was called before endAt(): the output length is set from the decoded frame count at end of stream.");
     while (this.nextIndex < this.outputCount) {
       const ideal = this.ideal(this.nextIndex);
       await this.write({ ...this.previous, timestamp: ideal, provenance: "Source" }, ideal);
