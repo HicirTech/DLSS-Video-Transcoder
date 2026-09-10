@@ -24,6 +24,11 @@ function flag(args: string[], name: string): boolean {
   return args.includes(name);
 }
 
+/**
+ * The token after `name`, or undefined when the flag is absent. positionalArgs
+ * has already proven that a declared value-bearing flag is followed by a real
+ * value, so this can never hand back another flag or an empty string.
+ */
 function option(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
@@ -110,13 +115,32 @@ function flagNames(spec: CommandSpec): Set<string> {
 }
 
 /**
- * Positional arguments only. A value-bearing flag's value token is skipped as
- * well: without that, the `3` in `sr in.png --factor 3` would be read as the
- * output path.
+ * A token is a flag when it starts with "-" and is not a number. A leading minus
+ * alone cannot mean "flag": `nr --skin-structure -1` is documented as
+ * "-1 = runtime default" and SETTING_RANGES.skinStructure allows it.
+ */
+function isFlagToken(token: string): boolean {
+  return token.startsWith("-") && Number.isNaN(Number(token));
+}
+
+/**
+ * The one structural check argv gets: it validates the flags against the
+ * command's spec and returns the positionals. Every reader below — option,
+ * numberOption, enumOption, choiceOption, adapterOption — may therefore assume a
+ * flag that is present is followed by a real value.
  *
- * An undeclared flag is rejected rather than ignored. Silently skipping it left
- * its value token to be captured as a path, so `fg movie.mp4 --adapter 0` wrote
- * to a file named `0`, and a typo like `--dlss-ver` quietly redirected the output.
+ * A value-bearing flag's value token is skipped: without that, the `3` in
+ * `sr in.png --factor 3` would be read as the output path.
+ *
+ * An undeclared flag is rejected rather than ignored, single dash included:
+ * silently skipping it left its value token to be captured as a path, so
+ * `fg movie.mp4 --adapter 0` wrote to a file named `0` and
+ * `sr in.png -factor 3` wrote one named `-factor`, at the default 2x.
+ *
+ * A flag whose value is missing, blank or another flag is a usage error rather
+ * than a silent default: `fg in.mp4 --fps`, or `--fps "$Unset"` where the shell
+ * drops the argument or passes it empty, used to run the whole job at the
+ * default rate and exit 0.
  */
 function positionalArgs(args: string[], spec: CommandSpec): string[] {
   const valued = valueFlagNames(spec);
@@ -124,13 +148,24 @@ function positionalArgs(args: string[], spec: CommandSpec): string[] {
   const out: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
-    if (a.startsWith("--")) {
+    if (isFlagToken(a)) {
       if (!known.has(a)) {
         console.error(`error: unknown option '${a}' for ${spec.name}`);
         printHelp(spec.name);
         process.exit(2);
       }
-      if (valued.has(a)) i++; // skip this flag's value token
+      if (valued.has(a)) {
+        const value = args[i + 1];
+        if (value === undefined || isFlagToken(value) || value.trim() === "") {
+          // known.has(a) already proved the spec carries this flag.
+          const declared = spec.options.find((o) => o.flag.split(/\s+/)[0] === a)!;
+          const cause =
+            value === undefined ? "nothing followed it" : value.trim() === "" ? "the value was empty" : `'${value}' is another option`;
+          const shown = declared.def === undefined ? "" : ` (default ${declared.def})`;
+          usageError(`${a} expects a value -- ${cause}. ${declared.flag}: ${declared.desc}${shown}`);
+        }
+        i++; // skip this flag's value token
+      }
       continue;
     }
     out.push(a);
@@ -370,6 +405,8 @@ async function main(): Promise<void> {
   }
   switch (command) {
     case "probe": {
+      // probe takes no positionals; validate the flag set before the GPU is touched.
+      positionalArgs(args, COMMANDS.find((c) => c.name === command)!);
       const report = await runProbe({
         adapterIndex: adapterOption(args),
         runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
@@ -389,6 +426,8 @@ async function main(): Promise<void> {
       process.exit(report.ok && report.verdict.neuralRenderingReady ? 0 : 1);
     }
     case "forwarder": {
+      // forwarder takes no positionals; validate before anything is written.
+      positionalArgs(args, COMMANDS.find((c) => c.name === command)!);
       const out = option(args, "--out") ?? join(ROOT, "runtime", "caller", "nvngx.dll");
       const built = buildForwarderDll();
       await Bun.write(out, built.bytes);
@@ -540,6 +579,8 @@ async function main(): Promise<void> {
       process.exit(0);
     }
     case "versions": {
+      // versions takes no positionals; validate before the catalog is built.
+      positionalArgs(args, COMMANDS.find((c) => c.name === command)!);
       const catalog = buildRuntimeCatalog(option(args, "--runtime") ?? join(ROOT, "runtime"));
       for (const feature of catalog.features) {
         console.log(`feature ${feature.id}  ${feature.name}  (${feature.dllName})  ${feature.versions.length} version(s)`);
