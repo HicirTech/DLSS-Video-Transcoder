@@ -4,7 +4,7 @@ import CancelIcon from "@mui/icons-material/Cancel";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ImageIcon from "@mui/icons-material/Image";
 import MovieIcon from "@mui/icons-material/Movie";
-import type { JobState, JobStatus } from "../../../src/server/api-types";
+import type { EngineKind, JobState, JobStatus } from "../../../src/server/api-types";
 import { baseName, formatDuration, formatTime, isJobActive, jobElapsedMs } from "../format";
 import { LogPanel } from "./LogPanel";
 import { Mono } from "./Section";
@@ -20,6 +20,13 @@ interface JobCardProps {
 }
 
 type ProgressColor = "primary" | "success" | "error" | "warning" | "inherit";
+
+// Record<EngineKind, ...>: a new engine without a label is a build error, not a wrong chip.
+const ENGINE_LABELS: Record<EngineKind, string> = {
+  sr: "super resolution",
+  nr: "neural rendering",
+  bypass: "bypass (passthrough)",
+};
 
 const PROGRESS_COLORS: Record<JobState, ProgressColor> = {
   queued: "inherit",
@@ -45,7 +52,7 @@ export function JobCard({ job, now, onCancel, cancelling = false, defaultExpande
           {baseName(job.input)}
         </Typography>
         <StateChip state={job.state} />
-        <Chip label={job.engine === "nr" ? "neural rendering" : "bypass (passthrough)"} variant="outlined" />
+        <Chip label={ENGINE_LABELS[job.engine]} variant="outlined" />
         <Box sx={{ flex: 1 }} />
         <Mono dim>{job.id}</Mono>
         {active && onCancel ? (
