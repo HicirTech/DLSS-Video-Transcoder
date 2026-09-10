@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Box, FormControl, FormControlLabel, InputLabel, MenuItem, Select, Stack, Switch, Typography } from "@mui/material";
 import type { NrSettings } from "../../../src/server/api-types";
 import { SliderRow } from "./SliderRow";
@@ -20,6 +21,10 @@ function formatSkin(value: number): string {
  * because the current runtime ignores that parameter.
  */
 export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
+  // useId, not a constant: every tab stays mounted, so two panels can render
+  // this component at once and a fixed id would appear twice in one document.
+  const styleLabelId = useId();
+  const presetLabelId = useId();
   const update = (patch: Partial<NrSettings>): void => onChange({ ...value, ...patch });
 
   return (
@@ -28,9 +33,9 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
         <Box>
           <Stack direction="row" spacing={2}>
             <FormControl fullWidth>
-              <InputLabel id="nr-style-label">Style</InputLabel>
+              <InputLabel id={styleLabelId}>Style</InputLabel>
               <Select<NrSettings["style"]>
-                labelId="nr-style-label"
+                labelId={styleLabelId}
                 label="Style"
                 value={value.style}
                 onChange={(event) => update({ style: event.target.value })}
@@ -41,9 +46,9 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
               </Select>
             </FormControl>
             <FormControl fullWidth>
-              <InputLabel id="nr-preset-label">Model preset</InputLabel>
+              <InputLabel id={presetLabelId}>Model preset</InputLabel>
               <Select<NrSettings["preset"]>
-                labelId="nr-preset-label"
+                labelId={presetLabelId}
                 label="Model preset"
                 value={value.preset}
                 onChange={(event) => update({ preset: event.target.value })}

@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { FormControl, FormControlLabel, InputLabel, MenuItem, Select, Stack, Switch } from "@mui/material";
 import type { EncodeSettings } from "../../../src/server/api-types";
 import { NumberField } from "./NumberField";
@@ -17,14 +18,18 @@ const CODECS: Array<{ value: EncodeSettings["codec"]; label: string }> = [
 ];
 
 export function EncodeSettingsEditor({ value, onChange }: EncodeSettingsEditorProps) {
+  // useId, not a constant: every tab stays mounted, so two panels can render
+  // this component at once and a fixed id would appear twice in one document.
+  const codecLabelId = useId();
+  const containerLabelId = useId();
   const update = (patch: Partial<EncodeSettings>): void => onChange({ ...value, ...patch });
 
   return (
     <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
       <FormControl sx={{ minWidth: 200 }}>
-        <InputLabel id="encode-codec-label">Codec</InputLabel>
+        <InputLabel id={codecLabelId}>Codec</InputLabel>
         <Select<EncodeSettings["codec"]>
-          labelId="encode-codec-label"
+          labelId={codecLabelId}
           label="Codec"
           value={value.codec}
           onChange={(event) => update({ codec: event.target.value })}
@@ -48,9 +53,9 @@ export function EncodeSettingsEditor({ value, onChange }: EncodeSettingsEditorPr
         onChange={(quality) => update({ quality })}
       />
       <FormControl sx={{ minWidth: 120 }}>
-        <InputLabel id="encode-container-label">Container</InputLabel>
+        <InputLabel id={containerLabelId}>Container</InputLabel>
         <Select<EncodeSettings["container"]>
-          labelId="encode-container-label"
+          labelId={containerLabelId}
           label="Container"
           value={value.container}
           onChange={(event) => update({ container: event.target.value })}

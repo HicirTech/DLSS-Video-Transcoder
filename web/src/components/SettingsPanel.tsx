@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Button, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
 import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
@@ -18,6 +18,9 @@ const NR_PATH_OPTIONS: Array<{ value: NrPath; label: string; hint: string }> = [
 ];
 
 export function SettingsPanel() {
+  // useId, not a constant: every tab stays mounted, so two panels can render
+  // this component at once and a fixed id would appear twice in one document.
+  const nrPathLabelId = useId();
   const { settings, setNr, reset, replaceAll } = useSettings();
   const toast = useToast();
   const [loading, setLoading] = useState(false);
@@ -42,9 +45,9 @@ export function SettingsPanel() {
       <Section title="Neural rendering runtime">
         <Stack spacing={1}>
           <FormControl sx={{ maxWidth: 420 }}>
-            <InputLabel id="nr-path-label">Neural rendering path</InputLabel>
+            <InputLabel id={nrPathLabelId}>Neural rendering path</InputLabel>
             <Select<NrPath>
-              labelId="nr-path-label"
+              labelId={nrPathLabelId}
               label="Neural rendering path"
               value={settings.nr.nrPath}
               onChange={(event) => setNr({ ...settings.nr, nrPath: event.target.value })}

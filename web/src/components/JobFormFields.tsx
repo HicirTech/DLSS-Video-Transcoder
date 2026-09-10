@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from "react";
+import { type ChangeEvent, useId, useState } from "react";
 import { Button, FormControl, FormHelperText, InputLabel, MenuItem, Select, Stack, TextField } from "@mui/material";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import type { EngineKind, MotionKind } from "../../../src/server/api-types";
@@ -83,11 +83,14 @@ interface EngineSelectProps {
 }
 
 export function EngineSelect({ value, disabled, onChange }: EngineSelectProps) {
+  // useId, not a constant: every tab stays mounted, so two panels can render
+  // this component at once and a fixed id would appear twice in one document.
+  const engineLabelId = useId();
   return (
     <FormControl sx={{ minWidth: 260 }} disabled={disabled}>
-      <InputLabel id="engine-label">Engine</InputLabel>
+      <InputLabel id={engineLabelId}>Engine</InputLabel>
       <Select<EngineKind>
-        labelId="engine-label"
+        labelId={engineLabelId}
         label="Engine"
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -111,11 +114,14 @@ interface MotionSelectProps {
 }
 
 export function MotionSelect({ value, disabled, onChange }: MotionSelectProps) {
+  // useId, not a constant: every tab stays mounted, so two panels can render
+  // this component at once and a fixed id would appear twice in one document.
+  const motionLabelId = useId();
   return (
     <FormControl sx={{ minWidth: 220 }} disabled={disabled}>
-      <InputLabel id="motion-label">Motion</InputLabel>
+      <InputLabel id={motionLabelId}>Motion</InputLabel>
       <Select<MotionKind>
-        labelId="motion-label"
+        labelId={motionLabelId}
         label="Motion"
         value={value}
         onChange={(event) => onChange(event.target.value)}
