@@ -63,7 +63,15 @@ export function probeDlssgCached(workerDir: string, ttlMs = 60_000): Promise<Dls
   const hit = probeCache.get(workerDir);
   if (hit && now - hit.at < ttlMs) return hit.probe;
   const probe = probeDlssg(workerDir);
-  probe.catch(() => probeCache.delete(workerDir));
+  // Only a probe the worker actually answered is worth keeping: the others
+  // describe a machine the user is probably fixing right now, and the TTL would
+  // repeat the same message for a minute without re-spawning.
+  probe.then(
+    (answered) => {
+      if (!answered.workerVersion) probeCache.delete(workerDir);
+    },
+    () => probeCache.delete(workerDir),
+  );
   probeCache.set(workerDir, { at: now, probe });
   return probe;
 }
@@ -78,12 +86,29 @@ export async function probeDlssg(workerDir: string): Promise<DlssgProbe> {
   });
   // Drain stdout AND stderr concurrently; reading only stdout would deadlock if
   // the worker filled the unread stderr pipe before finishing its stdout.
-  const [text] = await Promise.all([
+  const [text, errorText] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
   ]);
-  await proc.exited;
-  const line = text.trim().split(/\r?\n/).filter((l) => l.trim()).pop() ?? "{}";
+  const exitCode = await proc.exited;
+  const line = text.trim().split(/\r?\n/).filter((l) => l.trim()).pop() ?? "";
+  // A worker that died before printing its JSON leaves nothing to parse. Saying
+  // "not available: " with nothing after it tells the user nothing they can act
+  // on, so its stderr and exit code become the reason instead — that is where a
+  // missing redistributable or a blocked executable actually reports itself.
+  if (!line) {
+    const said = errorText.trim().split(/\r?\n/).filter((l) => l.trim()).pop() ?? "";
+    return {
+      available: false,
+      multiFrameCountMax: 0,
+      runtimeVersion: "",
+      workerVersion: "",
+      detail: said
+        ? `dlssg-worker.exe exited ${exitCode} without reporting: ${said}`
+        : `dlssg-worker.exe exited ${exitCode} without reporting anything. Check that ${workerDir} holds the worker and nvngx_dlssg.dll, and that the exe is not blocked.`,
+      hagsEnabled: probeHags(),
+    };
+  }
   const json = JSON.parse(line) as Record<string, unknown>;
   return {
     available: Boolean(json.available),
@@ -166,24 +191,35 @@ export class DlssgSession {
     // failures surface as a status code or a short read in ExactReader.
     void new Response(proc.stderr).text().catch(() => "");
 
-    const reader = new ExactReader(proc.stdout as ReadableStream<Uint8Array>, opts.sharedFrames ?? false);
-    const setup = new DataView(new ArrayBuffer(20));
-    setup.setUint32(0, SETUP_MAGIC, true);
-    setup.setUint32(4, opts.width, true);
-    setup.setUint32(8, opts.height, true);
-    setup.setUint32(12, Math.max(1, opts.frameCount), true);
-    setup.setUint32(16, opts.generatedCount, true);
-    (proc.stdin as { write(b: Uint8Array): unknown; flush(): unknown }).write(new Uint8Array(setup.buffer));
-    await (proc.stdin as { flush(): number | Promise<number> }).flush();
+    // Every exit from here to the constructor must end the child: by the time it
+    // answers at all it has its own D3D12 device and NGX feature up, and nothing
+    // else owns the process until DlssgSession exists. A refused generatedCount
+    // is the ordinary case — that is what a plan asking for more in-between
+    // frames than the runtime supports gets.
+    try {
+      const reader = new ExactReader(proc.stdout as ReadableStream<Uint8Array>, opts.sharedFrames ?? false);
+      const setup = new DataView(new ArrayBuffer(20));
+      setup.setUint32(0, SETUP_MAGIC, true);
+      setup.setUint32(4, opts.width, true);
+      setup.setUint32(8, opts.height, true);
+      setup.setUint32(12, Math.max(1, opts.frameCount), true);
+      setup.setUint32(16, opts.generatedCount, true);
+      (proc.stdin as { write(b: Uint8Array): unknown; flush(): unknown }).write(new Uint8Array(setup.buffer));
+      await (proc.stdin as { flush(): number | Promise<number> }).flush();
 
-    const replyBytes = await reader.read(16);
-    const reply = new DataView(replyBytes.buffer, replyBytes.byteOffset, 16);
-    if (reply.getUint32(0, true) !== SETUP_OUT_MAGIC) throw new Error("DLSSG setup: bad reply magic");
-    const status = reply.getUint32(4, true);
-    if (status !== 0) throw new Error(`DLSS Frame Generation could not be set up (status ${status}). Check the runtime folder and that your GPU driver is up to date.`);
-    const maximum = reply.getUint32(8, true);
-    if (opts.generatedCount > maximum) throw new Error(`This GPU/runtime can generate at most ${maximum} in-between frame(s) per source frame; ${opts.generatedCount} was requested. Use a lower multiplier.`);
-    return new DlssgSession(proc, reader, maximum, opts.width, opts.height, opts.generatedCount);
+      const replyBytes = await reader.read(16);
+      const reply = new DataView(replyBytes.buffer, replyBytes.byteOffset, 16);
+      if (reply.getUint32(0, true) !== SETUP_OUT_MAGIC) throw new Error("DLSSG setup: bad reply magic");
+      const status = reply.getUint32(4, true);
+      if (status !== 0) throw new Error(`DLSS Frame Generation could not be set up (status ${status}). Check the runtime folder and that your GPU driver is up to date.`);
+      const maximum = reply.getUint32(8, true);
+      if (opts.generatedCount > maximum) throw new Error(`This GPU/runtime can generate at most ${maximum} in-between frame(s) per source frame; ${opts.generatedCount} was requested. Use a lower multiplier.`);
+      return new DlssgSession(proc, reader, maximum, opts.width, opts.height, opts.generatedCount);
+    } catch (error) {
+      try { proc.kill(); } catch { /* already gone */ }
+      await proc.exited.catch(() => 0);
+      throw error;
+    }
   }
 
   /**
