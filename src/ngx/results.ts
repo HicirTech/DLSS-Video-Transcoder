@@ -131,7 +131,12 @@ export const DlssCreateFlag = {
   AlphaUpscaling: 0x80,
 } as const;
 
-/** NVSDK_NGX_DLSS_Hint_Render_Preset values. J/K/L/M (10-13) are the transformer-model presets. */
+/**
+ * NVSDK_NGX_DLSS_Hint_Render_Preset values. Which model a preset selects is a
+ * property of the loaded nvngx_dlss.dll, not of this enum: 310.7.129.0 names
+ * only Preset_A..Preset_E internally, so do not document a CNN/transformer
+ * split this repository cannot verify.
+ */
 export const DlssRenderPreset = {
   Default: 0, A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, J: 10, K: 11, L: 12, M: 13, N: 14, O: 15,
 } as const;
