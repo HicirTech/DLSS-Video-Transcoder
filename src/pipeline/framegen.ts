@@ -23,6 +23,7 @@ import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings } from "../server/api-types.ts";
 import { DlssgSession, probeDlssgCached } from "./dlssg.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
+import { EncodeSink, buildFrameGenEncodeArgs } from "./framegen-encode-sink.ts";
 import { FrameReader } from "./frame-reader.ts";
 import { verifyOutputVideo } from "./framegen-verify.ts";
 import {
@@ -36,10 +37,10 @@ import {
   resolveTargetRate,
 } from "./framegen-plan.ts";
 import type { NvencSdkCodec } from "./nvenc.ts";
-import { type Rational, formatRational, parseRational, ratAdd, ratDiv, ratMul, ratSub, ratToNumber, rational } from "./rational.ts";
+import { type Rational, parseRational, ratAdd, ratDiv, ratMul, ratSub, ratToNumber, rational } from "./rational.ts";
 import { evenSize } from "./resize.ts";
 import { findTool } from "./tools.ts";
-import { encoderArgs, nvencNativeTarget, probeVideo } from "./video.ts";
+import { probeVideo } from "./video.ts";
 
 export interface FrameGenOptions {
   input: string;
@@ -327,120 +328,6 @@ function openGuideWorker(open: OpenGuide): Promise<{ worker: Worker; flow: "nvof
   });
 }
 
-interface OpenEncode {
-  type: "open";
-  ffmpeg: string;
-  nvencArgs: string[];
-  rawArgs: string[];
-  nvenc: { width: number; height: number; fpsNum: number; fpsDen: number; codec: NvencSdkCodec; cq: number } | null;
-}
-
-/**
- * Main-thread handle for the encode worker. write() resolves as soon as the
- * frame is accepted, with at most `window` frames in flight, so encoding
- * overlaps the rest of the pipeline while staying in display order (the worker
- * processes requests through one promise chain) and bounded in memory.
- */
-class EncodeSink {
-  usesNvenc = false;
-  note = "";
-  private inFlight = 0;
-  private readonly waiters: Array<() => void> = [];
-  private failure: Error | null = null;
-  private openSettle: { resolve: (sink: EncodeSink) => void; reject: (error: Error) => void } | null = null;
-  private finishSettle: { resolve: () => void; reject: (error: Error) => void } | null = null;
-  private abortSettle: (() => void) | null = null;
-
-  private constructor(private readonly worker: Worker, private readonly window: number) {
-    worker.onmessage = (event: MessageEvent) => {
-      const m = event.data as { type: string; nvenc?: boolean; note?: string; message?: string };
-      if (m.type === "opened") {
-        this.usesNvenc = Boolean(m.nvenc);
-        this.note = m.note ?? "";
-        const settle = this.openSettle;
-        this.openSettle = null;
-        settle?.resolve(this);
-      } else if (m.type === "encoded") {
-        this.inFlight--;
-        this.waiters.shift()?.();
-      } else if (m.type === "done") {
-        const settle = this.finishSettle;
-        this.finishSettle = null;
-        settle?.resolve();
-      } else if (m.type === "aborted") {
-        const settle = this.abortSettle;
-        this.abortSettle = null;
-        settle?.();
-      } else if (m.type === "error") {
-        this.fail(new Error(m.message ?? "frame-generation encode worker failed"));
-      }
-    };
-    worker.addEventListener("error", (e) => this.fail(new Error(`frame-generation encode worker crashed: ${(e as ErrorEvent).message}`)));
-  }
-
-  private fail(error: Error): void {
-    this.failure ??= error;
-    const open = this.openSettle;
-    this.openSettle = null;
-    open?.reject(this.failure);
-    const finish = this.finishSettle;
-    this.finishSettle = null;
-    finish?.reject(this.failure);
-    const abort = this.abortSettle;
-    this.abortSettle = null;
-    abort?.();
-    // Wake every writer so it observes the failure instead of waiting for a credit that will never come.
-    for (const wake of this.waiters.splice(0)) wake();
-  }
-
-  static open(message: OpenEncode, window = 8): Promise<EncodeSink> {
-    const worker = new Worker(new URL("./workers/framegen-encode-worker.ts", import.meta.url).href);
-    const sink = new EncodeSink(worker, window);
-    return new Promise<EncodeSink>((resolve, reject) => {
-      sink.openSettle = { resolve, reject };
-      worker.postMessage(message);
-    });
-  }
-
-  async write(rgba: Uint8Array): Promise<void> {
-    if (this.failure) throw this.failure;
-    while (this.inFlight >= this.window) {
-      await new Promise<void>((resolve) => this.waiters.push(resolve));
-      if (this.failure) throw this.failure;
-    }
-    this.inFlight++;
-    this.worker.postMessage({ type: "frame", rgba });
-  }
-
-  /** Flush the encoder, close ffmpeg's stdin and wait for it to exit cleanly. */
-  finish(): Promise<void> {
-    if (this.failure) return Promise.reject(this.failure);
-    return new Promise<void>((resolve, reject) => {
-      this.finishSettle = { resolve, reject };
-      this.worker.postMessage({ type: "finish" });
-    });
-  }
-
-  /** Kill ffmpeg and wait for it to release the output file so the caller can delete it. */
-  async abort(): Promise<void> {
-    await new Promise<void>((resolve) => {
-      this.abortSettle = resolve;
-      try {
-        this.worker.postMessage({ type: "abort" });
-      } catch {
-        resolve();
-        return;
-      }
-      setTimeout(resolve, 5000);
-    });
-    this.close();
-  }
-
-  close(): void {
-    try { this.worker.terminate(); } catch {}
-  }
-}
-
 interface RunParams {
   reader: FrameReader;
   frameBytes: number;
@@ -655,32 +542,24 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   // Only re-open the source as a second input when it actually has audio to carry;
   // otherwise ffmpeg needlessly demuxes/decodes the whole source again.
   const wantAudio = info.hasAudio;
-  const audioArgs = wantAudio ? ["-map", "1:a:0", "-c:a", "aac", "-b:a", "192k"] : ["-an"];
-  const outputRate = formatRational(targetRate);
   const resolvedCodec = resolveEncodeCodec(options.codec ?? "h264_nvenc", ffmpeg);
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
 
-  // Prefer in-process NVENC (mux-only ffmpeg, -c:v copy): ffmpeg then muxes a
-  // compressed elementary stream instead of ingesting an 8 MB/frame rawvideo
-  // pipe. Null for CPU/AV1 codecs, and the worker falls back to the rawvideo
-  // args when NVENC will not open. NVENC emits Annex-B and the mp4 muxer
-  // converts it to length-prefixed, so `copy` needs no bitstream filter.
-  const nativeTarget = nvencNativeTarget(resolvedCodec.codec, width, height);
-  // No -shortest: the writer emits exactly ceil(duration * rate) frames, so the
-  // video already spans the source duration and the audio track is kept whole.
-  // -video_track_timescale = rate numerator makes one frame exactly `den` ticks,
-  // so the mp4 timeline is exact and ffprobe's base-rate guess equals the target.
   let sink: EncodeSink;
   try {
-    sink = await EncodeSink.open({
-      type: "open",
-      ffmpeg,
-      nvencArgs: nativeTarget
-        ? ["-v", "error", "-y", "-f", nativeTarget.demux, "-framerate", outputRate, "-i", "pipe:0", ...(wantAudio ? ["-i", options.input] : []), "-map", "0:v:0", "-c:v", "copy", ...audioArgs, "-video_track_timescale", String(targetRate.num), "-movflags", "+faststart", output]
-        : [],
-      rawArgs: ["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-framerate", outputRate, "-i", "pipe:0", ...(wantAudio ? ["-i", options.input] : []), "-map", "0:v:0", ...audioArgs, ...encoderArgs({ codec: resolvedCodec.codec, quality: options.quality ?? 20, container: "mp4", copyAudio: true }), "-video_track_timescale", String(targetRate.num), "-movflags", "+faststart", output],
-      nvenc: nativeTarget ? { width, height, fpsNum: Number(targetRate.num), fpsDen: Number(targetRate.den), codec: nativeTarget.codec, cq: options.quality ?? 20 } : null,
-    });
+    sink = await EncodeSink.open(
+      buildFrameGenEncodeArgs({
+        ffmpeg,
+        input: options.input,
+        output,
+        width,
+        height,
+        targetRate,
+        codec: resolvedCodec.codec,
+        quality: options.quality ?? 20,
+        hasAudio: wantAudio,
+      }),
+    );
   } catch (error) {
     try { decoder.kill(); } catch {}
     await Promise.allSettled([decoder.exited]);
