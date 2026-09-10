@@ -51,7 +51,7 @@ Open **http://localhost:4080/**. Other scripts:
 
 ```bash
 bun run typecheck   # tsc --noEmit
-bun test            # 146 unit-test cases (pure logic, no GPU needed)
+bun test            # the unit suite (pure logic, no GPU needed)
 bun run cli <command> [options]   # the DLSS command line (see below)
 ```
 
@@ -78,13 +78,16 @@ spec is the source of truth for that help.
 | `forwarder` | (Re)generate the `nvngx.dll` shim NGX requires (auto-built by `sr`/`nr` when missing). |
 | `help [command]` | Overview, or per-command help. |
 
-Shared options, and which commands take them — an option a command does not declare is a usage
-error, not a silently ignored flag:
+Shared options, and which commands take them:
 
 - `--adapter N` (GPU index from `probe`, default auto) — `probe`, `sr`, `nr`. Frame generation has
   no adapter selection: it runs in NVIDIA's `dlssg-worker.exe`, which always takes the default device.
-- `--runtime DIR` (default `<repo>/runtime`) — `probe`, `sr`, `nr`, `fg`. `forwarder` writes where
-  `--out` points instead.
+- `--runtime DIR` (default `<repo>/runtime`) — `probe`, `sr`, `nr`, `fg`, `versions`. `forwarder`
+  writes where `--out` points instead.
+
+`sr`, `nr` and `fg` reject an option they do not declare and print that command's help. `probe`,
+`versions` and `forwarder` do not yet check, so a misspelled flag there is ignored and the default
+is used instead — see issue #53.
 
 Key per-command options (defaults in parentheses):
 
