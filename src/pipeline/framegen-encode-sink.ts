@@ -7,7 +7,7 @@
 import type { EncodeSettings } from "../server/api-types.ts";
 import type { NvencSdkCodec } from "./nvenc.ts";
 import { formatRational, type Rational } from "./rational.ts";
-import { encoderArgs, nvencNativeTarget } from "./video.ts";
+import { aspectArgs, encoderArgs, nvencNativeTarget } from "./video.ts";
 
 /**
  * How long abort() waits for the worker to kill its ffmpeg and release the
@@ -23,6 +23,8 @@ export interface FrameGenEncodeArgs {
   width: number;
   height: number;
   targetRate: Rational;
+  /** Source display aspect to re-state on the output; null for a square-pixel source. */
+  displayAspect: Rational | null;
   codec: EncodeSettings["codec"];
   quality: number;
   hasAudio: boolean;
@@ -39,7 +41,7 @@ export interface FrameGenEncodeArgs {
  * the output.
  */
 export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): OpenEncode {
-  const { ffmpeg, input, output, width, height, targetRate, codec, quality, hasAudio } = spec;
+  const { ffmpeg, input, output, width, height, targetRate, codec, quality, hasAudio, displayAspect } = spec;
   const outputRate = formatRational(targetRate);
   // Null for CPU and AV1 codecs, and for dimensions NVENC will not take.
   const nativeTarget = nvencNativeTarget(codec, width, height);
@@ -60,12 +62,13 @@ export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): OpenEncode {
     // NVENC emits Annex-B and the mp4 muxer converts it to length-prefixed, so
     // `copy` needs no bitstream filter.
     nvencArgs: nativeTarget
-      ? ["-v", "error", "-y", "-f", nativeTarget.demux, "-framerate", outputRate, "-i", "pipe:0", ...inputsAndMap, "-c:v", "copy", ...audioArgs, ...muxTail]
+      ? ["-v", "error", "-y", "-f", nativeTarget.demux, "-framerate", outputRate, "-i", "pipe:0", ...inputsAndMap, "-c:v", "copy", ...aspectArgs(displayAspect, width, height, nativeTarget.demux), ...audioArgs, ...muxTail]
       : [],
     rawArgs: [
       "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`,
       "-framerate", outputRate, "-i", "pipe:0", ...inputsAndMap, ...audioArgs,
       ...encoderArgs({ codec, quality, container: "mp4", copyAudio: true }),
+      ...aspectArgs(displayAspect, width, height, null),
       ...muxTail,
     ],
     nvenc: nativeTarget
