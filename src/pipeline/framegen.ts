@@ -93,14 +93,27 @@ export interface FrameGenResult {
   hagsEnabled: boolean;
   /** "overlapped" (threads + concurrent stages) or "sequential" (fallback for frames too large for the buffer limit). */
   mode: "overlapped" | "sequential";
-  /** Peak bytes of frames in flight. */
-  peakBufferBytes: number;
+  /** Peak bytes of frames in flight, or null when the run used the sequential fallback, which keeps no credit ledger. */
+  peakBufferBytes: number | null;
   ms: number;
 }
 
 function defaultFrameGenOutput(input: string): string {
   const ext = extname(input);
   return join(dirname(input), `${basename(input, ext)}.dlssg.mp4`);
+}
+
+/**
+ * Whether a failed run may delete the file at its output path. The encode ffmpeg
+ * is spawned with `-y`, but its input is a pipe, so it creates or truncates the
+ * destination only once the first frame reaches its stdin — measured on the
+ * bundled build (runtime/ffmpeg/bin 9.0.1) for both the mux argv and the
+ * rawvideo argv. A run that wrote no frame has therefore not touched a file that
+ * was already there, and the default output name is `<input>.dlssg.mp4`, which
+ * is exactly what a previous good run of the same command wrote.
+ */
+export function failedRunOwnsOutput(framesWritten: number, outputExisted: boolean): boolean {
+  return framesWritten > 0 || !outputExisted;
 }
 
 /** Real inter-frame intervals to tolerate with zero synthesised frames before concluding generation is disabled. */
@@ -191,6 +204,8 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   const outputCount = outputFrameCount(duration, targetRate);
   const expectsGeneration = plan.generatedPerInterval > 0;
   const output = options.output ?? defaultFrameGenOutput(options.input);
+  // Read before anything can write there: it decides what the failure path may delete.
+  const outputExisted = existsSync(output);
   const detail =
     plan.path === "Native DLSSG"
       ? `native ${plan.nativeMultiplier}x, ${plan.generatedPerInterval} generated per interval`
@@ -247,7 +262,8 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   const capacity = Math.floor(DEFAULT_BUFFER_LIMIT / frameBytes);
   let mode: FrameGenResult["mode"] = "overlapped";
   let inputFrames = 0;
-  let peak = 0;
+  // null until a runner reports one; the sequential fallback keeps no ledger.
+  let peak: number | null = null;
 
   try {
     const generatedCounts: number[] = [];
@@ -332,7 +348,9 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     try { decoder.kill(); } catch {}
     await sink.abort();
     await Promise.allSettled([decoder.exited, decodeErrDrained]);
-    try { if (existsSync(output)) unlinkSync(output); } catch {}
+    if (failedRunOwnsOutput(writer.nextIndex, outputExisted)) {
+      try { if (existsSync(output)) unlinkSync(output); } catch {}
+    }
     throw error;
   } finally {
     sink.close();
@@ -371,7 +389,9 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     maximumTemporalErrorSeconds: ratToNumber(writer.maxError),
     hagsEnabled: caps.hagsEnabled,
     mode,
-    peakBufferBytes: peak * frameBytes,
+    // null when the sequential runner ran: it keeps no credit ledger, so there
+    // is no high-water mark to report.
+    peakBufferBytes: peak === null ? null : peak * frameBytes,
     ms: Math.round(performance.now() - started),
   };
 }

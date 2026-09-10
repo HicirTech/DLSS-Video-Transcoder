@@ -9,6 +9,13 @@ import type { FrameReader } from "./frame-reader.ts";
 import type { NearestTimestampWriter, TimedFrame } from "./framegen-plan.ts";
 import type { AnalyzedFrame, PreparedFrame, Stage } from "./framegen-stage.ts";
 import { type Rational, ratAdd, ratDiv, ratMul, ratSub, rational } from "./rational.ts";
+/** What a runner reports back. `peak` is the credit ledger's high-water mark in frame slots, or null from a runner that keeps no ledger. */
+export interface RunResult {
+  decoded: number;
+  peak: number | null;
+  busy?: Record<string, number>;
+}
+
 export interface RunParams {
   reader: FrameReader;
   frameBytes: number;
@@ -33,7 +40,7 @@ export interface RunParams {
  * before an evaluation, and motion storage before a guide, so no owner ever
  * blocks on a queue put; the last stage is served first so the pipeline drains.
  */
-export async function runOverlapped(p: RunParams): Promise<{ decoded: number; peak: number; busy?: Record<string, number> }> {
+export async function runOverlapped(p: RunParams): Promise<RunResult> {
   const { stages, writer, capacity } = p;
   const maxGenerated = Math.max(0, ...stages.map((s) => s.generatedCount));
   const edgeCapacity = Math.max(4, maxGenerated + 1);
@@ -151,7 +158,7 @@ export async function runOverlapped(p: RunParams): Promise<{ decoded: number; pe
 }
 
 /** Plain in-order fallback for frames too large for the credit window (still uses the guide threads, one step at a time). */
-export async function runSequential(p: RunParams): Promise<{ decoded: number; peak: number; busy?: Record<string, number> }> {
+export async function runSequential(p: RunParams): Promise<RunResult> {
   let decoded = 0;
   let guideSeq = 0;
   for (;;) {
@@ -170,5 +177,8 @@ export async function runSequential(p: RunParams): Promise<{ decoded: number; pe
   }
   p.writer.trimTo(decoded, p.sourceRate);
   await p.writer.finish();
-  return { decoded, peak: 0 };
+  // null, not 0: this runner holds frames without a credit ledger, so its peak
+  // is unmeasured rather than zero. Reporting 0 put a number nobody measured
+  // into the job result as though it had been.
+  return { decoded, peak: null };
 }
