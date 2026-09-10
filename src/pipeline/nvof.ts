@@ -296,6 +296,7 @@ export function tryCreateNvofBackend(width: number, height: number, flowWidth = 
     return { backend: nvofBackend(NvofSession.open(flowW, flowH, ordinal)), reason: null };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    return { backend: null, reason: `NVOFA optical flow could not start on its ${flowW}x${flowH} grid, so this run uses the CPU matcher: ${detail}. Run \`probe\` for the flow limits this GPU reports.` };
+    // Say what it costs, not where to look: nothing in `probe` reports NVOFA limits.
+    return { backend: null, reason: `NVOFA hardware optical flow could not start on its ${flowW}x${flowH} grid, so this run uses the CPU matcher instead -- slower, same result: ${detail}` };
   }
 }
