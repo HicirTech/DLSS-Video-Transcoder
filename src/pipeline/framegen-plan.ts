@@ -236,10 +236,8 @@ export class NearestTimestampWriter {
   private tieLate = false;
 
   /**
-   * Frames to emit. Planned from the container's frame count up front; the
-   * caller may lower it at end of stream to what was actually decoded (a
-   * container that declares more frames than it decodes would otherwise end
-   * in a short freeze). Never raise it after pushes began.
+   * Frames to emit. Planned from the container's frame count up front, then
+   * lowered by trimTo() at end of stream. Never raised after pushes began.
    */
   outputCount: number;
 
@@ -249,6 +247,16 @@ export class NearestTimestampWriter {
     outputCount: number,
   ) {
     this.outputCount = outputCount;
+  }
+
+  /**
+   * End the output at the duration actually decoded. A container that declares
+   * more frames than it can decode would otherwise finish on a short freeze.
+   * Never lowers below what has already been written.
+   */
+  trimTo(decodedFrames: number, sourceRate: Rational): void {
+    const actual = outputFrameCount(ratDiv(rational(decodedFrames), sourceRate), this.targetRate);
+    if (actual < this.outputCount) this.outputCount = Math.max(actual, this.nextIndex);
   }
 
   private ideal(index: number): Rational {
