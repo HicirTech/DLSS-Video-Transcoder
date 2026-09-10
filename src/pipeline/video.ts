@@ -10,6 +10,7 @@ import type { EncodeSettings, EngineKind, MotionKind, NrSettings, ScaleSettings 
 import { DEFAULT_ENCODE_SETTINGS } from "../server/api-types.ts";
 import { createEngine, type Engine } from "./engine.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
+import { ratMul, type Rational, rational } from "./rational.ts";
 import { createMotionEstimator } from "./flow.ts";
 import { FrameReader } from "./frame-reader.ts";
 import { probeNvencCaps, type NvencSdkCodec } from "./nvenc.ts";
@@ -57,6 +58,13 @@ export interface VideoInfo {
   height: number;
   /** Display-matrix rotation in degrees, 0 when the stream carries none. */
   rotation: number;
+  /**
+   * Display aspect ratio to re-state on the output; null when the source is
+   * square-pixel or declares nothing, so there is nothing to restore. DAR rather
+   * than the raw sample aspect because every path here rescales, and DAR is what
+   * survives a rescale; ffmpeg's -aspect takes it directly.
+   */
+  displayAspect: Rational | null;
   fps: number;
   /** Measured average rate (avg_frame_rate) when available, else the nominal rate. */
   fpsText: string;
@@ -125,7 +133,7 @@ export function probeVideo(ffprobe: string, input: string, ffmpeg?: string): Vid
       "-v",
       "error",
       "-show_entries",
-      "stream=index,codec_type,codec_name,width,height,r_frame_rate,avg_frame_rate,nb_frames:stream_side_data=rotation:format=duration",
+      "stream=index,codec_type,codec_name,width,height,sample_aspect_ratio,r_frame_rate,avg_frame_rate,nb_frames:stream_side_data=rotation:format=duration",
       "-of",
       "json",
       input,
@@ -148,6 +156,7 @@ export interface ProbeJson {
     codec_name?: string;
     width?: number;
     height?: number;
+    sample_aspect_ratio?: string;
     r_frame_rate?: string;
     avg_frame_rate?: string;
     nb_frames?: string;
@@ -164,6 +173,25 @@ function rotationDegrees(sideData: { rotation?: number }[] | undefined): number 
   return wrapped > 180 ? wrapped - 360 : wrapped;
 }
 
+/**
+ * The display aspect ratio a non-square-pixel source must keep, from ffprobe's
+ * sample_aspect_ratio ("8:9"; the field is absent for an mp4 with no pasp atom
+ * — both measured). Null for 1:1, "0:1", "N/A" and a missing field, so a
+ * square-pixel source adds no argv and its output is untouched. width/height
+ * are the DISPLAY dimensions, already transposed for a 90/270 rotation; that
+ * rotation turns the sample grid with the picture, so the sample aspect inverts
+ * along with the geometry.
+ */
+function displayAspectOf(text: string | undefined, width: number, height: number, transposed: boolean): Rational | null {
+  if (!text) return null;
+  const [n, d] = text.split(":");
+  const num = Number(n);
+  const den = Number(d);
+  if (!Number.isFinite(num) || !Number.isFinite(den) || num <= 0 || den <= 0 || num === den) return null;
+  const [sarNum, sarDen] = transposed ? [den, num] : [num, den];
+  return rational(sarNum * width, sarDen * height);
+}
+
 /** ffprobe's JSON as a VideoInfo. Separate from the spawn so it can be tested against odd streams. */
 export function videoInfoFrom(data: ProbeJson, input: string): VideoInfo {
   const video = data.streams?.find((s) => s.codec_type === "video");
@@ -177,10 +205,13 @@ export function videoInfoFrom(data: ProbeJson, input: string): VideoInfo {
   // transposed frame reads as a whole frame and nothing downstream can notice.
   const rotation = rotationDegrees(video.side_data_list);
   const transposed = Math.abs(rotation) % 180 === 90;
+  const displayWidth = transposed ? video.height : video.width;
+  const displayHeight = transposed ? video.width : video.height;
   return {
-    width: transposed ? video.height : video.width,
-    height: transposed ? video.width : video.height,
+    width: displayWidth,
+    height: displayHeight,
     rotation,
+    displayAspect: displayAspectOf(video.sample_aspect_ratio, displayWidth, displayHeight, transposed),
     fps,
     // Measured average first; the nominal CFR clock first for nominalFpsText.
     fpsText: rateText(video.avg_frame_rate) ?? rateText(video.r_frame_rate) ?? String(fps),
@@ -227,6 +258,26 @@ export function nvencNativeTarget(codec: EncodeSettings["codec"], width: number,
   if (codec === "h264_nvenc") return width <= 4096 && height <= 4096 ? { codec: "h264", demux: "h264" } : null;
   if (codec === "hevc_nvenc") return width <= 8192 && height <= 8192 ? { codec: "hevc", demux: "hevc" } : null;
   return null;
+}
+
+/**
+ * Output argv that re-states the source's display aspect on a `width`x`height`
+ * encode; empty for a square-pixel source, so the usual file is untouched.
+ *
+ * `demux` non-null means the video is stream-copied from an elementary stream,
+ * which needs BOTH flags. -aspect writes the container tag, but with -c:v copy
+ * ffmpeg tags the container from stream parameters it read before any filter
+ * ran, so the aspect inside the bitstream would still claim 1:1. Measured with
+ * the bundled ffmpeg: -aspect alone leaves the VUI at 1:1, the bitstream filter
+ * alone leaves the container at 1:1, the pair agrees everywhere.
+ */
+export function aspectArgs(displayAspect: Rational | null, width: number, height: number, demux: string | null): string[] {
+  if (!displayAspect) return [];
+  const args = ["-aspect", `${displayAspect.num}:${displayAspect.den}`];
+  if (!demux) return args;
+  // The bitstream stores SAR: the sample shape that makes this pixel grid display at DAR.
+  const sar = ratMul(displayAspect, rational(height, width));
+  return [...args, "-bsf:v", `${demux}_metadata=sample_aspect_ratio=${sar.num}/${sar.den}`];
 }
 
 /** Parse an ffmpeg rate string ("30000/1001", "25") into integer num/den; 30/1 if unparseable. */
@@ -303,7 +354,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const upscaling = options.engine === "sr";
   const renderWidth = upscaling ? info.width : target.width;
   const renderHeight = upscaling ? info.height : target.height;
-  progress(0, `source ${info.width}x${info.height} ${info.codec} ${info.fpsText} fps, ${info.frames ?? "?"} frames; ${upscaling ? `upscaling to ${target.width}x${target.height}` : `working size ${target.width}x${target.height}`}`);
+  progress(0, `source ${info.width}x${info.height}${info.displayAspect ? ` (non-square pixels, display ${info.displayAspect.num}:${info.displayAspect.den})` : ""} ${info.codec} ${info.fpsText} fps, ${info.frames ?? "?"} frames; ${upscaling ? `upscaling to ${target.width}x${target.height}` : `working size ${target.width}x${target.height}`}`);
 
   const session = openGpu({ adapterIndex: options.adapterIndex, debugLayer: options.debugLayer });
 
@@ -337,7 +388,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
       const sinkArgs = [
         "-v", "error", "-y", "-f", nrNative.demux, "-framerate", info.fpsText, "-i", "pipe:0",
         ...(wantAudio ? ["-i", options.input] : []),
-        "-map", "0:v:0", "-c:v", "copy", ...audioArgs, ...faststart, output,
+        "-map", "0:v:0", "-c:v", "copy", ...aspectArgs(info.displayAspect, target.width, target.height, nrNative.demux), ...audioArgs, ...faststart, output,
       ];
       const cuts = new SceneCutDetector(target.width, target.height);
       const guide = (rgba: Uint8Array, index: number): { reset: boolean; sceneCut: boolean } => {
@@ -447,6 +498,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
         "-f", nativeTarget.demux, "-framerate", info.fpsText, "-i", "pipe:0",
         ...(wantAudio ? ["-i", options.input] : []),
         "-map", "0:v:0", "-c:v", "copy",
+        ...aspectArgs(info.displayAspect, outWidth, outHeight, nativeTarget.demux),
         ...audioArgs, ...faststart,
         // No -shortest here: with -c:v copy from a raw elementary stream it
         // drops the audio track outright. Safe to omit, because this path emits
@@ -469,7 +521,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
           ffmpeg, "-v", "error", "-y",
           "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${outWidth}x${outHeight}`, "-r", info.fpsText, "-i", "pipe:0",
           ...(wantAudio ? ["-i", options.input] : []),
-          "-map", "0:v:0", ...audioArgs, ...encoderArgs(encode), ...faststart,
+          "-map", "0:v:0", ...audioArgs, ...encoderArgs(encode), ...aspectArgs(info.displayAspect, outWidth, outHeight, null), ...faststart,
           ...(wantAudio ? ["-shortest"] : []),
           output,
         ],
