@@ -156,6 +156,15 @@ export const DLSS_PRESET_PARAM: Record<number, string> = {
 };
 
 /** Output/render ratio per PerfQuality (fallback when GetOptimalSettings is not queried). */
+/**
+ * A PerfQuality value as its NVSDK_NGX_PerfQuality_Value_* name, for messages.
+ * Derived from the enum rather than tabulated: DLSS_PRESET_PARAM's path suffixes
+ * are deliberately different names and must not be used for display.
+ */
+export function perfQualityName(value: number): string {
+  return Object.keys(PerfQuality).find((k) => PerfQuality[k as keyof typeof PerfQuality] === value) ?? `PerfQuality ${value}`;
+}
+
 export const DLSS_RATIO: Record<number, number> = {
   5: 1.0, 2: 1.5, 1: 1.7241379, 0: 2.0, 3: 3.0, 4: 1.3,
 };
