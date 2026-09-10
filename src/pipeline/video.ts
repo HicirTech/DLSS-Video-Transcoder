@@ -52,8 +52,11 @@ export interface VideoJobResult {
 }
 
 export interface VideoInfo {
+  /** Display width: already transposed when the stream carries a 90/270 rotation. */
   width: number;
   height: number;
+  /** Display-matrix rotation in degrees, 0 when the stream carries none. */
+  rotation: number;
   fps: number;
   /** Measured average rate (avg_frame_rate) when available, else the nominal rate. */
   fpsText: string;
@@ -89,7 +92,7 @@ export function probeVideo(ffprobe: string, input: string): VideoInfo {
       "-v",
       "error",
       "-show_entries",
-      "stream=index,codec_type,codec_name,width,height,r_frame_rate,avg_frame_rate,nb_frames:format=duration",
+      "stream=index,codec_type,codec_name,width,height,r_frame_rate,avg_frame_rate,nb_frames:stream_side_data=rotation:format=duration",
       "-of",
       "json",
       input,
@@ -101,8 +104,25 @@ export function probeVideo(ffprobe: string, input: string): VideoInfo {
 }
 
 export interface ProbeJson {
-  streams?: { codec_type: string; codec_name?: string; width?: number; height?: number; r_frame_rate?: string; avg_frame_rate?: string; nb_frames?: string }[];
+  streams?: {
+    codec_type: string;
+    codec_name?: string;
+    width?: number;
+    height?: number;
+    r_frame_rate?: string;
+    avg_frame_rate?: string;
+    nb_frames?: string;
+    side_data_list?: { rotation?: number }[];
+  }[];
   format?: { duration?: string };
+}
+
+/** Display-matrix rotation in degrees, normalised to (-180, 180]; 0 when the stream carries none. */
+function rotationDegrees(sideData: { rotation?: number }[] | undefined): number {
+  const raw = sideData?.find((s) => typeof s.rotation === "number")?.rotation;
+  if (raw === undefined || !Number.isFinite(raw)) return 0;
+  const wrapped = ((Math.round(raw) % 360) + 360) % 360;
+  return wrapped > 180 ? wrapped - 360 : wrapped;
 }
 
 /** ffprobe's JSON as a VideoInfo. Separate from the spawn so it can be tested against odd streams. */
@@ -112,9 +132,16 @@ export function videoInfoFrom(data: ProbeJson, input: string): VideoInfo {
   const fps = parseRate(video.avg_frame_rate) || parseRate(video.r_frame_rate) || 30;
   const duration = data.format?.duration ? Number(data.format.duration) : null;
   const declared = video.nb_frames && video.nb_frames !== "N/A" ? Number(video.nb_frames) : null;
+  // ffprobe reports the CODED size, but ffmpeg autorotates on decode, so a
+  // portrait phone clip (coded 1920x1080, rotation 90) arrives as 1080x1920.
+  // Report what the decoder emits: width*height is the same either way, so a
+  // transposed frame reads as a whole frame and nothing downstream can notice.
+  const rotation = rotationDegrees(video.side_data_list);
+  const transposed = Math.abs(rotation) % 180 === 90;
   return {
-    width: video.width,
-    height: video.height,
+    width: transposed ? video.height : video.width,
+    height: transposed ? video.width : video.height,
+    rotation,
     fps,
     // Measured average first; the nominal CFR clock first for nominalFpsText.
     fpsText: rateText(video.avg_frame_rate) ?? rateText(video.r_frame_rate) ?? String(fps),
