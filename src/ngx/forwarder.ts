@@ -23,7 +23,13 @@ const SECTION_ALIGNMENT = 0x1000;
 const FILE_ALIGNMENT = 0x200;
 const DEFAULT_IMAGE_BASE = 0x180000000n;
 
-/** Slots the exported stubs read their targets from, in this fixed order. */
+/**
+ * The shim's exports. fwd_create, fwd_evaluate and fwd_release each call the
+ * target parked in one .data slot; fwd_set_slots is what parks them, so it is
+ * the writer rather than a fourth slot. This array's order is not load-bearing:
+ * the export table is emitted name-sorted below and every name is resolved
+ * through GetProcAddress.
+ */
 export const FORWARDER_EXPORTS = ["fwd_create", "fwd_evaluate", "fwd_release", "fwd_set_slots"] as const;
 
 function align(value: number, to: number): number {
