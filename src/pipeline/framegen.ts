@@ -61,8 +61,6 @@ export interface FrameGenOptions {
   quality?: number;
   /** Output codec; defaults to NVENC H.264 when available, else CPU libx264. */
   codec?: EncodeSettings["codec"];
-  /** Frames in flight across the whole pipeline, in bytes (default 1 GiB). */
-  bufferLimitBytes?: number;
   onProgress?: (fraction: number, message: string, frames?: number) => void;
 }
 
@@ -97,7 +95,7 @@ export interface FrameGenResult {
   ms: number;
 }
 
-export function defaultFrameGenOutput(input: string): string {
+function defaultFrameGenOutput(input: string): string {
   const ext = extname(input);
   return join(dirname(input), `${basename(input, ext)}.dlssg.mp4`);
 }
@@ -106,8 +104,8 @@ export function defaultFrameGenOutput(input: string): string {
 const FG_PROBE_INTERVALS = 8;
 const DEFAULT_BUFFER_LIMIT = 1 << 30;
 
-/** Raised when the worker synthesised nothing; carries the plan so "auto" can retry with a cascade. */
-export class FrameGenDisabledError extends Error {
+/** Raised when the worker synthesised nothing; carries the plan so "auto" can retry with a cascade. Caught in processFrameGen below, nowhere else. */
+class FrameGenDisabledError extends Error {
   constructor(message: string, readonly plan: InterpolationPlan) {
     super(message);
     this.name = "FrameGenDisabledError";
@@ -131,8 +129,8 @@ function frameGenDisabledError(plan: InterpolationPlan, disabledFrames: number, 
   return new FrameGenDisabledError(`DLSS Frame Generation produced no interpolated frames (${wanted})${reported}.${hint} No output was written.`, plan);
 }
 
-/** Once the runtime has refused a native multi-frame session in this process, "auto" skips the fail-fast probe for later jobs. */
-let nativeMultiFrameRefused = false;
+/** Runtime folders whose worker has refused a native multi-frame session in this process; "auto" skips the fail-fast probe for those. */
+const nativeMultiFrameRefused = new Set<string>();
 
 /**
  * An "auto" plan that chose native multi-frame and got nothing back is re-run
@@ -142,12 +140,13 @@ let nativeMultiFrameRefused = false;
  */
 export async function processFrameGen(options: FrameGenOptions): Promise<FrameGenResult> {
   const engine = options.engine ?? "auto";
-  if (engine === "auto" && nativeMultiFrameRefused) return processFrameGenOnce({ ...options, engine: "cascade" });
+  const workerDir = join(options.runtimeDir, "dlssg");
+  if (engine === "auto" && nativeMultiFrameRefused.has(workerDir)) return processFrameGenOnce({ ...options, engine: "cascade" });
   try {
     return await processFrameGenOnce(options);
   } catch (error) {
     if (engine === "auto" && error instanceof FrameGenDisabledError && error.plan.path === "Native DLSSG" && error.plan.generatedPerInterval >= 2) {
-      nativeMultiFrameRefused = true;
+      nativeMultiFrameRefused.add(workerDir);
       options.onProgress?.(0, `native ${error.plan.nativeMultiplier}x refused by the runtime (no frames synthesised); falling back to a cascade of 2x stages`);
       return processFrameGenOnce({ ...options, engine: "cascade" });
     }
@@ -174,7 +173,6 @@ interface GuideReply {
   small: ArrayBuffer | null;
   half: ArrayBuffer | null;
   sceneCuts: number;
-  duplicates: number;
 }
 
 interface PackReply {
@@ -195,7 +193,6 @@ interface AnalyzedFrame {
 /** One DLSSG stage: a worker-process session driven from the main thread, a guide thread, and (for the bottleneck stage) a packer thread. */
 class Stage {
   sceneCuts = 0;
-  duplicates = 0;
   /** Real intervals (no reset) this stage has evaluated. */
   intervals = 0;
   generatedTotal = 0;
@@ -221,7 +218,6 @@ class Stage {
         this.waiter = null;
         if (!w) return;
         this.sceneCuts = m.sceneCuts;
-        this.duplicates = m.duplicates;
         w.resolve({
           frame: m.segment === w.frame.segment ? w.frame : { ...w.frame, segment: m.segment },
           previousTimestamp: m.previousTsNum !== null && m.previousTsDen !== null ? { num: m.previousTsNum, den: m.previousTsDen } : null,
@@ -722,7 +718,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   const writer = new NearestTimestampWriter((frame) => sink.write(frame), targetRate, outputCount);
   const zeros = new Uint16Array(width * height * 2);
   const stages: Stage[] = [];
-  const capacity = Math.floor((options.bufferLimitBytes ?? DEFAULT_BUFFER_LIMIT) / frameBytes);
+  const capacity = Math.floor(DEFAULT_BUFFER_LIMIT / frameBytes);
   let mode: FrameGenResult["mode"] = "overlapped";
   let inputFrames = 0;
   let peak = 0;
@@ -814,7 +810,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     throw error;
   } finally {
     sink.close();
-    for (const stage of stages) await stage.close();
+    await Promise.allSettled(stages.map((stage) => stage.close()));
   }
 
   const decodeExit = await decoder.exited;

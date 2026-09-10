@@ -206,7 +206,7 @@ export function formatRate(rate: Rational): string {
 // Timed frames and the nearest-timestamp writer
 // ---------------------------------------------------------------------------
 
-export type FrameProvenance = "Source" | "DLSSG";
+type FrameProvenance = "Source" | "DLSSG";
 
 /** A frame on the exact rational timeline: real (Source) or synthesised (DLSSG). */
 export interface TimedFrame {

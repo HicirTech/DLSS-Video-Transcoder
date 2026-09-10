@@ -36,7 +36,7 @@ export interface DlssgProbe {
  * HwSchMode == 2. An absent value means it was never enabled, which the runtime
  * treats as off.
  */
-export function probeHags(): boolean {
+function probeHags(): boolean {
   if (process.platform !== "win32") return false;
   try {
     const result = Bun.spawnSync(["reg", "query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers", "/v", "HwSchMode"], {
