@@ -200,6 +200,8 @@ class Stage {
   intervals = 0;
   generatedTotal = 0;
   flow: "nvof" | "cpu" | "?" = "?";
+  /** Why this stage fell back to the CPU matcher, when it did. */
+  flowReason: string | null = null;
   private nextIndex = 0;
   private waiter: { frame: TimedFrame; resolve: (a: AnalyzedFrame) => void; reject: (e: Error) => void } | null = null;
   private packWaiter: { analyzed: AnalyzedFrame; resolve: (p: PreparedFrame) => void; reject: (e: Error) => void } | null = null;
@@ -313,15 +315,15 @@ class Stage {
 type OpenGuide = { type: "open"; width: number; height: number; detectSourceCuts: boolean; packInline: boolean } | { type: "open-packer"; width: number; height: number };
 
 /** Start a guide-side worker in either role and wait until it is ready (its NVOFA session included). */
-function openGuideWorker(open: OpenGuide): Promise<{ worker: Worker; flow: "nvof" | "cpu" | "pack" }> {
+function openGuideWorker(open: OpenGuide): Promise<{ worker: Worker; flow: "nvof" | "cpu" | "pack"; flowReason: string | null }> {
   return new Promise((resolve, reject) => {
     const role = open.type === "open" ? "guide" : "packer";
     const worker = new Worker(new URL("./workers/framegen-guide-worker.ts", import.meta.url).href);
     const onError = (e: Event) => { reject(new Error(`frame-generation ${role} worker failed to start: ${(e as ErrorEvent).message}`)); };
     worker.addEventListener("error", onError, { once: true });
     worker.onmessage = (event: MessageEvent) => {
-      const m = event.data as { type: string; flow?: "nvof" | "cpu" | "pack"; message?: string };
-      if (m.type === "opened") { worker.removeEventListener("error", onError); worker.onmessage = null; resolve({ worker, flow: m.flow ?? "cpu" }); }
+      const m = event.data as { type: string; flow?: "nvof" | "cpu" | "pack"; flowReason?: string | null; message?: string };
+      if (m.type === "opened") { worker.removeEventListener("error", onError); worker.onmessage = null; resolve({ worker, flow: m.flow ?? "cpu", flowReason: m.flowReason ?? null }); }
       else if (m.type === "error") { reject(new Error(`frame-generation ${role} worker: ${m.message}`)); }
     };
     worker.postMessage(open);
@@ -759,6 +761,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
       }
       const stage = new Stage(sessionResult.value, guideResult.value.worker, packerResult.value ? packerResult.value.worker : null, generatedCount, zeros);
       stage.flow = guideResult.value.flow === "pack" ? "cpu" : guideResult.value.flow;
+      stage.flowReason = guideResult.value.flowReason;
       return stage;
     };
     const opened = await Promise.allSettled(generatedCounts.map((generatedCount, index) => openStage(index, generatedCount)));
@@ -766,6 +769,9 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     const failed = opened.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failed) throw failed.reason;
     if (stages.length) progress(0, `guide threads: ${stages.length} + ${stages.filter((s) => s.packer).length} packer, 1 encode (optical flow ${stages.map((s) => (s.flow === "nvof" ? "NVOFA" : "CPU")).join(", ")})`);
+    // Every stage asks for the same grid, so one report covers all of them.
+    const flowReason = stages.find((s) => s.flowReason)?.flowReason;
+    if (flowReason) progress(0, flowReason);
 
     const noneGenerated = () => stages.every((stage) => stage.generatedTotal === 0);
     const check = (): void => {

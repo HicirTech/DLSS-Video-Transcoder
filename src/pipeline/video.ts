@@ -333,8 +333,8 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   if (options.motion === "flow") {
     try {
       const nvof = tryCreateNvofBackend(renderWidth, renderHeight);
-      estimator = createMotionEstimator(renderWidth, renderHeight, nvof ? { backend: nvof } : {});
-      progress(0, nvof ? "optical flow: NVIDIA hardware (NVOFA)" : "optical flow: CPU block matching (NVOFA unavailable)");
+      estimator = createMotionEstimator(renderWidth, renderHeight, nvof.backend ? { backend: nvof.backend } : {});
+      progress(0, nvof.backend ? "optical flow: NVIDIA hardware (NVOFA)" : `optical flow: CPU block matching. ${nvof.reason}`);
     } catch (error) {
       engine.close();
       session.close();
