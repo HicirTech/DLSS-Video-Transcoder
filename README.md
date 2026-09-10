@@ -197,11 +197,12 @@ runtime/
 
 ## Tests
 
-`bun test` runs **146 unit-test cases** across 10 files — all pure logic, **no GPU required**: the PNG
-codec, ffmpeg/NVENC/NUT planning math, encoder selection, frame-generation planning and the
-nearest-timestamp writer, optical-flow math, the version catalog, the forwarder shim, and the NGX
-parameter object. The `tests/diag-*.ts` and `tests/run-*.ts` scripts are manual GPU harnesses (run
-individually with `bun run tests/<file>.ts`), not part of the suite.
+`bun test` runs the whole suite — all pure logic, **no GPU required**: the PNG codec,
+ffmpeg/NVENC/NUT planning math, ffprobe interpretation (frame rates, rotation), encoder selection,
+frame-generation planning and the nearest-timestamp writer, optical-flow math, the version catalog,
+the forwarder shim, request validation, and the NGX parameter object. The `tests/diag-*.ts` and
+`tests/run-*.ts` scripts are manual GPU harnesses (run individually with `bun run tests/<file>.ts`),
+not part of the suite.
 
 ## Feature status
 
