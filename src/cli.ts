@@ -384,7 +384,9 @@ async function main(): Promise<void> {
       if (flag(args, "--json")) console.log(JSON.stringify(report, null, 2));
       else printProbe(report);
       if (flag(args, "--log")) for (const line of report.log) console.log("  | " + line);
-      process.exit(report.ok ? 0 : 1);
+      // The exit code answers the question the command exists to answer, so a
+      // run that prints "ready: NO" cannot look like success to a calling script.
+      process.exit(report.ok && report.verdict.neuralRenderingReady ? 0 : 1);
     }
     case "forwarder": {
       const out = option(args, "--out") ?? join(ROOT, "runtime", "caller", "nvngx.dll");
