@@ -5,12 +5,14 @@
  * Set NR_TRACE=1 to print each native call to stderr before it happens; a
  * crash inside NVIDIA code then leaves the last trace line as the culprit.
  */
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { D3D12Device } from "../native/d3d12.ts";
 import { DxgiFactory, selectAdapter, type DxgiAdapter } from "../native/dxgi.ts";
 import { hex32 } from "../native/memory.ts";
-import { readPeFile } from "../native/pe.ts";
+import { parsePe } from "../native/pe.ts";
+import { parseVersionInfo } from "../native/version-info.ts";
+import { FEATURES, runtimeDllCandidates, type FeatureDescriptor, type FeatureKey } from "./runtime-catalog.ts";
 import type { ProbeAdapter, ProbeFeature, ProbeReport, RuntimeFile } from "../server/api-types.ts";
 import { FeatureCommonInfo, NgxCore, locateNgxCores } from "./core.ts";
 import { prepareForwarder, selfTestForwarder } from "./forwarder-runtime.ts";
@@ -47,10 +49,15 @@ export interface ProbeOptions {
 
 export const PROBE_APP_ID = 0x4e5254530001n; // "NRTS" + 1, an arbitrary non-zero application id
 
-const RUNTIME_FILES: { name: string; subdir: string; role: string }[] = [
-  { name: "nvngx_dlssnr.dll", subdir: "dlssnr", role: "DLSS 5 Neural Rendering (feature 18)" },
-  { name: "nvngx_dlss.dll", subdir: "dlss", role: "DLSS Super Resolution (feature 1)" },
-  { name: "nvngx_dlssg.dll", subdir: "dlssg", role: "DLSS Frame Generation (feature 11)" },
+const featureByKey = (key: FeatureKey): FeatureDescriptor => FEATURES.find((f) => f.key === key)!;
+
+// Only the report's wording lives here. Which file each feature needs, and where
+// it may sit under runtime/, is runtime-catalog.ts's rule — so the report and
+// the version list cannot disagree about what is installed.
+const RUNTIME_FILES: { feature: FeatureDescriptor; role: string }[] = [
+  { feature: featureByKey("nr"), role: "DLSS 5 Neural Rendering (feature 18)" },
+  { feature: featureByKey("sr"), role: "DLSS Super Resolution (feature 1)" },
+  { feature: featureByKey("fg"), role: "DLSS Frame Generation (feature 11)" },
 ];
 
 const TRACE = process.env.NR_TRACE === "1";
@@ -70,23 +77,45 @@ function driverVersionFromSmi(): string | null {
   }
 }
 
-async function inventory(runtimeDir: string): Promise<RuntimeFile[]> {
+/**
+ * Which runtime DLLs the report lists, whether each is installed, and what the
+ * installed copy is. Filesystem work only — no GPU, no native load — so it is
+ * testable against a temporary runtime/ tree.
+ */
+export async function inventoryRuntimeFiles(runtimeDir: string): Promise<RuntimeFile[]> {
   const files: RuntimeFile[] = [];
-  for (const { name, subdir, role } of RUNTIME_FILES) {
-    // Each feature's DLL lives in its own subfolder; the flat layout is the
-    // fallback for setups predating that split.
-    const path = [join(runtimeDir, subdir, name), join(runtimeDir, name)].find((p) => existsSync(p)) ?? null;
-    if (!path) {
+  for (const { feature, role } of RUNTIME_FILES) {
+    const name = feature.dllName;
+    // The first candidate is the flat copy when there is one — the file a job
+    // with no dllDir loads — and otherwise the first version folder holding it.
+    const found = runtimeDllCandidates(runtimeDir, feature)[0] ?? null;
+    if (!found) {
       files.push({ name, role, present: false, path: null, sizeMB: null, version: null, exports: null });
       continue;
     }
+    let version: string | null = null;
     let exports: string[] | null = null;
     try {
-      exports = (await readPeFile(path)).exports.map((e) => e.name);
+      // One read serves both fields: nvngx_dlssnr.dll is 158 MB here, so opening
+      // it again just for the version would double the probe's I/O. Version
+      // first — parseVersionInfo does not throw, parsePe does on a malformed
+      // image, and a DLL whose exports cannot be listed still has a version.
+      const bytes = new Uint8Array(await Bun.file(found.path).arrayBuffer());
+      version = parseVersionInfo(bytes).fileVersion;
+      exports = parsePe(bytes).exports.map((e) => e.name);
     } catch {
-      exports = null;
+      // A file that cannot be read still gets a row saying it is there; the
+      // fields it could not supply stay null.
     }
-    files.push({ name, role, present: true, path, sizeMB: Math.round((statSync(path).size / 1048576) * 10) / 10, version: null, exports });
+    files.push({
+      name,
+      role,
+      present: true,
+      path: found.path,
+      sizeMB: Math.round((statSync(found.path).size / 1048576) * 10) / 10,
+      version,
+      exports,
+    });
   }
   return files;
 }
@@ -174,7 +203,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   }
 
   // --- runtime folder ---
-  report.runtime.files = await inventory(runtimeDir);
+  report.runtime.files = await inventoryRuntimeFiles(runtimeDir);
   const dlssnr = report.runtime.files.find((f) => f.name === "nvngx_dlssnr.dll");
   if (!dlssnr?.present) reasons.push(`The DLSS Neural Rendering runtime file nvngx_dlssnr.dll was not found in ${runtimeDir}. Copy it into that folder.`);
 
@@ -188,9 +217,14 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     report.driver.ngxCorePath = location.path;
     say(`NGX core: ${location.path} (${location.source}, ${locations.length} candidate${locations.length === 1 ? "" : "s"})`);
     try {
-      report.driver.ngxCoreExports = (await readPeFile(location.path)).exports.map((e) => e.name);
+      // Version and exports come out of the same bytes, so the file is read once.
+      // This is _nvngx.dll's own file version (e.g. 32.0.16.1664); nvidia-smi
+      // calls that same driver 616.64, so the two rows differ by design.
+      const bytes = new Uint8Array(await Bun.file(location.path).arrayBuffer());
+      report.driver.ngxCoreVersion = parseVersionInfo(bytes).fileVersion;
+      report.driver.ngxCoreExports = parsePe(bytes).exports.map((e) => e.name);
     } catch (error) {
-      say(`could not read NGX core exports: ${(error as Error).message}`);
+      say(`could not read the NGX core's version and exports: ${(error as Error).message}`);
     }
     try {
       trace(`LoadLibraryExW ${location.path} (entry=${options.entry ?? "core"})`);

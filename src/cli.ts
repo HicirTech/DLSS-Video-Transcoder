@@ -372,7 +372,10 @@ function printProbe(report: Awaited<ReturnType<typeof runProbe>>): void {
   }
   lines.push(`D3D12 device: ${report.device.created ? "created" : "FAILED"}${report.device.hresult && !report.device.created ? ` (${report.device.hresult})` : ""}`);
   lines.push(`Driver: ${report.driver.version ?? "unknown"}`);
-  lines.push(`NGX core: ${report.driver.ngxCorePath ?? "not found"}${report.driver.ngxCoreExports.length ? `  (${report.driver.ngxCoreExports.length} exports)` : ""}`);
+  // The core's own file version, which is not the number nvidia-smi reports for
+  // the same driver (32.0.16.1664 vs 616.64), so both are shown.
+  const coreVersion = report.driver.ngxCoreVersion ? `  v${report.driver.ngxCoreVersion}` : "";
+  lines.push(`NGX core: ${report.driver.ngxCorePath ?? "not found"}${coreVersion}${report.driver.ngxCoreExports.length ? `  (${report.driver.ngxCoreExports.length} exports)` : ""}`);
   lines.push(`NGX init: ${report.ngxInit.attempted ? report.ngxInit.result : "not attempted"}`);
   lines.push("");
   lines.push("Features (GetFeatureRequirements):");
@@ -388,7 +391,8 @@ function printProbe(report: Awaited<ReturnType<typeof runProbe>>): void {
   lines.push("");
   lines.push(`Runtime folder: ${report.runtime.folder}`);
   for (const f of report.runtime.files) {
-    lines.push(`  ${f.present ? "present" : "missing"}  ${f.name.padEnd(18)} ${f.role}${f.sizeMB !== null ? `  ${f.sizeMB} MB` : ""}${f.exports ? `  ${f.exports.length} exports` : ""}`);
+    const version = f.version ? `  v${f.version}` : "";
+    lines.push(`  ${f.present ? "present" : "missing"}  ${f.name.padEnd(18)} ${f.role}${version}${f.sizeMB !== null ? `  ${f.sizeMB} MB` : ""}${f.exports ? `  ${f.exports.length} exports` : ""}`);
   }
   lines.push(`Forwarder: ${report.forwarder.selfTest ?? "not built"}`);
   lines.push("");
