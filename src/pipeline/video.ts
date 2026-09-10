@@ -65,6 +65,16 @@ export interface VideoInfo {
   hasAudio: boolean;
 }
 
+/**
+ * The rate string itself, or null when ffmpeg could not use it. Both rate
+ * fields go through this: they are passed verbatim as `-framerate`/`-r`, and
+ * ffmpeg rejects "0/0" outright ("Unable to parse ... as video rate") instead
+ * of defaulting, so an unusable rate has to fall through to the numeric one.
+ */
+function rateText(text: string | undefined): string | null {
+  return parseRate(text) > 0 ? (text ?? null) : null;
+}
+
 function parseRate(text: string | undefined): number {
   if (!text) return 0;
   const [num, den] = text.split("/").map(Number);
@@ -87,10 +97,16 @@ export function probeVideo(ffprobe: string, input: string): VideoInfo {
     { stdout: "pipe", stderr: "pipe" },
   );
   if (proc.exitCode !== 0) throw new Error(`ffprobe could not read this file as video: ${new TextDecoder().decode(proc.stderr).trim()}`);
-  const data = JSON.parse(new TextDecoder().decode(proc.stdout)) as {
-    streams?: { codec_type: string; codec_name?: string; width?: number; height?: number; r_frame_rate?: string; avg_frame_rate?: string; nb_frames?: string }[];
-    format?: { duration?: string };
-  };
+  return videoInfoFrom(JSON.parse(new TextDecoder().decode(proc.stdout)) as ProbeJson, input);
+}
+
+export interface ProbeJson {
+  streams?: { codec_type: string; codec_name?: string; width?: number; height?: number; r_frame_rate?: string; avg_frame_rate?: string; nb_frames?: string }[];
+  format?: { duration?: string };
+}
+
+/** ffprobe's JSON as a VideoInfo. Separate from the spawn so it can be tested against odd streams. */
+export function videoInfoFrom(data: ProbeJson, input: string): VideoInfo {
   const video = data.streams?.find((s) => s.codec_type === "video");
   if (!video || !video.width || !video.height) throw new Error(`${input}: no video stream found in this file.`);
   const fps = parseRate(video.avg_frame_rate) || parseRate(video.r_frame_rate) || 30;
@@ -100,13 +116,9 @@ export function probeVideo(ffprobe: string, input: string): VideoInfo {
     width: video.width,
     height: video.height,
     fps,
-    fpsText: video.avg_frame_rate && video.avg_frame_rate !== "0/0" ? video.avg_frame_rate : (video.r_frame_rate ?? String(fps)),
-    nominalFpsText:
-      video.r_frame_rate && video.r_frame_rate !== "0/0"
-        ? video.r_frame_rate
-        : video.avg_frame_rate && video.avg_frame_rate !== "0/0"
-          ? video.avg_frame_rate
-          : String(fps),
+    // Measured average first; the nominal CFR clock first for nominalFpsText.
+    fpsText: rateText(video.avg_frame_rate) ?? rateText(video.r_frame_rate) ?? String(fps),
+    nominalFpsText: rateText(video.r_frame_rate) ?? rateText(video.avg_frame_rate) ?? String(fps),
     frames: declared ?? (duration ? Math.round(duration * fps) : null),
     duration,
     codec: video.codec_name ?? "unknown",
