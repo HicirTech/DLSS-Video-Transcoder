@@ -306,6 +306,10 @@ export class NvencEncoder {
     const lastError = fn(FN.getLastErrorString, { args: [FFIType.u64], returns: FFIType.ptr });
     const check = (st: unknown, what: string): void => ckenc(st, what, enc, lastError);
 
+    // Out here so the failure path can reach it: registration can throw after
+    // the allocation succeeded, and destroyEncoder does not own this pointer.
+    let device = 0n;
+
     try {
       // NV_ENC_PRESET_CONFIG (5128B): version@0, then the NV_ENC_CONFIG the
       // driver fills at +8, which we tweak below and hand back to init.
@@ -356,7 +360,7 @@ export class NvencEncoder {
 
       // Either one CUDA buffer this encoder owns, or the caller's shared pool;
       // every pointer is registered as an ABGR input resource either way.
-      const device = opts.inputs ? 0n : cudaMalloc(pitch * height);
+      if (!opts.inputs) device = cudaMalloc(pitch * height);
       const devPtrs = opts.inputs ? opts.inputs.map((x) => x.devPtr) : [device];
       const registerFn = fn(FN.registerResource, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 });
       const registeredList = devPtrs.map((dp) => {
@@ -387,6 +391,7 @@ export class NvencEncoder {
       }, presetConfig);
     } catch (error) {
       try { fn(FN.destroyEncoder, { args: [FFIType.u64], returns: FFIType.i32 })(enc); } catch { /* best effort */ }
+      if (ownsDevice && device !== 0n) { try { cudaFree(device); } catch { /* best effort */ } }
       throw error;
     }
   }
