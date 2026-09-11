@@ -9,8 +9,9 @@
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import { callableAt, type Signature } from "../native/com.ts";
-import { cudaCreateContext, cudaMemcpy2DDtoH, cudaMemcpy2DHtoD, cudaSynchronize } from "../native/cuda.ts";
+import { cudaCreateContext, cudaMemcpy2DDtoH, cudaMemcpy2DHtoD, cudaReleaseContext, cudaSynchronize } from "../native/cuda.ts";
 import { OutU64 } from "../native/memory.ts";
+import type { OpticalFlowLimits } from "../server/api-types.ts";
 import { DEFAULT_FLOW_WIDTH, flowGridSize, type FlowBackend } from "./flow.ts";
 
 const NV_OF_API_VERSION = 0x20; // (major 2 << 4) | minor 0
@@ -25,15 +26,19 @@ const FN = {
   setStreams: 6, exec: 7, destroyBuf: 8, destroy: 9, lastError: 10, getCaps: 11,
 } as const;
 
-const lib = dlopen("nvofapi64.dll", {
-  NvOFAPICreateInstanceCuda: { args: [FFIType.u32, FFIType.ptr], returns: FFIType.i32 },
-});
-
 let fnList: bigint[] | null = null;
 
-/** Create the NVOFA CUDA instance once and cache its function-pointer table. */
+/**
+ * Load the DLL and create the NVOFA CUDA instance on first use, caching its
+ * function-pointer table. Loading here rather than at import lets the probe
+ * (which imports this module on the server's main thread) report a missing
+ * nvofapi64.dll as an unavailable engine instead of failing at startup.
+ */
 function functions(): bigint[] {
   if (fnList) return fnList;
+  const lib = dlopen("nvofapi64.dll", {
+    NvOFAPICreateInstanceCuda: { args: [FFIType.u32, FFIType.ptr], returns: FFIType.i32 },
+  });
   const buf = new BigUint64Array(12);
   const st = lib.symbols.NvOFAPICreateInstanceCuda(NV_OF_API_VERSION, ptr(buf)) as number;
   if (st !== OK) throw new Error(`NvOFAPICreateInstanceCuda(0x${NV_OF_API_VERSION.toString(16)}) failed: NV_OF_STATUS ${st}`);
@@ -46,51 +51,76 @@ function fn(index: number, sig: Signature): (...args: unknown[]) => unknown {
   return callableAt(Number(functions()[index]!), sig);
 }
 
+/** What probeNvof learned about the engine; the probe report adds the CUDA ordinal on top (ProbeOpticalFlow). */
 export interface NvofCaps {
-  available: boolean;
+  status: "ok" | "unavailable";
+  /** "ok", or why the engine could not be brought up. */
   detail: string;
-  widthMin?: number;
-  widthMax?: number;
-  heightMin?: number;
-  heightMax?: number;
-  outGridSizes?: number[];
+  /** Input frame size the engine accepts; null unless status is "ok". */
+  limits: OpticalFlowLimits | null;
+  /** Output grid sizes (one flow vector per NxN block) the engine offers; null unless status is "ok". */
+  outGridSizes: number[] | null;
 }
 
 /**
- * Bring up NVOFA on GPU `ordinal` and read back its capabilities — proves the
- * whole CUDA + NVOFA FFI chain works without running a flow computation. Never
- * throws: a missing DLL or an unsupported GPU comes back as available: false.
+ * Bring up NVOFA on CUDA device `ordinal` and read back its capabilities —
+ * proves the whole CUDA + NVOFA FFI chain works without running a flow
+ * computation. Never throws: a missing DLL, a device CUDA does not know or an
+ * unsupported GPU comes back as status "unavailable" with the cause. A partial
+ * answer (a limit the driver would not report) is "unavailable" too, so "ok"
+ * always carries every number. Leaves the calling thread's CUDA context stack
+ * as it found it, which matters for the server's long-lived main thread.
  */
-export function probeNvof(ordinal = 0): NvofCaps {
+export function probeNvof(ordinal: number): NvofCaps {
+  const unavailable = (detail: string): NvofCaps => ({ status: "unavailable", detail, limits: null, outGridSizes: null });
+  let pushed = false;
   try {
     const ctx = cudaCreateContext(ordinal);
+    pushed = true;
     const create = fn(FN.create, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 });
     const hOut = new OutU64();
     const st = create(ctx, hOut.ptr) as number;
-    if (st !== OK) return { available: false, detail: `nvCreateOpticalFlowCuda failed: NV_OF_STATUS ${st}` };
+    if (st !== OK) return unavailable(`nvCreateOpticalFlowCuda failed: NV_OF_STATUS ${st}`);
     const hOf = hOut.value;
-
-    const getCaps = fn(FN.getCaps, { args: [FFIType.u64, FFIType.i32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 });
-    // nvOFGetCaps is a two-call API: a NULL value buffer only reports the count.
-    const cap = (param: number): number[] => {
-      const size = new Uint32Array(1);
-      let r = getCaps(hOf, param, null, ptr(size)) as number;
-      if (r !== OK || size[0]! === 0) return [];
-      const vals = new Uint32Array(size[0]!);
-      r = getCaps(hOf, param, ptr(vals), ptr(size)) as number;
-      return r === OK ? Array.from(vals) : [];
-    };
-
-    const widthMin = cap(CAPS.WIDTH_MIN)[0];
-    const widthMax = cap(CAPS.WIDTH_MAX)[0];
-    const heightMin = cap(CAPS.HEIGHT_MIN)[0];
-    const heightMax = cap(CAPS.HEIGHT_MAX)[0];
-    const outGridSizes = cap(CAPS.OUT_GRID);
-
-    fn(FN.destroy, { args: [FFIType.u64], returns: FFIType.i32 })(hOf);
-    return { available: true, detail: "ok", widthMin, widthMax, heightMin, heightMax, outGridSizes };
+    try {
+      const getCaps = fn(FN.getCaps, { args: [FFIType.u64, FFIType.i32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 });
+      // nvOFGetCaps is a two-call API: a NULL value buffer only reports the count.
+      const cap = (param: number): number[] => {
+        const size = new Uint32Array(1);
+        let r = getCaps(hOf, param, null, ptr(size)) as number;
+        if (r !== OK || size[0]! === 0) return [];
+        const vals = new Uint32Array(size[0]!);
+        r = getCaps(hOf, param, ptr(vals), ptr(size)) as number;
+        return r === OK ? Array.from(vals) : [];
+      };
+      const limit = (name: string, param: number): number => {
+        const value = cap(param)[0];
+        if (value === undefined) throw new Error(`nvOFGetCaps reported no value for ${name}`);
+        return value;
+      };
+      const limits: OpticalFlowLimits = {
+        widthMin: limit("WIDTH_MIN", CAPS.WIDTH_MIN),
+        widthMax: limit("WIDTH_MAX", CAPS.WIDTH_MAX),
+        heightMin: limit("HEIGHT_MIN", CAPS.HEIGHT_MIN),
+        heightMax: limit("HEIGHT_MAX", CAPS.HEIGHT_MAX),
+      };
+      const outGridSizes = cap(CAPS.OUT_GRID);
+      if (outGridSizes.length === 0) throw new Error("nvOFGetCaps reported no output grid sizes");
+      return { status: "ok", detail: "ok", limits, outGridSizes };
+    } finally {
+      fn(FN.destroy, { args: [FFIType.u64], returns: FFIType.i32 })(hOf);
+    }
   } catch (error) {
-    return { available: false, detail: (error as Error).message };
+    return unavailable((error as Error).message);
+  } finally {
+    if (pushed) {
+      try {
+        cudaReleaseContext(ordinal);
+      } catch {
+        // The context could not be given back; the stack entry it leaves behind
+        // is the fault this probe reports, not one it can repair.
+      }
+    }
   }
 }
 
@@ -132,7 +162,7 @@ export class NvofSession {
     private readonly destroy: (...a: unknown[]) => unknown,
   ) {}
 
-  static open(width: number, height: number, ordinal = 0, perf = PERF_MEDIUM): NvofSession {
+  static open(width: number, height: number, ordinal: number, perf = PERF_MEDIUM): NvofSession {
     const ctx = cudaCreateContext(ordinal);
     const create = fn(FN.create, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 });
     const hOut = new OutU64();
@@ -285,18 +315,21 @@ export interface NvofAttempt {
 }
 
 /**
- * Try to build an NVOFA optical-flow backend for frames of `width`x`height`
- * (sized to the estimator's flow grid). Failing is not fatal — the CPU block
- * matcher does the same job more slowly — but the reason is returned rather
- * than swallowed, so someone who asked for hardware flow learns they lost it.
+ * Try to build an NVOFA optical-flow backend on CUDA device `ordinal` for
+ * frames of `width`x`height` (sized to the estimator's flow grid). Failing is
+ * not fatal — the CPU block matcher does the same job more slowly — but the
+ * reason is returned rather than swallowed, so someone who asked for hardware
+ * flow learns they lost it.
  */
-export function tryCreateNvofBackend(width: number, height: number, flowWidth = DEFAULT_FLOW_WIDTH, ordinal = 0): NvofAttempt {
+export function tryCreateNvofBackend(width: number, height: number, ordinal: number, flowWidth = DEFAULT_FLOW_WIDTH): NvofAttempt {
   const { flowW, flowH } = flowGridSize(width, height, flowWidth);
   try {
     return { backend: nvofBackend(NvofSession.open(flowW, flowH, ordinal)), reason: null };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    // Say what it costs, not where to look: nothing in `probe` reports NVOFA limits.
-    return { backend: null, reason: `NVOFA hardware optical flow could not start on its ${flowW}x${flowH} grid, so this run uses the CPU matcher instead -- slower, same result: ${detail}` };
+    // The pointer names the probe line that answers "does the engine come up on
+    // this GPU"; its size limits never explain this failure, since the grid is
+    // 64..640 px a side and every RTX reports a far wider range.
+    return { backend: null, reason: `NVOFA hardware optical flow could not start on its ${flowW}x${flowH} grid, so this run uses the CPU matcher instead -- slower, same result: ${detail}. Run \`probe\`: its "Hardware optical flow (NVOFA)" line says whether the engine comes up on the selected GPU and why not.` };
   }
 }
