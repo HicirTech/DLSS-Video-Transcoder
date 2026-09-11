@@ -168,11 +168,11 @@ export interface NvencCaps {
 }
 
 /**
- * Bring up NVENC on GPU `ordinal`: create the instance, open a CUDA encode
- * session, query a few H.264 caps, and tear down. Proves the whole
+ * Bring up NVENC on CUDA device `ordinal`: create the instance, open a CUDA
+ * encode session, query a few H.264 caps, and tear down. Proves the whole
  * CUDA + NVENC FFI/ABI chain without encoding a frame.
  */
-export function probeNvencCaps(ordinal = 0): NvencCaps {
+export function probeNvencCaps(ordinal: number): NvencCaps {
   const ver = nvencMaxSupportedVersion();
   let encoder = 0n;
   try {
@@ -237,7 +237,8 @@ export interface NvencEncoderOptions {
   preset?: NvencPreset; // default p4 (balanced)
   /** Constant-quality target (H.264/HEVC 0..51, lower = better). Default 20. */
   cq?: number;
-  ordinal?: number;
+  /** CUDA device to encode on: the renderer's, resolved by LUID (GpuSession.cudaOrdinal), never a guess. */
+  ordinal: number;
   /**
    * Zero-copy input pool: external CUDA device pointers (e.g. D3D12 shared
    * buffers imported via cuda-interop) registered as ABGR inputs, `pitch` bytes
@@ -294,7 +295,7 @@ export class NvencEncoder {
     const pitch = opts.inputs?.[0]?.pitch ?? width * 4;
     const ownsDevice = !opts.inputs;
 
-    const ctx = cudaCreateContext(opts.ordinal ?? 0);
+    const ctx = cudaCreateContext(opts.ordinal);
 
     // NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS, laid out as in probeNvencCaps().
     const open = new Uint8Array(1552);
