@@ -17,6 +17,7 @@
  * because the coordinator sends one request at a time, in stream order.
  */
 import { createMotionEstimator, flowGridSize, packFlowResizedR16G16, type MotionEstimator } from "../flow.ts";
+import { FRAMEGEN_CUDA_DEVICE } from "../framegen-plan.ts";
 import { tryCreateNvofBackend } from "../nvof.ts";
 
 interface OpenMsg {
@@ -25,7 +26,6 @@ interface OpenMsg {
   height: number;
   /** Only the first stage discovers scene cuts; later stages inherit them as segment changes. */
   detectSourceCuts: boolean;
-  ordinal?: number;
   /** Pack on this thread instead of handing the grid flow to a packer thread. */
   packInline?: boolean;
 }
@@ -62,7 +62,7 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
   const m = event.data;
   try {
     if (m.type === "open") {
-      const nvof = tryCreateNvofBackend(m.width, m.height, undefined, m.ordinal ?? 0);
+      const nvof = tryCreateNvofBackend(m.width, m.height, FRAMEGEN_CUDA_DEVICE);
       estimator = createMotionEstimator(m.width, m.height, nvof.backend ? { backend: nvof.backend } : {});
       detectSourceCuts = m.detectSourceCuts;
       packInline = m.packInline ?? false;
