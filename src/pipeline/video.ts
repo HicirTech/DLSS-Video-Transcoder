@@ -18,7 +18,7 @@ import { runThreadedEncode } from "./threaded-encode.ts";
 import { runAsyncNrEncode } from "./async-nr-encode.ts";
 import { tryCreateNvofBackend } from "./nvof.ts";
 import { DXGI_FORMAT_R8G8B8A8_UNORM, linearLayout } from "../native/d3d12.ts";
-import { openGpu } from "./gpu.ts";
+import { describeGpu, openGpu } from "./gpu.ts";
 import { resolveTargetSize } from "./image.ts";
 import { evenSize } from "./resize.ts";
 import { findTool } from "./tools.ts";
@@ -337,18 +337,13 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
     throw new Error("ffmpeg and ffprobe are required for video jobs (install with `winget install Gyan.FFmpeg` or set FFMPEG_PATH / FFPROBE_PATH)");
   }
   const requestedEncode = options.encode ?? DEFAULT_ENCODE_SETTINGS;
-  // Resolve the codec before anything else: an NVENC request that cannot run
-  // here degrades to its CPU sibling, and every path below branches on the result.
-  const resolvedCodec = resolveEncodeCodec(requestedEncode.codec, ffmpeg, options.adapterIndex);
-  if (resolvedCodec.note) progress(0, resolvedCodec.note);
-  const encode: EncodeSettings = { ...requestedEncode, codec: resolvedCodec.codec };
   const info = probeVideo(ffprobe, options.input, ffmpeg);
   // Every codec here encodes 4:2:0 (yuv420p / NVENC NV12), which requires even
   // width and height. resolveTargetSize leaves scale 'none' (the default) at the
   // raw source size, so an odd-sized source would only fail at encode time.
   const rawTarget = resolveTargetSize(info.width, info.height, options.scale);
   const target = { width: evenSize(rawTarget.width), height: evenSize(rawTarget.height) };
-  const output = options.output ?? defaultVideoOutput(options.input, options.engine, encode.container);
+  const output = options.output ?? defaultVideoOutput(options.input, options.engine, requestedEncode.container);
   // SR upscales inside DLSS: decode at source size and let the engine write the
   // target size. Other engines get frames pre-scaled to the target by ffmpeg.
   const upscaling = options.engine === "sr";
@@ -357,6 +352,16 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   progress(0, `source ${info.width}x${info.height}${info.displayAspect ? ` (non-square pixels, display ${info.displayAspect.num}:${info.displayAspect.den})` : ""} ${info.codec} ${info.fpsText} fps, ${info.frames ?? "?"} frames; ${upscaling ? `upscaling to ${target.width}x${target.height}` : `working size ${target.width}x${target.height}`}`);
 
   const session = openGpu({ adapterIndex: options.adapterIndex, debugLayer: options.debugLayer });
+  progress(0, describeGpu(session));
+  // session.cudaOrdinal, not adapterIndex: see GpuSession.cudaOrdinal. Every
+  // CUDA user below (ffmpeg's -gpu, in-process NVENC, NVOFA) takes this one.
+  const cudaOrdinal = session.cudaOrdinal;
+  // Resolve the codec on that device before choosing a path: an NVENC request
+  // that cannot run there degrades to its CPU sibling, and every path below
+  // branches on the result.
+  const resolvedCodec = resolveEncodeCodec(requestedEncode.codec, ffmpeg, cudaOrdinal);
+  if (resolvedCodec.note) progress(0, resolvedCodec.note);
+  const encode: EncodeSettings = { ...requestedEncode, codec: resolvedCodec.codec };
 
   // Fastest path, tried first: DLSS output stays on the GPU and NVENC reads it
   // through a shared buffer, so the two overlap with no CPU frame copy between
@@ -365,15 +370,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   // dimensions. motion is ignored: feature 18 consumes no motion vectors, so
   // motion="flow" would only burn optical-flow time here.
   const nrNative = options.engine === "nr" && !upscaling && options.runtimeDir ? nvencNativeTarget(encode.codec, target.width, target.height) : null;
-  // session.cudaOrdinal, not adapterIndex: see GpuSession.cudaOrdinal.
-  const cudaOrdinal = session.cudaOrdinal;
-  if (cudaOrdinal === null) {
-    // Both GPU-side fast paths (in-process NVENC, hardware optical flow) run on
-    // CUDA. Without a CUDA device for this adapter they cannot start, and the
-    // job silently takes the slower ffmpeg encode and the CPU matcher instead.
-    progress(0, `${session.adapter.info.name} has no CUDA device, so GPU encoding and hardware optical flow are unavailable; encoding through ffmpeg instead. Run \`probe\` to see which adapter to select.`);
-  }
-  if (nrNative && cudaOrdinal !== null && probeNvencCaps(cudaOrdinal).available) {
+  if (nrNative && probeNvencCaps(cudaOrdinal).available) {
     try {
       const { num, den } = rateParts(info.fpsText);
       const layout = linearLayout(target.width, target.height, DXGI_FORMAT_R8G8B8A8_UNORM);
@@ -457,7 +454,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   let estimator: ReturnType<typeof createMotionEstimator> | null = null;
   if (options.motion === "flow") {
     try {
-      const nvof = tryCreateNvofBackend(renderWidth, renderHeight, undefined, session.cudaOrdinal ?? 0);
+      const nvof = tryCreateNvofBackend(renderWidth, renderHeight, cudaOrdinal);
       estimator = createMotionEstimator(renderWidth, renderHeight, nvof.backend ? { backend: nvof.backend } : {});
       progress(0, nvof.backend ? "optical flow: NVIDIA hardware (NVOFA)" : `optical flow: CPU block matching. ${nvof.reason}`);
     } catch (error) {
@@ -483,7 +480,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   // serial. CPU/AV1 codecs, oversized frames, or an NVENC that will not come up
   // here fall through to the single-thread rawvideo path.
   const nativeTarget = nvencNativeTarget(encode.codec, outWidth, outHeight);
-  const useThreaded = nativeTarget !== null && cudaOrdinal !== null && probeNvencCaps(cudaOrdinal).available;
+  const useThreaded = nativeTarget !== null && probeNvencCaps(cudaOrdinal).available;
 
   let frames = 0;
   let sceneCuts = 0;
