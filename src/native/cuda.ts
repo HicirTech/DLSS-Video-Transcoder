@@ -5,17 +5,22 @@
  *
  * CUresult 0 = CUDA_SUCCESS. 64-bit handles (CUcontext, CUdeviceptr) are carried
  * as bigint; CUdevice is a 32-bit ordinal.
+ *
+ * The DLL is loaded on first use, not at import: the probe reports a missing or
+ * broken CUDA driver as a report field, which it could not do if importing this
+ * module already required the DLL to be present.
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import { OutU32, OutU64 } from "./memory.ts";
 
-const cuda = dlopen("nvcuda.dll", {
+const SYMBOLS = {
   cuInit: { args: [FFIType.u32], returns: FFIType.i32 },
   cuDeviceGetCount: { args: [FFIType.ptr], returns: FFIType.i32 },
   cuDeviceGet: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
   // CUdevice_luid is 8 bytes, matching DXGI's LUID; the node mask is ignored here.
   cuDeviceGetLuid: { args: [FFIType.ptr, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
   cuDevicePrimaryCtxRetain: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
+  cuDevicePrimaryCtxRelease_v2: { args: [FFIType.i32], returns: FFIType.i32 },
   cuCtxPushCurrent_v2: { args: [FFIType.u64], returns: FFIType.i32 },
   cuCtxPopCurrent_v2: { args: [FFIType.ptr], returns: FFIType.i32 },
   cuCtxSynchronize: { args: [], returns: FFIType.i32 },
@@ -24,7 +29,7 @@ const cuda = dlopen("nvcuda.dll", {
   cuMemcpy2D_v2: { args: [FFIType.ptr], returns: FFIType.i32 },
   cuMemAlloc_v2: { args: [FFIType.ptr, FFIType.u64], returns: FFIType.i32 },
   cuMemFree_v2: { args: [FFIType.u64], returns: FFIType.i32 },
-});
+} as const;
 
 const CU_NAMES: Record<number, string> = {
   0: "SUCCESS", 1: "INVALID_VALUE", 2: "OUT_OF_MEMORY", 3: "NOT_INITIALIZED", 100: "NO_DEVICE",
@@ -37,92 +42,120 @@ function ck(r: number, what: string): void {
 const CU_MEMORYTYPE_HOST = 1;
 const CU_MEMORYTYPE_DEVICE = 2;
 
-let initialised = false;
+function load() {
+  return dlopen("nvcuda.dll", SYMBOLS);
+}
+
+let lib: ReturnType<typeof load> | null = null;
+
+/** The driver's symbols, loaded and cuInit'ed once; throws the dlopen or cuInit error when CUDA is unusable. */
+function cu(): ReturnType<typeof load>["symbols"] {
+  if (!lib) {
+    const loaded = load();
+    ck(loaded.symbols.cuInit(0) as number, "cuInit");
+    lib = loaded;
+  }
+  return lib.symbols;
+}
+
+function device(ordinal: number): number {
+  const dev = new OutU32();
+  ck(cu().cuDeviceGet(dev.ptr, ordinal) as number, "cuDeviceGet");
+  return dev.value | 0;
+}
 
 /** Retain GPU `ordinal`'s primary context and push it onto *this* thread's context stack; returns the CUcontext. */
-export function cudaCreateContext(ordinal = 0): bigint {
-  if (!initialised) {
-    ck(cuda.symbols.cuInit(0) as number, "cuInit");
-    initialised = true;
-  }
-  const dev = new OutU32();
-  ck(cuda.symbols.cuDeviceGet(dev.ptr, ordinal) as number, "cuDeviceGet");
+export function cudaCreateContext(ordinal: number): bigint {
+  const dev = device(ordinal);
   const ctx = new OutU64();
-  ck(cuda.symbols.cuDevicePrimaryCtxRetain(ctx.ptr, dev.value | 0) as number, "cuDevicePrimaryCtxRetain");
-  ck(cuda.symbols.cuCtxPushCurrent_v2(ctx.value) as number, "cuCtxPushCurrent");
+  ck(cu().cuDevicePrimaryCtxRetain(ctx.ptr, dev) as number, "cuDevicePrimaryCtxRetain");
+  ck(cu().cuCtxPushCurrent_v2(ctx.value) as number, "cuCtxPushCurrent");
   return ctx.value;
 }
 
 /**
- * The CUDA ordinal for the adapter D3D12 chose, matched by LUID, or null when no
- * CUDA device carries it.
- *
- * The two enumerations are unrelated: on this machine DXGI lists three entries
- * named "RTX 5090" with different LUIDs while CUDA reports one device, so
- * assuming ordinal 0 is the selected adapter is a guess that happens to hold
- * only while exactly one NVIDIA GPU is visible to CUDA. A mismatch would put the
- * encoder or the flow engine on a different GPU than the renderer, and the
- * shared-resource paths between them would fail or silently fall back.
+ * Undo cudaCreateContext on this thread: pop the context and drop the retain.
+ * Job workers skip this because they are terminated whole; a long-lived thread
+ * (the server's, running the probe) must call it or its context stack grows by
+ * one entry per probe.
  */
-export function cudaOrdinalForLuid(luidLow: number, luidHigh: number): number | null {
-  if (!initialised) {
-    ck(cuda.symbols.cuInit(0) as number, "cuInit");
-    initialised = true;
-  }
-  const wanted = new Uint8Array(8);
-  const view = new DataView(wanted.buffer);
-  view.setUint32(0, luidLow >>> 0, true);
-  view.setInt32(4, luidHigh, true);
+export function cudaReleaseContext(ordinal: number): void {
+  const popped = new OutU64();
+  ck(cu().cuCtxPopCurrent_v2(popped.ptr) as number, "cuCtxPopCurrent");
+  ck(cu().cuDevicePrimaryCtxRelease_v2(device(ordinal)) as number, "cuDevicePrimaryCtxRelease");
+}
 
-  const count = cudaDeviceCount();
+/** What the CUDA driver says about a set of DXGI adapters, resolved in one pass. */
+export interface CudaDeviceMap {
+  /** Per input LUID, the CUDA ordinal whose LUID matches, or null when none does (or CUDA is unusable). */
+  ordinals: (number | null)[];
+  /** How many devices the driver lists; null when it could not be asked. */
+  deviceCount: number | null;
+  /** Why CUDA could not be asked (nvcuda.dll missing, cuInit failed); null when it answered. */
+  error: string | null;
+}
+
+/**
+ * The CUDA ordinal behind each adapter LUID. One cuInit, one walk over the
+ * devices, never throws: a broken or absent CUDA driver comes back as `error`
+ * with every ordinal null, so a caller can report the cause instead of guessing.
+ *
+ * DXGI and CUDA enumerate independently: on this machine DXGI lists three
+ * entries named "RTX 5090" with different LUIDs while CUDA reports one device,
+ * so taking ordinal 0 for whichever adapter D3D12 chose is a guess that holds
+ * only while exactly one NVIDIA GPU is visible to CUDA. A mismatch would put the
+ * encoder or the flow engine on a different GPU than the renderer.
+ */
+export function cudaDevicesForLuids(luids: readonly { luidLow: number; luidHigh: number }[]): CudaDeviceMap {
+  const ordinals: (number | null)[] = luids.map(() => null);
+  let count: number;
+  try {
+    const out = new OutU32();
+    ck(cu().cuDeviceGetCount(out.ptr) as number, "cuDeviceGetCount");
+    count = out.value;
+  } catch (error) {
+    return { ordinals, deviceCount: null, error: (error as Error).message };
+  }
   const luid = new Uint8Array(8);
+  const view = new DataView(luid.buffer);
   const nodeMask = new Uint32Array(1);
   for (let ordinal = 0; ordinal < count; ordinal++) {
-    const dev = new OutU32();
-    ck(cuda.symbols.cuDeviceGet(dev.ptr, ordinal) as number, "cuDeviceGet");
     luid.fill(0);
     // Not every driver/device pair supports the query; a failure just means this
     // device cannot be matched, not that the whole lookup failed.
-    const status = cuda.symbols.cuDeviceGetLuid(ptr(luid), ptr(nodeMask), dev.value | 0) as number;
-    if (status !== 0) continue;
-    if (luid.every((byte, i) => byte === wanted[i])) return ordinal;
+    if ((cu().cuDeviceGetLuid(ptr(luid), ptr(nodeMask), device(ordinal)) as number) !== 0) continue;
+    const low = view.getUint32(0, true);
+    const high = view.getInt32(4, true);
+    luids.forEach((wanted, i) => {
+      if (ordinals[i] === null && (wanted.luidLow >>> 0) === low && wanted.luidHigh === high) ordinals[i] = ordinal;
+    });
   }
-  return null;
-}
-
-export function cudaDeviceCount(): number {
-  if (!initialised) {
-    ck(cuda.symbols.cuInit(0) as number, "cuInit");
-    initialised = true;
-  }
-  const out = new OutU32();
-  ck(cuda.symbols.cuDeviceGetCount(out.ptr) as number, "cuDeviceGetCount");
-  return out.value;
+  return { ordinals, deviceCount: count, error: null };
 }
 
 export function cudaSynchronize(): void {
-  ck(cuda.symbols.cuCtxSynchronize() as number, "cuCtxSynchronize");
+  ck(cu().cuCtxSynchronize() as number, "cuCtxSynchronize");
 }
 
 /** Allocate `bytes` of device memory; returns the CUdeviceptr. */
 export function cudaMalloc(bytes: number): bigint {
   const out = new OutU64();
-  ck(cuda.symbols.cuMemAlloc_v2(out.ptr, BigInt(bytes)) as number, "cuMemAlloc");
+  ck(cu().cuMemAlloc_v2(out.ptr, BigInt(bytes)) as number, "cuMemAlloc");
   return out.value;
 }
 
 export function cudaFree(device: bigint): void {
-  ck(cuda.symbols.cuMemFree_v2(device) as number, "cuMemFree");
+  ck(cu().cuMemFree_v2(device) as number, "cuMemFree");
 }
 
 /** Copy `bytes` from a host buffer into a device pointer (tightly packed). */
 export function cudaMemcpyHtoD(dst: bigint, src: Uint8Array, bytes: number): void {
-  ck(cuda.symbols.cuMemcpyHtoD_v2(dst, ptr(src), BigInt(bytes)) as number, "cuMemcpyHtoD");
+  ck(cu().cuMemcpyHtoD_v2(dst, ptr(src), BigInt(bytes)) as number, "cuMemcpyHtoD");
 }
 
 /** Copy `bytes` from a device pointer into a host buffer (tightly packed). */
 export function cudaMemcpyDtoH(dst: Uint8Array, src: bigint, bytes: number): void {
-  ck(cuda.symbols.cuMemcpyDtoH_v2(ptr(dst), src, BigInt(bytes)) as number, "cuMemcpyDtoH");
+  ck(cu().cuMemcpyDtoH_v2(ptr(dst), src, BigInt(bytes)) as number, "cuMemcpyDtoH");
 }
 
 /** 2D host→device copy honouring the device pitch — NVOFA buffers are pitch-linear, not tightly packed. */
@@ -148,7 +181,7 @@ export function cudaMemcpy2DHtoD(opts: {
   dv.setBigUint64(104, BigInt(opts.dstPitch), true);
   dv.setBigUint64(112, BigInt(opts.widthBytes), true);
   dv.setBigUint64(120, BigInt(opts.height), true);
-  ck(cuda.symbols.cuMemcpy2D_v2(ptr(desc)) as number, "cuMemcpy2D");
+  ck(cu().cuMemcpy2D_v2(ptr(desc)) as number, "cuMemcpy2D");
 }
 
 /** 2D device→host copy respecting the device pitch. */
@@ -170,5 +203,5 @@ export function cudaMemcpy2DDtoH(opts: {
   dv.setBigUint64(104, BigInt(opts.dstPitch), true);
   dv.setBigUint64(112, BigInt(opts.widthBytes), true);
   dv.setBigUint64(120, BigInt(opts.height), true);
-  ck(cuda.symbols.cuMemcpy2D_v2(ptr(desc)) as number, "cuMemcpy2D");
+  ck(cu().cuMemcpy2D_v2(ptr(desc)) as number, "cuMemcpy2D");
 }
