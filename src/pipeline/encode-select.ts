@@ -41,6 +41,9 @@ export function preferredDefaultCodec(nvencAvailable: boolean): Codec {
  * actually encode: NVENC failures surface at session open, not from
  * `-encoders` listing the name. 256x256 only proves the encoder exists — the
  * per-codec size caps are checked separately in video.ts. Success == exit 0.
+ *
+ * `gpu` is a CUDA device ordinal (ffmpeg's -gpu counts CUDA devices), never a
+ * DXGI adapter index: callers pass GpuSession.cudaOrdinal.
  */
 export function buildNvencProbeArgs(codec: FfmpegNvencEncoder, gpu?: number): string[] {
   const args = ["-v", "error", "-f", "lavfi", "-i", "color=size=256x256:rate=1", "-frames:v", "1", "-c:v", codec];
