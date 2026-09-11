@@ -73,10 +73,15 @@ export interface FeatureRequirementResult {
   minOsVersion: string | null;
 }
 
+/**
+ * There is no shutdown here on purpose: NVSDK_NGX_D3D12_Shutdown1 on this driver
+ * core releases the D3D12 device it was given and leaves the process unable to
+ * create another on that adapter (issue #75), and it faults outright once a
+ * feature exists (sr.ts). Every caller leaves NGX to process exit and releases
+ * only the objects it owns.
+ */
 export class NgxCore {
   private readonly module: NativeModule;
-  private initialised = false;
-  private device = 0;
   private forwarder: ForwarderModule | null = null;
   private readonly keep: unknown[] = [];
 
@@ -148,10 +153,6 @@ export class NgxCore {
       NGX_VERSION_API,
       featureInfo ? featureInfo.ptr : null,
     ) as number;
-    if (ngxOk(result)) {
-      this.initialised = true;
-      this.device = device;
-    }
     return result;
   }
 
@@ -174,10 +175,6 @@ export class NgxCore {
       FFIType.i32,
       FFIType.ptr,
     ])(id, NGX_ENGINE_TYPE_CUSTOM, version, path, device, NGX_VERSION_API, featureInfo ? featureInfo.ptr : null) as number;
-    if (ngxOk(result)) {
-      this.initialised = true;
-      this.device = device;
-    }
     return result;
   }
 
@@ -192,10 +189,6 @@ export class NgxCore {
       NGX_VERSION_API,
       fifth === 0 ? null : fifth,
     ) as number;
-    if (ngxOk(result)) {
-      this.initialised = true;
-      this.device = device;
-    }
     return result;
   }
 
@@ -204,15 +197,7 @@ export class NgxCore {
     const path = wstring(appDataPath);
     this.keep.push(path);
     const result = this.fn("NVSDK_NGX_D3D12_Init", [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.i32])(appId, path, device, NGX_VERSION_API) as number;
-    if (ngxOk(result)) {
-      this.initialised = true;
-      this.device = device;
-    }
     return result;
-  }
-
-  get isInitialised(): boolean {
-    return this.initialised;
   }
 
   capabilityParameters(): NgxParameters {
@@ -271,12 +256,5 @@ export class NgxCore {
 
   releaseFeature(handle: number): number {
     return this.fn("NVSDK_NGX_D3D12_ReleaseFeature", [FFIType.ptr])(handle) as number;
-  }
-
-  shutdown(): number {
-    if (!this.initialised) return 1;
-    const result = this.fn("NVSDK_NGX_D3D12_Shutdown1", [FFIType.ptr])(this.device) as number;
-    this.initialised = false;
-    return result;
   }
 }
