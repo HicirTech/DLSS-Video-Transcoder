@@ -122,10 +122,20 @@ export class DxgiFactory extends ComObject {
   }
 }
 
-/** Pick the adapter to run on: an explicit index, else the NVIDIA GPU with the most memory. */
-export function selectAdapter(adapters: DxgiAdapter[], preferredIndex?: number): DxgiAdapter | null {
+/** An adapter DLSS can run on at all: NVIDIA, and not the software rasteriser Windows always lists. */
+export function isHardwareNvidia(info: AdapterInfo): boolean {
+  return info.isNvidia && !info.software;
+}
+
+/**
+ * Pick the adapter to run on: an explicit index, else the NVIDIA GPU with the
+ * most memory (a stable sort, so equal memory keeps the caller's order). Generic
+ * over anything carrying an AdapterInfo so the CUDA-aware choice in
+ * src/pipeline/gpu.ts can reuse this ordering on its own candidates.
+ */
+export function selectAdapter<A extends { info: AdapterInfo }>(adapters: readonly A[], preferredIndex?: number): A | null {
   if (preferredIndex !== undefined) return adapters.find((a) => a.info.index === preferredIndex) ?? null;
-  const nvidia = adapters.filter((a) => a.info.isNvidia && !a.info.software);
+  const nvidia = adapters.filter((a) => isHardwareNvidia(a.info));
   nvidia.sort((a, b) => Number(b.info.dedicatedVideoMemory - a.info.dedicatedVideoMemory));
   return nvidia[0] ?? null;
 }
