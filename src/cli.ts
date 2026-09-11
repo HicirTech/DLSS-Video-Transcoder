@@ -11,11 +11,11 @@ import { PROBE_ENTRIES, PROBE_INITS, runProbe } from "./ngx/probe.ts";
 import { DlssNrSession } from "./ngx/nr-render.ts";
 import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
-import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, NR_PRESETS, NR_STYLES, SETTING_RANGES } from "./server/api-types.ts";
+import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, NR_PRESETS, NR_STYLES, type ProbeAdapter, type ProbeOpticalFlow, SETTING_RANGES } from "./server/api-types.ts";
 import { DlssRenderPreset, DLSS_RATIO, perfQualityName, qualityForFactor } from "./ngx/results.ts";
 import { processFrameGen } from "./pipeline/framegen.ts";
 import { FRAMEGEN_ENGINES } from "./pipeline/framegen-plan.ts";
-import { openGpu } from "./pipeline/gpu.ts";
+import { describeGpu, openGpu } from "./pipeline/gpu.ts";
 import { evenSize } from "./pipeline/resize.ts";
 
 const ROOT = join(import.meta.dir, "..");
@@ -190,7 +190,7 @@ interface CommandSpec {
 }
 
 const RUNTIME_OPT: OptionSpec = { flag: "--runtime DIR", desc: "runtime folder holding the NGX DLLs / workers", def: "<repo>/runtime" };
-const ADAPTER_OPT: OptionSpec = { flag: "--adapter N", desc: "GPU adapter index (from `probe`)", def: "auto" };
+const ADAPTER_OPT: OptionSpec = { flag: "--adapter N", desc: "GPU adapter index as `probe` listed it in this session (DXGI indices can change between runs); the adapter must have a CUDA device. auto = the NVIDIA adapter with the most VRAM that has one", def: "auto" };
 
 const COMMANDS: readonly CommandSpec[] = [
   {
@@ -360,17 +360,36 @@ function printHelp(command?: string): boolean {
   return true;
 }
 
+/**
+ * One line on the hardware optical-flow engine. The limits are the engine's own
+ * input range; the pipeline never feeds it a source frame, only a grid between
+ * pipelineGrid.minSide and pipelineGrid.maxLongSide a side, so the line says
+ * whether that grid fits instead of leaving the reader to compare numbers.
+ */
+function opticalFlowLine(flow: ProbeOpticalFlow): string {
+  const grid = flow.pipelineGrid;
+  if (flow.status === "not queried") return `not queried — ${flow.detail}`;
+  if (flow.status === "unavailable" || !flow.limits || !flow.outGridSizes) return `unavailable on CUDA device ${flow.cudaOrdinal} — ${flow.detail}`;
+  const l = flow.limits;
+  const fits = l.widthMin <= grid.minSide && l.heightMin <= grid.minSide && l.widthMax >= grid.maxLongSide && l.heightMax >= grid.maxLongSide;
+  return `ok on CUDA device ${flow.cudaOrdinal}; input ${l.widthMin}..${l.widthMax} x ${l.heightMin}..${l.heightMax} px; output grids ${flow.outGridSizes.join(", ")}; the pipeline feeds it a ${grid.minSide}..${grid.maxLongSide} px grid, which ${fits ? "fits" : "does NOT fit"}`;
+}
+
 function printProbe(report: Awaited<ReturnType<typeof runProbe>>): void {
   const lines: string[] = [];
   lines.push(`Neural Render probe  (${report.generatedAt})`);
   lines.push(`Bun ${report.platform.bun} on ${report.platform.os}`);
   lines.push("");
   lines.push("Adapters:");
+  // "n/a" when CUDA could not be asked at all, so a driver problem does not read as "this adapter has no CUDA device".
+  const cudaColumn = (a: ProbeAdapter): string => (report.cuda.error !== null ? "n/a" : a.cudaOrdinal === null ? "none" : String(a.cudaOrdinal));
   for (const a of report.adapters) {
     const mark = a.index === report.selectedAdapter ? "*" : " ";
-    lines.push(`  ${mark} [${a.index}] ${a.name}  vendor=0x${a.vendorId.toString(16)}  vram=${a.dedicatedVideoMemoryMB} MB  luid=${a.luid}${a.software ? "  (software)" : ""}`);
+    lines.push(`  ${mark} [${a.index}] ${a.name}  vendor=0x${a.vendorId.toString(16)}  vram=${a.dedicatedVideoMemoryMB} MB  luid=${a.luid}  cudaDevice=${cudaColumn(a)}${a.software ? "  (software)" : ""}`);
   }
+  lines.push(report.cuda.error === null ? `CUDA: ${report.cuda.deviceCount} device(s) listed by the driver` : `CUDA: not available — ${report.cuda.error}`);
   lines.push(`D3D12 device: ${report.device.created ? "created" : "FAILED"}${report.device.hresult && !report.device.created ? ` (${report.device.hresult})` : ""}`);
+  lines.push(`Hardware optical flow (NVOFA): ${opticalFlowLine(report.opticalFlow)}`);
   lines.push(`Driver: ${report.driver.version ?? "unknown"}`);
   // The core's own file version, which is not the number nvidia-smi reports for
   // the same driver (32.0.16.1664 vs 616.64), so both are shown.
@@ -496,6 +515,7 @@ async function main(): Promise<void> {
       }
 
       const session = openGpu({ adapterIndex: adapterOption(args) });
+      console.log(describeGpu(session));
       const started = performance.now();
       const sr = DlssSrSession.open(session, {
         renderWidth: image.width,
@@ -545,6 +565,7 @@ async function main(): Promise<void> {
         uiCorrection: flag(args, "--ui-correction") || DEFAULT_NR_SETTINGS.uiCorrection,
       };
       const session = openGpu({ adapterIndex: adapterOption(args) });
+      console.log(describeGpu(session));
       const started = performance.now();
       const nr = DlssNrSession.open(session, {
         width: image.width,
