@@ -80,8 +80,13 @@ spec is the source of truth for that help.
 
 Shared options, and which commands take them:
 
-- `--adapter N` (GPU index from `probe`, default auto) — `probe`, `sr`, `nr`. Frame generation has
-  no adapter selection: it runs in NVIDIA's `dlssg-worker.exe`, which always takes the default device.
+- `--adapter N` (GPU index as `probe` listed it, default auto) — `probe`, `sr`, `nr`. Auto picks the
+  NVIDIA adapter with the most VRAM **that has a CUDA device behind it**; DXGI can list one GPU several
+  times (this machine shows three "RTX 5090" entries) and only one entry has CUDA. DXGI indices can
+  change between runs, so take the index from a `probe` in the same session; an adapter without a CUDA
+  device is refused with the ones that have one, LUIDs included. Frame generation has no adapter
+  selection: it runs in NVIDIA's `dlssg-worker.exe`, which always takes the default device, and its
+  NVENC/NVOFA helpers follow it to CUDA device 0.
 - `--runtime DIR` (default `<repo>/runtime`) — `probe`, `sr`, `nr`, `fg`, `versions`. `forwarder`
   writes where `--out` points instead.
 
@@ -148,12 +153,18 @@ size and the look controls:
 
 ![Neural Render — video job with frame generation](docs/images/ui-video.png)
 
-**Probe tab** — hardware/runtime check (adapters, driver, NGX core, runtime DLLs, caller-shim self-test):
+**Probe tab** — hardware/runtime check (adapters with their CUDA device, hardware optical-flow limits,
+driver, NGX core, runtime DLLs, caller-shim self-test):
 
 ![Neural Render — hardware and runtime probe](docs/images/ui-probe.png)
 
 **Notes / honest caveats:**
 
+- **A CUDA device is required.** `sr`, `nr` and video jobs run on the DXGI adapter's CUDA device
+  (in-process NVENC and the hardware optical-flow engine live there); an adapter without one — the
+  duplicate "RTX 5090" entries DXGI lists here, a non-NVIDIA GPU — is refused with the adapters that
+  qualify, and `probe` reports "not ready" for it. The ffmpeg NVENC fallback (rawvideo path) uses
+  ffmpeg's default device. Frame generation always uses the default device (see `--adapter`).
 - The `nr` engine exposes the reference project's controls — **model preset**, **style**, **intensity**
   (0–2), **local tone** (0–2), **local structure** (0–2) and **skin structure** (-1–2, -1 = runtime
   default, skin only). Style and the strength sliders have a strong, visible effect; **model preset**
@@ -231,7 +242,7 @@ Verified against the source on 2026-09-10.
 | Browser file upload | n/a | ✅ | POST /api/upload; stored under logs/uploads/ |
 | NR look controls | ✅ (`nr`) | ✅ | style / intensity(0–2) / tone / structure apply strongly; preset exposed (experimental); global tone not applied |
 | NVENC (GPU) video encode | ✅ if requested | ✅ if selected | frame-gen GPU-encodes by default |
-| GPU optical flow (NVOFA) | ✅ (video/fg motion) | ✅ | hardware flow engine, ~5.7× faster than CPU, auto CPU fallback |
+| GPU optical flow (NVOFA) | ✅ (video/fg motion) | ✅ | hardware flow engine, ~5.7× faster than CPU, auto CPU fallback; `probe` reports whether it comes up and its size limits |
 | RTX Video Super Resolution / TrueHDR | ❌ | ❌ | DLLs present but no code path uses them |
 
 ### Known limitations
