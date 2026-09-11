@@ -202,6 +202,44 @@ export interface ProbeAdapter {
   luid: string;
   isNvidia: boolean;
   software: boolean;
+  /**
+   * CUDA device ordinal whose LUID matches this adapter's; null when CUDA lists
+   * no device with this LUID, or when CUDA could not be queried at all (see
+   * ProbeReport.cuda.error). Jobs run only on an adapter with one.
+   */
+  cudaOrdinal: number | null;
+}
+
+/** The CUDA driver's side of the adapter list. */
+export interface ProbeCuda {
+  /** Devices the driver lists; null when it could not be asked. */
+  deviceCount: number | null;
+  /** Why it could not be asked (nvcuda.dll missing, cuInit failed); null when it answered. */
+  error: string | null;
+}
+
+/** Input frame size NVOFA accepts, in pixels. */
+export interface OpticalFlowLimits {
+  widthMin: number;
+  widthMax: number;
+  heightMin: number;
+  heightMax: number;
+}
+
+/** NVIDIA hardware optical flow (NVOFA) on the selected adapter's CUDA device. */
+export interface ProbeOpticalFlow {
+  /** "not queried" when the selected adapter has no CUDA device to ask on. */
+  status: "ok" | "unavailable" | "not queried";
+  /** "ok", or why the engine could not be brought up or was not asked. */
+  detail: string;
+  /** CUDA device the query ran on; null when status is "not queried". */
+  cudaOrdinal: number | null;
+  /** Null unless status is "ok". */
+  limits: OpticalFlowLimits | null;
+  /** Output grid sizes (one flow vector per NxN block) the engine offers; null unless status is "ok". The pipeline uses 1. */
+  outGridSizes: number[] | null;
+  /** The grid the pipeline actually feeds the engine: every side is at least minSide and the longer side at most maxLongSide pixels. */
+  pipelineGrid: { minSide: number; maxLongSide: number };
 }
 
 export interface ProbeFeature {
@@ -233,6 +271,8 @@ export interface ProbeReport {
   platform: { os: string; bun: string };
   adapters: ProbeAdapter[];
   selectedAdapter: number | null;
+  cuda: ProbeCuda;
+  opticalFlow: ProbeOpticalFlow;
   device: { created: boolean; hresult: string | null; featureLevel: string | null };
   driver: { version: string | null; ngxCorePath: string | null; ngxCoreVersion: string | null; ngxCoreExports: string[] };
   ngxInit: { attempted: boolean; result: string | null; ok: boolean };
