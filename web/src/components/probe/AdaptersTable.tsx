@@ -1,14 +1,27 @@
-import { Chip, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
-import type { ProbeAdapter } from "../../../../src/server/api-types";
+import { Chip, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip } from "@mui/material";
+import type { ProbeAdapter, ProbeCuda } from "../../../../src/server/api-types";
 import { formatHex, formatMB } from "../../format";
 import { Mono } from "../Section";
 
 interface AdaptersTableProps {
   adapters: ProbeAdapter[];
   selected: number | null;
+  cuda: ProbeCuda;
 }
 
-export function AdaptersTable({ adapters, selected }: AdaptersTableProps) {
+/** The CUDA column: the device ordinal, "none" when CUDA lists no device for the LUID, "n/a" when CUDA could not be asked at all. */
+function CudaCell({ adapter, cuda }: { adapter: ProbeAdapter; cuda: ProbeCuda }) {
+  if (cuda.error !== null) {
+    return (
+      <Tooltip title={cuda.error}>
+        <Mono dim>n/a</Mono>
+      </Tooltip>
+    );
+  }
+  return adapter.cudaOrdinal === null ? <Mono dim>none</Mono> : <Mono>device {adapter.cudaOrdinal}</Mono>;
+}
+
+export function AdaptersTable({ adapters, selected, cuda }: AdaptersTableProps) {
   return (
     <TableContainer component={Paper} variant="outlined">
       <Table>
@@ -19,6 +32,7 @@ export function AdaptersTable({ adapters, selected }: AdaptersTableProps) {
             <TableCell>Vendor : device ID</TableCell>
             <TableCell align="right">Dedicated VRAM</TableCell>
             <TableCell>LUID</TableCell>
+            <TableCell>CUDA</TableCell>
             <TableCell>Status</TableCell>
           </TableRow>
         </TableHead>
@@ -37,6 +51,9 @@ export function AdaptersTable({ adapters, selected }: AdaptersTableProps) {
                 <Mono>{adapter.luid}</Mono>
               </TableCell>
               <TableCell>
+                <CudaCell adapter={adapter} cuda={cuda} />
+              </TableCell>
+              <TableCell>
                 <Stack direction="row" spacing={0.5}>
                   {adapter.index === selected ? <Chip label="selected" color="primary" /> : null}
                   {adapter.isNvidia ? <Chip label="NVIDIA" color="success" variant="outlined" /> : null}
@@ -47,7 +64,7 @@ export function AdaptersTable({ adapters, selected }: AdaptersTableProps) {
           ))}
           {adapters.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6}>No display adapters (GPUs) were found.</TableCell>
+              <TableCell colSpan={7}>No display adapters (GPUs) were found.</TableCell>
             </TableRow>
           ) : null}
         </TableBody>

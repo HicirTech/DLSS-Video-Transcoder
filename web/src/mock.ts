@@ -26,6 +26,7 @@ export const MOCK_PROBE: ProbeReport = {
       luid: "0x0000000000011F3A",
       isNvidia: true,
       software: false,
+      cudaOrdinal: 0,
     },
     {
       index: 1,
@@ -36,6 +37,7 @@ export const MOCK_PROBE: ProbeReport = {
       luid: "0x000000000001204C",
       isNvidia: false,
       software: false,
+      cudaOrdinal: null,
     },
     {
       index: 2,
@@ -46,9 +48,19 @@ export const MOCK_PROBE: ProbeReport = {
       luid: "0x0000000000012A11",
       isNvidia: false,
       software: true,
+      cudaOrdinal: null,
     },
   ],
   selectedAdapter: 0,
+  cuda: { deviceCount: 1, error: null },
+  opticalFlow: {
+    status: "ok",
+    detail: "ok",
+    cudaOrdinal: 0,
+    limits: { widthMin: 32, widthMax: 8192, heightMin: 32, heightMax: 8192 },
+    outGridSizes: [1, 2, 4],
+    pipelineGrid: { minSide: 64, maxLongSide: 640 },
+  },
   device: { created: true, hresult: "0x00000000", featureLevel: "D3D_FEATURE_LEVEL_12_2" },
   driver: {
     version: "596.72",

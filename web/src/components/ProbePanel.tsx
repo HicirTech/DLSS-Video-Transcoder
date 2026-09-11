@@ -8,6 +8,7 @@ import { AdaptersTable } from "./probe/AdaptersTable";
 import { DriverCard } from "./probe/DriverCard";
 import { FeaturesTable } from "./probe/FeaturesTable";
 import { ForwarderSection } from "./probe/ForwarderSection";
+import { OpticalFlowCard } from "./probe/OpticalFlowCard";
 import { RawLog } from "./probe/RawLog";
 import { RuntimeFilesTable } from "./probe/RuntimeFilesTable";
 import { VerdictCard } from "./probe/VerdictCard";
@@ -31,8 +32,9 @@ export function ProbePanel({ probe, probing, onProbe }: ProbePanelProps) {
           {probing ? "Probing..." : probe ? "Run probe again" : "Run probe"}
         </Button>
         <Typography variant="body2" color="text.secondary">
-          Checks whether this machine can run DLSS neural rendering: it lists your display adapters (GPUs), creates a
-          Direct3D 12 device, starts NVIDIA&apos;s NGX runtime, and confirms the neural rendering feature and its support
+          Checks whether this machine can run DLSS neural rendering: it lists your display adapters (GPUs), matches the
+          selected one to its CUDA device (jobs require one), reads the hardware optical-flow engine&apos;s limits, creates
+          a Direct3D 12 device, starts NVIDIA&apos;s NGX runtime, and confirms the neural rendering feature and its support
           files are available. Takes a few seconds.
         </Typography>
       </Box>
@@ -54,7 +56,10 @@ export function ProbePanel({ probe, probing, onProbe }: ProbePanelProps) {
           </Typography>
 
           <Section title="Adapters">
-            <AdaptersTable adapters={probe.adapters} selected={probe.selectedAdapter} />
+            <AdaptersTable adapters={probe.adapters} selected={probe.selectedAdapter} cuda={probe.cuda} />
+          </Section>
+          <Section title="CUDA and hardware optical flow">
+            <OpticalFlowCard cuda={probe.cuda} opticalFlow={probe.opticalFlow} />
           </Section>
           <Section title="Driver and NGX core">
             <DriverCard driver={probe.driver} device={probe.device} ngxInit={probe.ngxInit} capabilities={probe.capabilities} />
