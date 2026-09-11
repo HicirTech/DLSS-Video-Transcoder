@@ -24,6 +24,8 @@ export const DUPLICATE_SCENE_SCORE = 0.0005;
 export const RESET_CONFIDENCE = 0.98;
 /** Default long-side resolution the flow is computed at (guides.py:21). */
 export const DEFAULT_FLOW_WIDTH = 640;
+/** Smallest flow-grid side: tiny sources are computed on a grid this large rather than their own size. */
+export const MIN_FLOW_SIDE = 64;
 
 // -- float32 -> float16 (IEEE-754 half) ---------------------------------------
 
@@ -240,13 +242,14 @@ export function sparseSceneScore(current: Uint8Array, previous: Uint8Array, widt
 
 /**
  * Flow-grid dimensions for a render size: the LONG side becomes ~flowWidth, both
- * dims even and >= 64. Scaling by the long side rather than the width keeps a
- * portrait frame from running the flow on a far larger grid than intended.
+ * dims even and >= MIN_FLOW_SIDE. Scaling by the long side rather than the
+ * width keeps a portrait frame from running the flow on a far larger grid than
+ * intended.
  */
 export function flowGridSize(width: number, height: number, flowWidth = DEFAULT_FLOW_WIDTH): { flowW: number; flowH: number } {
   const scale = Math.min(1, flowWidth / Math.max(1, width, height));
-  const flowW = Math.max(64, Math.round((width * scale) / 2) * 2);
-  const flowH = Math.max(64, Math.round((height * scale) / 2) * 2);
+  const flowW = Math.max(MIN_FLOW_SIDE, Math.round((width * scale) / 2) * 2);
+  const flowH = Math.max(MIN_FLOW_SIDE, Math.round((height * scale) / 2) * 2);
   return { flowW, flowH };
 }
 
