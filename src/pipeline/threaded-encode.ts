@@ -24,9 +24,10 @@ export interface ThreadedEncodeParams {
   frameBytes: number;
   /** ffmpeg mux argv after the binary; must read the elementary stream on pipe:0. */
   sinkArgs: string[];
+  /** NVENC settings; `ordinal` is the renderer's CUDA device (GpuSession.cudaOrdinal), so encode and render share one GPU. */
   enc: {
     width: number; height: number; fpsNum: number; fpsDen: number;
-    codec: "h264" | "hevc"; preset?: "p1" | "p2" | "p3" | "p4" | "p5" | "p6" | "p7"; cq?: number; ordinal?: number;
+    codec: "h264" | "hevc"; preset?: "p1" | "p2" | "p3" | "p4" | "p5" | "p6" | "p7"; cq?: number; ordinal: number;
   };
   totalFrames: number | null;
   /** Per-frame guide computed on the main thread (scene cut / motion). */
