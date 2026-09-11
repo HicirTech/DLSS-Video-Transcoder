@@ -8,10 +8,13 @@
 import { mkdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { D3D12Device } from "../native/d3d12.ts";
-import { DxgiFactory, selectAdapter, type DxgiAdapter } from "../native/dxgi.ts";
+import { DxgiFactory, type DxgiAdapter } from "../native/dxgi.ts";
 import { hex32 } from "../native/memory.ts";
 import { parsePe } from "../native/pe.ts";
 import { parseVersionInfo } from "../native/version-info.ts";
+import { DEFAULT_FLOW_WIDTH, MIN_FLOW_SIDE } from "../pipeline/flow.ts";
+import { chooseGpu, gpuCandidates } from "../pipeline/gpu.ts";
+import { probeNvof } from "../pipeline/nvof.ts";
 import { FEATURES, runtimeDllCandidates, type FeatureDescriptor, type FeatureKey } from "./runtime-catalog.ts";
 import type { ProbeAdapter, ProbeFeature, ProbeReport, RuntimeFile } from "../server/api-types.ts";
 import { FeatureCommonInfo, NgxCore, locateNgxCores } from "./core.ts";
@@ -127,11 +130,16 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     trace(line);
   };
   // Blocking failures only. The verdict carries this array, so every line in it
-  // must be a reason neural rendering is NOT ready; advisory notes go to say().
+  // must be a reason a job would not run: openGpu would refuse the adapter (no
+  // CUDA device, not NVIDIA), or feature 18 could not be created. A condition a
+  // job survives by running slower (no hardware optical flow) is advisory and
+  // goes to say().
   const reasons: string[] = [];
   const runtimeDir = resolve(options.runtimeDir);
   const appDataPath = resolve(options.appDataPath);
   mkdirSync(appDataPath, { recursive: true });
+  // What the pipeline feeds NVOFA, so the report can say whether the engine's limits can ever matter.
+  const pipelineGrid = { minSide: MIN_FLOW_SIDE, maxLongSide: DEFAULT_FLOW_WIDTH };
 
   const report: ProbeReport = {
     ok: false,
@@ -139,6 +147,8 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     platform: { os: `${process.platform} ${require("node:os").release()}`, bun: Bun.version },
     adapters: [],
     selectedAdapter: null,
+    cuda: { deviceCount: null, error: null },
+    opticalFlow: { status: "not queried", detail: "no adapter was selected", cudaOrdinal: null, limits: null, outGridSizes: null, pipelineGrid },
     device: { created: false, hresult: null, featureLevel: null },
     driver: { version: driverVersionFromSmi(), ngxCorePath: null, ngxCoreVersion: null, ngxCoreExports: [] },
     ngxInit: { attempted: false, result: null, ok: false },
@@ -154,12 +164,17 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   let factory: DxgiFactory | null = null;
   let adapters: DxgiAdapter[] = [];
   let adapter: DxgiAdapter | null = null;
+  let cudaOrdinal: number | null = null;
   let device: D3D12Device | null = null;
   try {
     trace("CreateDXGIFactory1");
     factory = DxgiFactory.create();
     adapters = factory.enumerate();
-    report.adapters = adapters.map<ProbeAdapter>((a) => ({
+    trace("cuInit + cuDeviceGetLuid per CUDA device");
+    const { candidates, cuda } = gpuCandidates(adapters);
+    report.cuda = { deviceCount: cuda.deviceCount, error: cuda.error };
+    say(cuda.error === null ? `CUDA lists ${cuda.deviceCount} device(s)` : `CUDA could not be queried: ${cuda.error}`);
+    report.adapters = adapters.map<ProbeAdapter>((a, i) => ({
       index: a.info.index,
       name: a.info.name,
       vendorId: a.info.vendorId,
@@ -168,26 +183,21 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
       luid: a.info.luid,
       isNvidia: a.info.isNvidia,
       software: a.info.software,
+      cudaOrdinal: candidates[i]!.cudaOrdinal,
     }));
-    adapter = selectAdapter(adapters, options.adapterIndex);
-    if (!adapter) {
-      // An index the caller chose that does not exist is a different problem from
-      // having no NVIDIA GPU at all, and the report has to say which one it is.
-      const listed = report.adapters.map((a) => `${a.index}: ${a.name}`).join(", ") || "none";
-      reasons.push(
-        options.adapterIndex !== undefined
-          ? `No adapter at index ${options.adapterIndex}. Available adapters: ${listed}.`
-          : "No NVIDIA GPU was found. DLSS requires an NVIDIA RTX GPU.",
-      );
-      say(options.adapterIndex !== undefined ? `no adapter at index ${options.adapterIndex}` : "no NVIDIA adapter");
-    } else {
+    // The same rule a job applies (openGpu), so the verdict here and a refusal
+    // there can never disagree. An ineligible choice is still diagnosed below:
+    // its D3D12 and NGX results are what a user needs to see next to the reason.
+    const choice = chooseGpu(candidates, cuda, options.adapterIndex);
+    for (const reason of choice.reasons) {
+      reasons.push(reason);
+      say(reason);
+    }
+    adapter = choice.index === null ? null : (adapters.find((a) => a.info.index === choice.index) ?? null);
+    cudaOrdinal = choice.cudaOrdinal;
+    if (adapter) {
       report.selectedAdapter = adapter.info.index;
-      say(`selected adapter ${adapter.info.index}: ${adapter.info.name}`);
-      // selectAdapter honours an explicit index without checking the vendor, and
-      // D3D12 will create a device on an Intel or software adapter just fine. NGX
-      // then fails with a bare status code, so name the real problem here.
-      if (!adapter.info.isNvidia)
-        reasons.push(`Adapter ${adapter.info.index} (${adapter.info.name}) is not an NVIDIA GPU, and DLSS runs only on NVIDIA. Re-run without --adapter, or pass the index of an NVIDIA adapter.`);
+      say(`selected adapter ${adapter.info.index}: ${adapter.info.name}${cudaOrdinal === null ? "" : ` (CUDA device ${cudaOrdinal})`}`);
       try {
         trace("D3D12CreateDevice");
         device = D3D12Device.create(adapter, { debugLayer: options.debugLayer });
@@ -200,6 +210,24 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     }
   } catch (error) {
     reasons.push(`Could not list graphics adapters: ${(error as Error).message}`);
+  }
+
+  // --- hardware optical flow ---
+  // Advisory, not a verdict reason: a video job with motion=flow falls back to
+  // the CPU matcher when the engine is missing. It is reported so the fallback
+  // message has a line to point at, and so the engine's limits are on record.
+  if (cudaOrdinal === null) {
+    report.opticalFlow.detail = adapter ? "the selected adapter has no CUDA device to ask on" : "no adapter was selected";
+    say(`hardware optical flow (NVOFA) not queried: ${report.opticalFlow.detail}`);
+  } else {
+    trace(`probeNvof(${cudaOrdinal})`);
+    const caps = probeNvof(cudaOrdinal);
+    report.opticalFlow = { ...caps, cudaOrdinal, pipelineGrid };
+    say(
+      caps.status === "ok"
+        ? `hardware optical flow (NVOFA) on CUDA device ${cudaOrdinal}: input ${caps.limits!.widthMin}..${caps.limits!.widthMax} x ${caps.limits!.heightMin}..${caps.limits!.heightMax} px, output grids ${caps.outGridSizes!.join(", ")}`
+        : `hardware optical flow (NVOFA) unavailable on CUDA device ${cudaOrdinal}: ${caps.detail}`,
+    );
   }
 
   // --- runtime folder ---
@@ -374,15 +402,16 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   // --- verdict ---
   // GetFeatureRequirements returns NotImplemented for every feature on this
   // driver, so it cannot confirm feature 18; readiness is judged on the real
-  // prerequisites instead — the DLL present, a D3D12 device, and a shim that both
-  // loaded and passed its self-test (a loaded-but-broken shim cannot reach the
-  // driver). CreateFeature(18) itself is left to the nr command and the pipeline:
-  // running it in-process can destabilise a long-lived server.
+  // prerequisites instead — an adapter a job would accept (a CUDA device behind
+  // it, as chooseGpu requires), the DLL present, a D3D12 device, and a shim that
+  // both loaded and passed its self-test (a loaded-but-broken shim cannot reach
+  // the driver). CreateFeature(18) itself is left to the nr command and the
+  // pipeline: running it in-process can destabilise a long-lived server.
   // Init belongs here: it runs whenever core and device exist, and leaving it out
   // let the report say YES while listing an Init failure underneath.
   const forwarderOk = report.forwarder.loaded && Boolean(report.forwarder.selfTest?.startsWith("ok"));
   const prerequisites =
-    Boolean(dlssnr?.present) && forwarderOk && report.device.created && core !== null && report.ngxInit.ok;
+    cudaOrdinal !== null && Boolean(dlssnr?.present) && forwarderOk && report.device.created && core !== null && report.ngxInit.ok;
   // Both halves: the prerequisites are what readiness means, and an empty reason
   // list is what makes the verdict and the text under it agree. A failure that
   // pushes a reason without clearing a prerequisite still blocks.
