@@ -217,7 +217,7 @@ export const MOCK_PROBE: ProbeReport = {
     "[00:00.240] runtime folder " + RUNTIME_FOLDER + ": 4 of 5 expected files present",
     "[00:00.241] missing: nvngx_dlssnr.dll",
     "[00:00.266] forwarder ngx_forwarder.dll loaded via bun:ffi, self-test ok",
-    "[00:00.267] NVSDK_NGX_D3D12_Shutdown1 -> Success",
+    "[00:00.267] teardown: D3D12 device released; NGX stays loaded until the process exits (no Shutdown1)",
     "[00:00.268] verdict: neural rendering NOT ready (2 blocking reasons)",
   ],
 };
