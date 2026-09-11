@@ -58,14 +58,34 @@ const SIZE: ScaleSettings = { mode: "size", factor: 1, width: 1280, height: 1872
 const settings = { ...DEFAULT_NR_SETTINGS };
 const safe = (s: string): string => s.replace(/[^\w.-]/g, "_");
 
+/**
+ * Progress lines that say WHERE a row ran — the GPU (adapter, LUID, CUDA
+ * device) and the encode / optical-flow path taken. A hash alone cannot show
+ * that a job picked a different DXGI entry of the same GPU, so each row is
+ * followed by these lines and a baseline diff shows a changed pick.
+ */
+function provenance(): { onProgress: (fraction: number, message: string) => void; print: () => void } {
+  const lines: string[] = [];
+  return {
+    onProgress: (_fraction, message) => {
+      if (/^(GPU: |encode: |optical flow: )/.test(message)) lines.push(message);
+    },
+    print: () => {
+      for (const l of lines) console.log(`    ${l}`);
+    },
+  };
+}
+
 async function imageJob(name: string, engine: "bypass" | "nr" | "sr", scale: ScaleSettings, nr = settings): Promise<void> {
   const output = join(outDir, `img-${safe(name)}.png`);
+  const where = provenance();
   try {
-    await processImage({ input: image, output, engine, scale, settings: nr, runtimeDir });
+    await processImage({ input: image, output, engine, scale, settings: nr, runtimeDir, onProgress: where.onProgress });
     line(`image ${name}`, 0, `sha=${await sha(output)} bytes=${statSync(output).size}`);
   } catch (error) {
     line(`image ${name}`, 1, `error="${(error as Error).message.slice(0, 90)}"`);
   }
+  where.print();
 }
 
 async function videoJob(
@@ -76,8 +96,9 @@ async function videoJob(
   encode: EncodeSettings,
 ): Promise<void> {
   const output = join(outDir, `vid-${safe(name)}.${encode.container}`);
+  const where = provenance();
   try {
-    const r = await processVideo({ input: clip, output, engine, motion, scale, settings, encode, runtimeDir });
+    const r = await processVideo({ input: clip, output, engine, motion, scale, settings, encode, runtimeDir, onProgress: where.onProgress });
     // libx265 schedules frame-parallel threads non-deterministically, so its
     // bitstream differs run to run on identical input. Everything else here is
     // reproducible, so only this one reports structure instead of a hash.
@@ -86,6 +107,7 @@ async function videoJob(
   } catch (error) {
     line(`video ${name}`, 1, `error="${(error as Error).message.slice(0, 90)}"`);
   }
+  where.print();
 }
 
 for (const engine of ["bypass", "nr", "sr"] as const) {
