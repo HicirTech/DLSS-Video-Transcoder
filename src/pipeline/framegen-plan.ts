@@ -16,6 +16,15 @@
  */
 import { parseRational, type Rational, ratAbs, ratAdd, ratCeil, ratCmp, ratDiv, ratMul, ratSub, rational } from "./rational.ts";
 
+/**
+ * The CUDA device frame generation's NVENC and NVOFA workers run on. Frame
+ * generation has no adapter selection: NVIDIA's dlssg-worker.exe always takes
+ * the default device (README, "Shared options"), so its helpers follow it to
+ * CUDA's first device rather than resolving an adapter of their own. The
+ * other pipelines resolve theirs by LUID (GpuSession.cudaOrdinal).
+ */
+export const FRAMEGEN_CUDA_DEVICE = 0;
+
 // ---------------------------------------------------------------------------
 // Target rates
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@
  * as SharedArrayBuffer-backed RGBA, so posting them costs nothing; display
  * order holds because every request is appended to a single promise chain.
  */
+import { FRAMEGEN_CUDA_DEVICE } from "../framegen-plan.ts";
 import { NvencEncoder, probeNvencCaps, type NvencSdkCodec } from "../nvenc.ts";
 
 interface OpenMsg {
@@ -19,8 +20,8 @@ interface OpenMsg {
   nvencArgs: string[];
   /** ffmpeg argv for the rawvideo path (ffmpeg does the encoding). */
   rawArgs: string[];
-  /** NVENC configuration, or null when the codec has no NVENC equivalent. */
-  nvenc: { width: number; height: number; fpsNum: number; fpsDen: number; codec: NvencSdkCodec; cq: number; ordinal?: number } | null;
+  /** NVENC configuration, or null when the codec has no NVENC equivalent. The device is FRAMEGEN_CUDA_DEVICE. */
+  nvenc: { width: number; height: number; fpsNum: number; fpsDen: number; codec: NvencSdkCodec; cq: number } | null;
 }
 interface FrameMsg {
   type: "frame";
@@ -56,9 +57,9 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
   if (m.type === "open") {
     try {
       let note = "";
-      if (m.nvenc && probeNvencCaps(m.nvenc.ordinal ?? 0).available) {
+      if (m.nvenc && probeNvencCaps(FRAMEGEN_CUDA_DEVICE).available) {
         try {
-          enc = NvencEncoder.open({ ...m.nvenc, preset: "p5" });
+          enc = NvencEncoder.open({ ...m.nvenc, ordinal: FRAMEGEN_CUDA_DEVICE, preset: "p5" });
           note = `encode: NVENC ${m.nvenc.codec} (GPU, mux-only pipe, encode thread)`;
         } catch (error) {
           enc = null;
