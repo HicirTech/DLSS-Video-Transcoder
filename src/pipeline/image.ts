@@ -5,7 +5,7 @@ import { basename, dirname, extname, join } from "node:path";
 import { decodePng, encodePng, isPng } from "../codec/png.ts";
 import type { EngineKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { createEngine } from "./engine.ts";
-import { openGpu } from "./gpu.ts";
+import { describeGpu, openGpu } from "./gpu.ts";
 import { evenSize, resizeRgba } from "./resize.ts";
 
 export interface ImageJobOptions {
@@ -71,6 +71,7 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
   const working = upscaling ? decoded.rgba : resizeRgba(decoded.rgba, decoded.width, decoded.height, target.width, target.height);
 
   const session = openGpu({ adapterIndex: options.adapterIndex, debugLayer: options.debugLayer });
+  progress(0.1, describeGpu(session));
   let passes = 0;
   let result: Uint8Array;
   try {
