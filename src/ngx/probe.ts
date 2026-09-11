@@ -419,17 +419,15 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   report.ok = report.device.created && core !== null;
 
   // --- teardown ---
-  // The driver's _nvngx.dll core releases the device inside Shutdown1, so a
-  // second ID3D12Device::Release() double-frees it (a fault at a hooked vtable
-  // slot). Release the device ourselves only when NGX never initialised.
-  const ngxWasInitialised = core?.isInitialised ?? false;
-  try {
-    trace("NVSDK_NGX_D3D12_Shutdown1");
-    core?.shutdown();
-  } catch {
-    /* ignore */
-  }
-  if (!ngxWasInitialised) device?.release();
+  // Never Shutdown1 here. On this driver core it releases the D3D12 device
+  // itself and leaves D3D12 unable to make another on the same adapter: the next
+  // D3D12CreateDevice in the process faults inside D3D12Core (measured — a
+  // second runProbe, or a job after a probe, died there, which is what the
+  // server does per /api/probe request; issue #75). sr.ts and nr-render.ts
+  // leave NGX to process exit for the same reason, so the probe does too and
+  // releases only what it owns. Measured: three consecutive probes in one
+  // process then each get a fresh device.
+  device?.release();
   for (const a of adapters) a.release();
   factory?.release();
   return report;
