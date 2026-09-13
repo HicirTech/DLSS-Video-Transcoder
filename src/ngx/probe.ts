@@ -13,7 +13,7 @@ import { hex32 } from "../native/memory.ts";
 import { parsePe } from "../native/pe.ts";
 import { parseVersionInfo } from "../native/version-info.ts";
 import { DEFAULT_FLOW_WIDTH, MIN_FLOW_SIDE } from "../pipeline/flow.ts";
-import { chooseGpu, gpuCandidates } from "../pipeline/gpu.ts";
+import { chooseGpu, gpuCandidates, isEligibleGpu } from "../pipeline/gpu.ts";
 import { probeNvof } from "../pipeline/nvof.ts";
 import { FEATURES, runtimeDllCandidates, type FeatureDescriptor, type FeatureKey } from "./runtime-catalog.ts";
 import type { ProbeAdapter, ProbeFeature, ProbeReport, RuntimeFile } from "../server/api-types.ts";
@@ -185,6 +185,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
       software: a.info.software,
       cudaOrdinal: candidates[i]!.cudaOrdinal,
       cudaUuid: candidates[i]!.cudaUuid,
+      eligible: isEligibleGpu(candidates[i]!),
     }));
     // The same rule a job applies (openGpu), so the verdict here and a refusal
     // there can never disagree. An ineligible choice is still diagnosed below:
