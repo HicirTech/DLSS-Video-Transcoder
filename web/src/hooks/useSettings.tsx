@@ -6,6 +6,7 @@ import {
   DEFAULT_SCALE_SETTINGS,
   ENCODE_CODECS,
   ENCODE_CONTAINERS,
+  NR_INTENSITY_EFFECTIVE_MAX,
   NR_PRESETS,
   NR_STYLES,
   SCALE_MODES,
@@ -87,7 +88,8 @@ export function loadSettings(raw: string | null): StoredSettings {
       ...nr,
       preset: pick(nr.preset, NR_PRESETS, defaults.nr.preset),
       style: pick(nr.style, NR_STYLES, defaults.nr.style),
-      intensity: clamp(nr.intensity, "intensity", defaults.nr.intensity),
+      // The slider ends at the effective maximum, so a value stored by the older 0..2 slider is brought into its range.
+      intensity: Math.min(NR_INTENSITY_EFFECTIVE_MAX, clamp(nr.intensity, "intensity", defaults.nr.intensity)),
       localTone: clamp(nr.localTone, "localTone", defaults.nr.localTone),
       localStructure: clamp(nr.localStructure, "localStructure", defaults.nr.localStructure),
       skinStructure: clamp(nr.skinStructure, "skinStructure", defaults.nr.skinStructure),
