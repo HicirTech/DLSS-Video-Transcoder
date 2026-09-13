@@ -13,9 +13,8 @@ with a **React + Material UI** web front end. DLSS runtimes are version-switchab
 ![DLSS Neural Rendering parameter matrix — style vs. intensity](docs/images/nr-matrix.png)
 
 <sub>Rows top→bottom: style Default / Natural / Cinematic. Columns left→right: intensity 0.0 / 0.5 /
-1.0 (0.0 = original). NR model preset (0–3) is also adjustable, but it is an experimental,
-content-dependent hint (per the reference) — Default is recommended and it showed no visible change on
-this photo.</sub>
+1.0 (0.0 = original). The NR model preset (0–3) is accepted by the API but the installed runtime
+ignores it (measured: every value gives the same image), so the UI shows it disabled.</sub>
 
 > **Status (2026-09-09).** Runs on the project's RTX 5090. The **web UI** covers the whole pipeline —
 > SR upscaling, Neural Rendering, Frame Generation, DLSS version selection and browser upload — and the
@@ -84,7 +83,7 @@ Shared options, and which commands take them:
   NVIDIA adapter with the most VRAM **that has a CUDA device behind it**; DXGI can list one GPU several
   times (this machine shows three "RTX 5090" entries) and only one entry has CUDA. DXGI indices can
   change between runs, so take the index from a `probe` in the same session; an adapter without a CUDA
-  device is refused with the ones that have one, LUIDs included. Frame generation has no adapter
+  device is refused with the ones that have one, LUIDs and CUDA UUIDs included. Frame generation has no adapter
   selection: it runs in NVIDIA's `dlssg-worker.exe`, which always takes the default device, and its
   NVENC/NVOFA helpers follow it to CUDA device 0.
 - `--runtime DIR` (default `<repo>/runtime`) — `probe`, `sr`, `nr`, `fg`, `versions`. `forwarder`
@@ -142,7 +141,10 @@ Resolution upscaling to the chosen output size), `nr` (DLSS Neural Rendering enh
 version selection** per feature; **browser file upload** for the input; a live job queue with
 WebSocket progress; a before/after compare view; a hardware/runtime **probe** panel; and encode
 settings for video (codec incl. NVENC, quality 0–51 with 18 as default, container mp4/mkv/mov, audio).
-Optical-flow motion can be enabled for video.
+Optical-flow motion can be enabled for video. The **Settings** tab picks the GPU image and video jobs
+run on, from the adapters the last probe found eligible; the choice is stored by the CUDA device
+UUID (nvidia-smi's `GPU-…`), which survives reboots where a DXGI index or LUID does not. Frame
+generation ignores it and always uses the default device.
 
 **Image tab** — choose an engine (SR upscale / Neural Rendering / bypass), a DLSS version, the output
 size and the look controls:
@@ -166,11 +168,13 @@ driver, NGX core, runtime DLLs, caller-shim self-test):
   qualify, and `probe` reports "not ready" for it. The ffmpeg NVENC fallback (rawvideo path) is
   pinned to the same CUDA device with `-gpu`. Frame generation always uses CUDA device 0 (see
   `--adapter`).
-- The `nr` engine exposes the reference project's controls — **model preset**, **style**, **intensity**
-  (0–2), **local tone** (0–2), **local structure** (0–2) and **skin structure** (-1–2, -1 = runtime
-  default, skin only). Style and the strength sliders have a strong, visible effect; **model preset**
-  (0–3) is an experimental, content-dependent hint (Default recommended); **global tone** is not
-  applied by the current runtime.
+- The `nr` engine exposes the reference project's controls — **style**, **intensity**, **local tone**
+  (0–2), **local structure** (0–2), **auto mask**, plus **model preset** (0–3) and **skin structure**
+  (-1–2). Style, intensity, local tone, local structure and auto mask have a visible effect; the
+  installed `nvngx_dlssnr.dll` 310.8.2.0 ignores model preset, skin structure and UI correction
+  (measured with `tests/diag-nr-settings.ts`: every value gives the same image), so the UI shows
+  the first two disabled and does not offer UI correction (the CLI flag stays). Intensity is
+  effective up to 1: the slider ends there, the API still accepts up to 2.
 - **DLSS version selection**: the picker defaults to the bundled DLL. Loading an alternate (not
   driver-matched) DLSS DLL can intermittently fail to initialise on newer drivers (a known
   DLSS-Swapper behaviour); the job then reports a clear error and you can retry or pick another.
@@ -196,8 +200,10 @@ All JSON unless noted. Base is same-origin.
 
 `JobRequest`: `{ kind: "image"|"video", input, output?, engine: "sr"|"nr"|"bypass",
 motion: "none"|"flow", settings, scale, encode?, frameGen?: { targetFps?, multiplier?, engine? },
-dllDir? }`. A submitted `output` must be absolute and inside the app-data folder, the runtime folder
-or the input's own directory. Payload shapes are defined in
+dllDir?, adapterUuid? }`. `adapterUuid` is a CUDA device UUID as `GET /api/probe` lists it per
+adapter (`GPU-…`); image and video jobs only, rejected together with `frameGen`. A submitted
+`output` must be absolute and inside the app-data folder, the runtime folder or the input's own
+directory. Payload shapes are defined in
 [`src/server/api-types.ts`](src/server/api-types.ts).
 
 ## Runtime folder
