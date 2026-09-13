@@ -25,19 +25,16 @@ describe("encode-select", () => {
     expect(preferredDefaultCodec(false)).toBe("h264");
   });
 
-  test("buildNvencProbeArgs builds the one-frame lavfi null encode", () => {
-    expect(buildNvencProbeArgs("h264_nvenc")).toEqual([
+  test("buildNvencProbeArgs builds the one-frame lavfi null encode on the given CUDA device", () => {
+    expect(buildNvencProbeArgs("h264_nvenc", 0)).toEqual([
       "-v", "error", "-f", "lavfi", "-i", "color=size=256x256:rate=1",
-      "-frames:v", "1", "-c:v", "h264_nvenc", "-f", "null", "-",
+      "-frames:v", "1", "-c:v", "h264_nvenc", "-gpu", "0", "-f", "null", "-",
     ]);
-    // Ordinal 0 is a real GPU index, not "unset", so it must still be emitted.
-    expect(buildNvencProbeArgs("av1_nvenc", 0)).toContain("-gpu");
     const pinned = buildNvencProbeArgs("hevc_nvenc", 1);
     expect(pinned.slice(pinned.indexOf("-gpu"), pinned.indexOf("-gpu") + 2)).toEqual(["-gpu", "1"]);
   });
 
   test("nvencGpuArgs is the one place -gpu comes from, and ordinal 0 is a real device", () => {
-    expect(nvencGpuArgs(undefined)).toEqual([]);
     expect(nvencGpuArgs(0)).toEqual(["-gpu", "0"]);
     expect(nvencGpuArgs(3)).toEqual(["-gpu", "3"]);
   });
@@ -54,13 +51,13 @@ describe("encode-select", () => {
 
   test("resolveEncodeCodec passes CPU codecs through without probing", () => {
     // A CPU codec returns as-is and never spawns ffmpeg, so a bogus path is fine.
-    expect(resolveEncodeCodec("h264", "C:/nonexistent/ffmpeg.exe")).toEqual({ codec: "h264", note: null });
-    expect(resolveEncodeCodec("av1", "C:/nonexistent/ffmpeg.exe")).toEqual({ codec: "av1", note: null });
+    expect(resolveEncodeCodec("h264", "C:/nonexistent/ffmpeg.exe", 0)).toEqual({ codec: "h264", note: null });
+    expect(resolveEncodeCodec("av1", "C:/nonexistent/ffmpeg.exe", 0)).toEqual({ codec: "av1", note: null });
   });
 
   test("resolveEncodeCodec falls back to the CPU sibling when the NVENC probe cannot run", () => {
     // A bogus ffmpeg path makes the probe throw/fail, exercising the fallback branch.
-    const resolved = resolveEncodeCodec("hevc_nvenc", "C:/nonexistent/ffmpeg.exe");
+    const resolved = resolveEncodeCodec("hevc_nvenc", "C:/nonexistent/ffmpeg.exe", 0);
     expect(resolved.codec).toBe("hevc");
     expect(resolved.note).toContain("hevc_nvenc");
   });

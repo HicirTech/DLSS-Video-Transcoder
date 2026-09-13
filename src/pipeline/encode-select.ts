@@ -39,11 +39,13 @@ export function preferredDefaultCodec(nvencAvailable: boolean): Codec {
 /**
  * The argv that pins an ffmpeg NVENC encoder to a CUDA device. `gpu` is a CUDA
  * device ordinal (ffmpeg's -gpu counts CUDA devices), never a DXGI adapter
- * index: callers pass GpuSession.cudaOrdinal. Shared by the availability probe
- * and the encode argv so the two can never name different devices.
+ * index: video jobs pass GpuSession.cudaOrdinal, frame generation
+ * FRAMEGEN_CUDA_DEVICE. Shared by the availability probe and the encode argv so
+ * the two can never name different devices; there is no unpinned form, since a
+ * CUDA device is a requirement of every job.
  */
-export function nvencGpuArgs(gpu: number | undefined): string[] {
-  return gpu === undefined ? [] : ["-gpu", String(gpu)];
+export function nvencGpuArgs(gpu: number): string[] {
+  return ["-gpu", String(gpu)];
 }
 
 /**
@@ -52,7 +54,7 @@ export function nvencGpuArgs(gpu: number | undefined): string[] {
  * `-encoders` listing the name. 256x256 only proves the encoder exists — the
  * per-codec size caps are checked separately in video.ts. Success == exit 0.
  */
-export function buildNvencProbeArgs(codec: FfmpegNvencEncoder, gpu?: number): string[] {
+export function buildNvencProbeArgs(codec: FfmpegNvencEncoder, gpu: number): string[] {
   return ["-v", "error", "-f", "lavfi", "-i", "color=size=256x256:rate=1", "-frames:v", "1", "-c:v", codec, ...nvencGpuArgs(gpu), "-f", "null", "-"];
 }
 
@@ -61,7 +63,7 @@ export function buildNvencProbeArgs(codec: FfmpegNvencEncoder, gpu?: number): st
  * Named for the mechanism because nvenc.ts has its own probeNvencCaps that asks
  * the SDK directly over FFI; this one spawns ffmpeg, synchronously.
  */
-export function probeNvencViaFfmpeg(ffmpeg: string, codec: FfmpegNvencEncoder, gpu?: number): boolean {
+export function probeNvencViaFfmpeg(ffmpeg: string, codec: FfmpegNvencEncoder, gpu: number): boolean {
   try {
     const proc = Bun.spawnSync([ffmpeg, ...buildNvencProbeArgs(codec, gpu)], { stdout: "ignore", stderr: "ignore" });
     return proc.exitCode === 0;
@@ -82,7 +84,7 @@ export interface ResolvedCodec {
  * probe run succeeds here and now. The probe costs one ffmpeg spawn per call,
  * so callers resolve once per job and pass the result down.
  */
-export function resolveEncodeCodec(codec: Codec, ffmpeg: string, gpu?: number): ResolvedCodec {
+export function resolveEncodeCodec(codec: Codec, ffmpeg: string, gpu: number): ResolvedCodec {
   if (!isNvenc(codec)) return { codec, note: null };
   if (probeNvencViaFfmpeg(ffmpeg, codec, gpu)) return { codec, note: null };
   const cpu = cpuSiblingCodec(codec);
