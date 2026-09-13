@@ -93,6 +93,8 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
       encode: settings.encode,
     };
     if (frameGenOn) request.frameGen = { targetFps, engine: fgEngine };
+    // Frame generation runs on the default device (dlssg-worker.exe), so the stored GPU choice is left off it.
+    else if (settings.adapterUuid) request.adapterUuid = settings.adapterUuid;
     if (usesDlss && dllDir !== "") request.dllDir = dllDir;
     if (output.trim() !== "") request.output = output.trim();
     void runner.submit(request);

@@ -17,6 +17,12 @@ export interface StoredSettings {
   nr: NrSettings;
   scale: ScaleSettings;
   encode: EncodeSettings;
+  /**
+   * The GPU image and video jobs run on, as its CUDA device UUID from the probe
+   * (JobRequest.adapterUuid); null = the server's automatic choice. A UUID
+   * because it is the one name for a GPU that survives a reboot.
+   */
+  adapterUuid: string | null;
 }
 
 export const STORAGE_KEY = "neural-render.settings.v1";
@@ -26,6 +32,7 @@ export function defaultSettings(): StoredSettings {
     nr: { ...DEFAULT_NR_SETTINGS },
     scale: { ...DEFAULT_SCALE_SETTINGS },
     encode: { ...DEFAULT_ENCODE_SETTINGS },
+    adapterUuid: null,
   };
 }
 
@@ -101,6 +108,7 @@ export function loadSettings(raw: string | null): StoredSettings {
       container: pick(encode.container, ENCODE_CONTAINERS, defaults.encode.container),
       quality: clamp(encode.quality, "quality", defaults.encode.quality),
     },
+    adapterUuid: typeof parsed.adapterUuid === "string" && parsed.adapterUuid !== "" ? parsed.adapterUuid : null,
   };
 }
 
@@ -125,6 +133,7 @@ export interface SettingsStore {
   setNr(nr: NrSettings): void;
   setScale(scale: ScaleSettings): void;
   setEncode(encode: EncodeSettings): void;
+  setAdapterUuid(adapterUuid: string | null): void;
   replaceAll(next: StoredSettings): void;
   /** Back to the DEFAULT_* constants of the API contract. */
   reset(): void;
@@ -145,6 +154,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setNr: (nr) => setSettings((current) => ({ ...current, nr })),
       setScale: (scale) => setSettings((current) => ({ ...current, scale })),
       setEncode: (encode) => setSettings((current) => ({ ...current, encode })),
+      setAdapterUuid: (adapterUuid) => setSettings((current) => ({ ...current, adapterUuid })),
       replaceAll: (next) => setSettings(next),
       reset: () => setSettings(defaultSettings()),
     }),

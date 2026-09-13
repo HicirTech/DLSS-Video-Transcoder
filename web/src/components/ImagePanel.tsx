@@ -44,6 +44,7 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
       scale: settings.scale,
     };
     if (usesDlss && dllDir !== "") request.dllDir = dllDir;
+    if (settings.adapterUuid) request.adapterUuid = settings.adapterUuid;
     if (output.trim() !== "") request.output = output.trim();
     void runner.submit(request);
   };
