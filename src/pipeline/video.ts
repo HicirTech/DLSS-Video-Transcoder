@@ -31,7 +31,9 @@ export interface VideoJobOptions {
   scale: ScaleSettings;
   settings: NrSettings;
   encode?: EncodeSettings;
+  /** One of the two, never both: see GpuOptions. */
   adapterIndex?: number;
+  adapterUuid?: string;
   debugLayer?: boolean;
   runtimeDir?: string;
   /** Specific DLSS DLL folder to load (version switching); defaults to the runtime feature folder. */
@@ -357,7 +359,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const renderHeight = upscaling ? info.height : target.height;
   progress(0, `source ${info.width}x${info.height}${info.displayAspect ? ` (non-square pixels, display ${info.displayAspect.num}:${info.displayAspect.den})` : ""} ${info.codec} ${info.fpsText} fps, ${info.frames ?? "?"} frames; ${upscaling ? `upscaling to ${target.width}x${target.height}` : `working size ${target.width}x${target.height}`}`);
 
-  const session = openGpu({ adapterIndex: options.adapterIndex, debugLayer: options.debugLayer });
+  const session = openGpu({ adapterIndex: options.adapterIndex, adapterUuid: options.adapterUuid, debugLayer: options.debugLayer });
   progress(0, describeGpu(session));
   // session.cudaOrdinal, not adapterIndex: see GpuSession.cudaOrdinal. Every
   // CUDA user below (ffmpeg's -gpu, in-process NVENC, NVOFA) takes this one.
