@@ -37,19 +37,23 @@ export function preferredDefaultCodec(nvencAvailable: boolean): Codec {
 }
 
 /**
+ * The argv that pins an ffmpeg NVENC encoder to a CUDA device. `gpu` is a CUDA
+ * device ordinal (ffmpeg's -gpu counts CUDA devices), never a DXGI adapter
+ * index: callers pass GpuSession.cudaOrdinal. Shared by the availability probe
+ * and the encode argv so the two can never name different devices.
+ */
+export function nvencGpuArgs(gpu: number | undefined): string[] {
+  return gpu === undefined ? [] : ["-gpu", String(gpu)];
+}
+
+/**
  * ffmpeg args for a one-frame lavfi encode to `-f null`. The probe has to
  * actually encode: NVENC failures surface at session open, not from
  * `-encoders` listing the name. 256x256 only proves the encoder exists — the
  * per-codec size caps are checked separately in video.ts. Success == exit 0.
- *
- * `gpu` is a CUDA device ordinal (ffmpeg's -gpu counts CUDA devices), never a
- * DXGI adapter index: callers pass GpuSession.cudaOrdinal.
  */
 export function buildNvencProbeArgs(codec: FfmpegNvencEncoder, gpu?: number): string[] {
-  const args = ["-v", "error", "-f", "lavfi", "-i", "color=size=256x256:rate=1", "-frames:v", "1", "-c:v", codec];
-  if (gpu !== undefined) args.push("-gpu", String(gpu));
-  args.push("-f", "null", "-");
-  return args;
+  return ["-v", "error", "-f", "lavfi", "-i", "color=size=256x256:rate=1", "-frames:v", "1", "-c:v", codec, ...nvencGpuArgs(gpu), "-f", "null", "-"];
 }
 
 /**
