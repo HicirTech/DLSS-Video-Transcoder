@@ -18,7 +18,13 @@ function CudaCell({ adapter, cuda }: { adapter: ProbeAdapter; cuda: ProbeCuda })
       </Tooltip>
     );
   }
-  return adapter.cudaOrdinal === null ? <Mono dim>none</Mono> : <Mono>device {adapter.cudaOrdinal}</Mono>;
+  if (adapter.cudaOrdinal === null) return <Mono dim>none</Mono>;
+  return (
+    <Mono>
+      device {adapter.cudaOrdinal}
+      {adapter.cudaUuid ? <> ({adapter.cudaUuid})</> : null}
+    </Mono>
+  );
 }
 
 export function AdaptersTable({ adapters, selected, cuda }: AdaptersTableProps) {
