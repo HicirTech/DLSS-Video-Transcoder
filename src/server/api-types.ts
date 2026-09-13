@@ -171,6 +171,13 @@ export interface JobRequest {
    * omit to use the bundled runtime DLL. Applies to the sr and nr engines.
    */
   dllDir?: string;
+  /**
+   * The GPU to run on, as the CUDA device UUID GET /api/probe lists per adapter
+   * (ProbeAdapter.cudaUuid); omit for the automatic choice (the NVIDIA adapter
+   * with the most VRAM that has a CUDA device). Image and video jobs only:
+   * frame generation always runs on the default device, so it rejects this.
+   */
+  adapterUuid?: string;
 }
 
 export type JobState = "queued" | "running" | "done" | "failed" | "cancelled";
@@ -211,6 +218,13 @@ export interface ProbeAdapter {
    * ProbeReport.cuda.error). Jobs run only on an adapter with one.
    */
   cudaOrdinal: number | null;
+  /**
+   * That CUDA device's UUID, as nvidia-smi prints it ("GPU-524e8373-..."); null
+   * alongside a null ordinal. The stable name for a GPU: DXGI indices change
+   * between runs and Windows reissues LUIDs at every boot, so this is what
+   * JobRequest.adapterUuid stores.
+   */
+  cudaUuid: string | null;
 }
 
 /** The CUDA driver's side of the adapter list. */
