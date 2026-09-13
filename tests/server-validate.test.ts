@@ -87,6 +87,20 @@ describe("validateJobRequest", () => {
     expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS, container: "avi" } }))).toMatch(/encode\.container must be one of mp4, mkv, mov/);
   });
 
+  test("accepts a CUDA device UUID in nvidia-smi's form and rejects anything else", () => {
+    const uuid = "GPU-524e8373-5fe1-44b3-c0aa-cdbe917e7ed2";
+    expect(validateJobRequest(request({ adapterUuid: uuid }))).toBeNull();
+    for (const bad of ["gpu-524e8373-5fe1-44b3-c0aa-cdbe917e7ed2", "524e8373-5fe1-44b3-c0aa-cdbe917e7ed2", "GPU-524e837-5fe1-44b3-c0aa-cdbe917e7ed2", "0", 7]) {
+      expect(validateJobRequest(request({ adapterUuid: bad }))).toMatch(/adapterUuid must be a CUDA device UUID/);
+    }
+  });
+
+  test("a GPU choice cannot ride along with frame generation, which runs on the default device", () => {
+    const uuid = "GPU-524e8373-5fe1-44b3-c0aa-cdbe917e7ed2";
+    expect(validateJobRequest(request({ kind: "video", frameGen: { targetFps: "120" }, adapterUuid: uuid }))).toMatch(/does not apply to frame generation/);
+    expect(validateJobRequest(request({ kind: "video", frameGen: { targetFps: "120" } }))).toBeNull();
+  });
+
   test("rejects non-boolean flags", () => {
     expect(validateJobRequest(request({ settings: { ...DEFAULT_NR_SETTINGS, autoMask: "yes" } }))).toMatch(/settings\.autoMask must be true or false/);
   });
