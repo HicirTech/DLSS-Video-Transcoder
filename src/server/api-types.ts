@@ -19,7 +19,6 @@
 
 export type EngineKind = "bypass" | "nr" | "sr";
 export type MotionKind = "none" | "flow";
-export type NrPath = "auto" | "core" | "snippet";
 
 /**
  * DLSS 5 Neural Rendering controls (NGX feature 18). Feature 18 enhances an image at the same
@@ -50,8 +49,6 @@ export interface NrSettings {
   autoMask: boolean;
   /** Protect overlays / text / sharp UI edges from being re-rendered. */
   uiCorrection: boolean;
-  /** Which NGX entry drives feature 18: the driver core, the standalone DLL ("snippet"), or auto. */
-  nrPath: NrPath;
   /** Extra evaluations of the first frame so the temporal state settles (images use this). */
   warmupFrames: number;
 }
@@ -66,7 +63,6 @@ export const DEFAULT_NR_SETTINGS: NrSettings = {
   globalTone: null,
   autoMask: false,
   uiCorrection: false,
-  nrPath: "auto",
   warmupFrames: 4,
 };
 
@@ -115,7 +111,6 @@ export const NR_INTENSITY_EFFECTIVE_MAX = 1;
 
 export const NR_PRESETS = [0, 1, 2, 3] as const;
 export const NR_STYLES = [0, 1, 2] as const;
-export const NR_PATHS = ["auto", "core", "snippet"] as const;
 export const SCALE_MODES = ["none", "factor", "size"] as const;
 export const ENCODE_CODECS = ["h264", "hevc", "av1", "h264_nvenc", "hevc_nvenc", "av1_nvenc"] as const;
 export const ENCODE_CONTAINERS = ["mp4", "mkv", "mov"] as const;
