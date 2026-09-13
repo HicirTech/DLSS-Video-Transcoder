@@ -78,11 +78,9 @@ export function resizePlane(src: Uint8Array, srcWidth: number, srcHeight: number
 }
 
 /**
- * The alpha plane of an RGBA8 frame, and the same frame with alpha forced to
- * 255. The neural engines are defined on colour: DLSS SR resamples a fourth
- * channel like colour and feature 18 writes 255 into it (both measured), so a
- * transparent source keeps its transparency only if alpha never enters the
- * network and is re-attached afterwards (attachAlpha). `rgba` is not modified.
+ * The alpha plane of an RGBA8 frame, and a copy of the frame with alpha forced
+ * to 255; the inverse is attachAlpha. `rgba` is not modified. Why a still is
+ * split around the neural engines is enhanceStill's (image.ts) to say.
  */
 export function splitAlpha(rgba: Uint8Array): { colour: Uint8Array; alpha: Uint8Array } {
   const pixels = rgba.byteLength >> 2;
