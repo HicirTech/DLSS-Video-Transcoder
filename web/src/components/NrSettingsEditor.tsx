@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { Box, FormControl, FormControlLabel, InputLabel, MenuItem, Select, Stack, Switch, Typography } from "@mui/material";
-import { NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, type NrSettings, nrSettingIgnored, SETTING_RANGES } from "../../../src/server/api-types";
+import { DEFAULT_NR_SETTINGS, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, type NrSettings, nrSettingIgnored, SETTING_RANGES } from "../../../src/server/api-types";
 import { SliderRow } from "./SliderRow";
 
 interface NrSettingsEditorProps {
@@ -9,7 +9,15 @@ interface NrSettingsEditorProps {
 }
 
 const NEUTRAL_MARKS = [{ value: 0 }, { value: 1, label: "default" }, { value: 2 }];
-const INTENSITY_MARKS = [{ value: 0 }, { value: NR_INTENSITY_EFFECTIVE_MAX, label: "default" }];
+const INTENSITY_MARKS = [{ value: 0 }, { value: DEFAULT_NR_SETTINGS.intensity, label: "default" }];
+
+/** The controls this editor shows that the installed runtime ignores, named as the UI labels them; empty once the runtime honours them. */
+const DISABLED_HERE = (
+  [
+    ["preset", "Model preset"],
+    ["skinStructure", "Skin structure"],
+  ] as const
+).filter(([key]) => nrSettingIgnored(key)).map(([, label]) => label);
 const SKIN_MARKS = [{ value: -1, label: "default" }, { value: 0 }, { value: 1, label: "neutral" }, { value: 2 }];
 
 function formatSkin(value: number): string {
@@ -19,9 +27,10 @@ function formatSkin(value: number): string {
 /**
  * Look controls for DLSS neural rendering (feature 18): style, model preset and the strength
  * sliders. `warmupFrames` is edited in the Settings tab. A control the installed runtime
- * ignores (nrSettingIgnored, measured) is shown disabled rather than hidden, so re-enabling it
- * after a runtime update is a change to that list alone; UI correction has no counterpart in
- * the reference tool and is not offered here at all.
+ * ignores (nrSettingIgnored, measured) is shown disabled rather than hidden, and the caption
+ * that says so is built from the same list, so re-enabling it after a runtime update is a
+ * change to NR_SETTINGS_IGNORED_BY_RUNTIME alone; UI correction has no counterpart in the
+ * reference tool and is not offered here at all.
  */
 export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
   // useId, not a constant: every tab stays mounted, so two panels can render
@@ -64,8 +73,8 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
             </FormControl>
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-            Style sets the overall look (strong effect). Model preset and skin structure are disabled because{" "}
-            {NR_IGNORED_NOTE}.
+            Style sets the overall look (strong effect).
+            {DISABLED_HERE.length ? ` ${DISABLED_HERE.join(" and ")} ${DISABLED_HERE.length === 1 ? "is" : "are"} disabled: ${NR_IGNORED_NOTE}.` : null}
           </Typography>
         </Box>
 
@@ -87,7 +96,7 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
           min={0}
           max={NR_INTENSITY_EFFECTIVE_MAX}
           marks={INTENSITY_MARKS}
-          hint={`Overall neural-rendering strength. 0 = original, ${NR_INTENSITY_EFFECTIVE_MAX} = default and also the most the installed runtime responds to; the API still accepts up to ${SETTING_RANGES.intensity.max}.`}
+          hint={`Overall neural-rendering strength. 0 = original, ${DEFAULT_NR_SETTINGS.intensity} = default; the slider ends at ${NR_INTENSITY_EFFECTIVE_MAX}, the most the installed runtime responds to, while the API still accepts up to ${SETTING_RANGES.intensity.max}.`}
           onChange={(intensity) => update({ intensity })}
         />
         <SliderRow
@@ -116,7 +125,7 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
           marks={SKIN_MARKS}
           format={formatSkin}
           disabled={nrSettingIgnored("skinStructure")}
-          hint="Detail strength on skin regions only. Leftmost = runtime default; 1 = neutral. Disabled: see the note above."
+          hint={`Detail strength on skin regions only. Leftmost = runtime default; 1 = neutral.${nrSettingIgnored("skinStructure") ? " Disabled: see the note above." : ""}`}
           onChange={(skinStructure) => update({ skinStructure: skinStructure < 0 ? -1 : skinStructure })}
         />
       </Stack>
