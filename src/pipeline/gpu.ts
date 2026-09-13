@@ -63,6 +63,17 @@ export interface GpuChoice {
   reasons: string[];
 }
 
+/** An adapter a job accepts: NVIDIA hardware with a CUDA device behind it. The probe reports this per adapter. */
+export function isEligibleGpu(c: GpuCandidate): boolean {
+  return isHardwareNvidia(c.info) && c.cudaOrdinal !== null;
+}
+
+/** The sentence every refusal ends with: the adapters a user can pick instead, with the identifiers to pick them by. */
+function alternatives(candidates: readonly GpuCandidate[]): string {
+  const usable = candidates.filter(isEligibleGpu).map(describe).join(", ");
+  return usable ? `Adapters with a CUDA device: ${usable}.` : "No listed NVIDIA adapter has a CUDA device.";
+}
+
 const describe = (c: GpuCandidate): string =>
   `${c.info.index}: ${c.info.name}${c.cudaOrdinal === null ? "" : ` (LUID ${c.info.luid}, CUDA device ${c.cudaOrdinal}${c.cudaUuid ? `, ${c.cudaUuid}` : ""})`}`;
 
@@ -85,17 +96,15 @@ function cudaVerdict(cuda: CudaSummary, c: GpuCandidate): string {
  * the LUID matching stays cudaDevicesForLuids's; this only adds the requirement.
  */
 export function chooseGpu(candidates: readonly GpuCandidate[], cuda: CudaSummary, preferredIndex?: number): GpuChoice {
-  const withCuda = candidates.filter((c) => isHardwareNvidia(c.info) && c.cudaOrdinal !== null);
-  const usable = withCuda.map(describe).join(", ");
+  const withCuda = candidates.filter(isEligibleGpu);
   if (preferredIndex !== undefined) {
     const chosen = candidates.find((c) => c.info.index === preferredIndex);
     if (!chosen) {
       const listed = candidates.map(describe).join(", ") || "none";
       return { index: null, cudaOrdinal: null, reasons: [`No adapter at index ${preferredIndex}. Available adapters: ${listed}.`] };
     }
-    const alternatives = usable ? `Adapters with a CUDA device: ${usable}.` : "No listed NVIDIA adapter has a CUDA device.";
     if (!isHardwareNvidia(chosen.info)) {
-      return { index: chosen.info.index, cudaOrdinal: null, reasons: [`Adapter ${chosen.info.index} (${chosen.info.name}) is not an NVIDIA GPU, and DLSS runs only on NVIDIA. ${alternatives}`] };
+      return { index: chosen.info.index, cudaOrdinal: null, reasons: [`Adapter ${chosen.info.index} (${chosen.info.name}) is not an NVIDIA GPU, and DLSS runs only on NVIDIA. ${alternatives(candidates)}`] };
     }
     if (chosen.cudaOrdinal === null) {
       // DXGI indices are per run: the same GPU can be listed under another
@@ -103,7 +112,7 @@ export function chooseGpu(candidates: readonly GpuCandidate[], cuda: CudaSummary
       return {
         index: chosen.info.index,
         cudaOrdinal: null,
-        reasons: [`Adapter ${chosen.info.index} (${chosen.info.name}, LUID ${chosen.info.luid}) has no CUDA device behind it, and this tool's jobs run NVENC and hardware optical flow on CUDA. ${cudaVerdict(cuda, chosen)} ${alternatives} DXGI indices can change between runs; match by LUID.`],
+        reasons: [`Adapter ${chosen.info.index} (${chosen.info.name}, LUID ${chosen.info.luid}) has no CUDA device behind it, and this tool's jobs run NVENC and hardware optical flow on CUDA. ${cudaVerdict(cuda, chosen)} ${alternatives(candidates)} DXGI indices can change between runs; match by LUID.`],
       };
     }
     return { index: chosen.info.index, cudaOrdinal: chosen.cudaOrdinal, reasons: [] };
@@ -136,13 +145,11 @@ export function gpuCandidates(adapters: readonly DxgiAdapter[]): { candidates: G
  * be tested; the UUIDs it offers are the ones a user can actually pick.
  */
 export function adapterIndexForUuid(candidates: readonly GpuCandidate[], uuid: string): { index: number } | { index: null; reason: string } {
-  const match = candidates.find((c) => c.cudaUuid === uuid);
+  const match = candidates.find((c) => isEligibleGpu(c) && c.cudaUuid === uuid);
   if (match) return { index: match.info.index };
-  const usable = candidates.filter((c) => c.cudaUuid !== null).map(describe).join(", ");
-  const listed = usable ? `Adapters with a CUDA device: ${usable}.` : "No listed NVIDIA adapter has a CUDA device.";
   return {
     index: null,
-    reason: `No adapter has a CUDA device with UUID ${uuid}. ${listed} Run \`probe\` for the current list, or clear the stored GPU choice to select automatically.`,
+    reason: `No adapter has a CUDA device with UUID ${uuid}. ${alternatives(candidates)} Run \`probe\` for the current list, or clear the stored GPU choice to select automatically.`,
   };
 }
 
