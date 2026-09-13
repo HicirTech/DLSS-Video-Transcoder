@@ -5,6 +5,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { buildFrameGenEncodeArgs } from "../src/pipeline/framegen-encode-sink.ts";
+import { FRAMEGEN_CUDA_DEVICE } from "../src/pipeline/framegen-plan.ts";
 import { rational } from "../src/pipeline/rational.ts";
 
 const base = {
@@ -51,10 +52,13 @@ describe("buildFrameGenEncodeArgs", () => {
     ]);
   });
 
-  test("av1_nvenc has no in-process encoder, so it takes the rawvideo path", () => {
+  test("av1_nvenc has no in-process encoder, so it takes the rawvideo path on frame generation's CUDA device", () => {
     const open = buildFrameGenEncodeArgs({ ...base, codec: "av1_nvenc", hasAudio: false });
     expect(open.nvenc).toBeNull();
-    expect(open.rawArgs).toContain("av1_nvenc");
+    // ffmpeg's own NVENC must land on the same device as dlssg-worker.exe, so
+    // -gpu follows -c:v; a CPU codec (the test above) carries no -gpu at all.
+    const codec = open.rawArgs.indexOf("av1_nvenc");
+    expect(open.rawArgs.slice(codec, codec + 3)).toEqual(["av1_nvenc", "-gpu", String(FRAMEGEN_CUDA_DEVICE)]);
   });
 
   test("odd NVENC dimensions fall back to the rawvideo path", () => {

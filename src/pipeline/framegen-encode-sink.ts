@@ -6,6 +6,7 @@
  */
 import type { EncodeSettings } from "../server/api-types.ts";
 import type { NvencSdkCodec } from "./nvenc.ts";
+import { FRAMEGEN_CUDA_DEVICE } from "./framegen-plan.ts";
 import { formatRational, type Rational } from "./rational.ts";
 import { aspectArgs, encoderArgs, nvencNativeTarget } from "./video.ts";
 
@@ -67,7 +68,8 @@ export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): OpenEncode {
     rawArgs: [
       "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`,
       "-framerate", outputRate, "-i", "pipe:0", ...inputsAndMap, ...audioArgs,
-      ...encoderArgs({ codec, quality, container: "mp4", copyAudio: true }),
+      // The device is fixed for frame generation: dlssg-worker.exe takes the default one, and the encoder follows it.
+      ...encoderArgs({ codec, quality, container: "mp4", copyAudio: true }, FRAMEGEN_CUDA_DEVICE),
       ...aspectArgs(displayAspect, width, height, null),
       ...muxTail,
     ],
