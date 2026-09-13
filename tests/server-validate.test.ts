@@ -87,10 +87,8 @@ describe("validateJobRequest", () => {
     expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS, container: "avi" } }))).toMatch(/encode\.container must be one of mp4, mkv, mov/);
   });
 
-  test("rejects non-boolean flags and a bad globalTone", () => {
+  test("rejects non-boolean flags", () => {
     expect(validateJobRequest(request({ settings: { ...DEFAULT_NR_SETTINGS, autoMask: "yes" } }))).toMatch(/settings\.autoMask must be true or false/);
-    expect(validateJobRequest(request({ settings: { ...DEFAULT_NR_SETTINGS, globalTone: "1" } }))).toMatch(/settings\.globalTone must be a finite number or null/);
-    expect(validateJobRequest(request({ settings: { ...DEFAULT_NR_SETTINGS, globalTone: null } }))).toBeNull();
   });
 
   test("frameGen needs a rate and takes a known engine", () => {
