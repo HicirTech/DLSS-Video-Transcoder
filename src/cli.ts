@@ -16,6 +16,7 @@ import { DlssRenderPreset, DLSS_RATIO, perfQualityName, qualityForFactor } from 
 import { processFrameGen } from "./pipeline/framegen.ts";
 import { FRAMEGEN_ENGINES } from "./pipeline/framegen-plan.ts";
 import { describeGpu, openGpu } from "./pipeline/gpu.ts";
+import { enhanceStill } from "./pipeline/image.ts";
 import { evenSize } from "./pipeline/resize.ts";
 
 const ROOT = join(import.meta.dir, "..");
@@ -527,8 +528,8 @@ async function main(): Promise<void> {
         runtimeDir,
         dllDir,
       });
-      const rgba = sr.evaluate(image.rgba, true);
-      await Bun.write(output, encodePng({ width: outputWidth, height: outputHeight, rgba }, { level: 6 }));
+      const enhanced = enhanceStill(image, (colour) => ({ rgba: sr.evaluate(colour, true), width: outputWidth, height: outputHeight }));
+      await Bun.write(output, encodePng(enhanced, { level: 6 }));
       sr.close();
       // The mode name and the ratio it snapped to, not the PerfQuality index: the
       // index is meaningless to a user and its order is counter-intuitive (0 is the
@@ -573,8 +574,8 @@ async function main(): Promise<void> {
         settings,
         runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
       });
-      const rgba = nr.evaluate(image.rgba, true);
-      await Bun.write(output, encodePng({ width: image.width, height: image.height, rgba }, { level: 6 }));
+      const enhanced = enhanceStill(image, (colour) => ({ rgba: nr.evaluate(colour, true), width: image.width, height: image.height }));
+      await Bun.write(output, encodePng(enhanced, { level: 6 }));
       nr.close();
       console.log(`DLSS NR: ${image.width}x${image.height} enhanced (intensity ${settings.intensity}, preset ${settings.preset}) in ${(performance.now() - started).toFixed(1)} ms`);
       console.log(`wrote ${output}`);
