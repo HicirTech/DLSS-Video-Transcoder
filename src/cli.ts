@@ -245,7 +245,7 @@ const COMMANDS: readonly CommandSpec[] = [
       { name: "output.png", desc: "destination; defaults to <input>.nr.png next to the input" },
     ],
     options: [
-      { flag: "--intensity F", desc: `overall strength, 0..2; the installed ${NR_RUNTIME_MEASURED} stops responding above ${NR_INTENSITY_EFFECTIVE_MAX}, so 1, 1.5 and 2 give the same image`, def: String(DEFAULT_NR_SETTINGS.intensity) },
+      { flag: "--intensity F", desc: `overall strength, ${SETTING_RANGES.intensity.min}..${SETTING_RANGES.intensity.max}; the installed ${NR_RUNTIME_MEASURED} stops responding above ${NR_INTENSITY_EFFECTIVE_MAX}, so every value from there up gives the same image`, def: String(DEFAULT_NR_SETTINGS.intensity) },
       { flag: "--style N", desc: "look style: 0 = Default, 1 = Natural, 2 = Cinematic (strong, visible effect)", def: String(DEFAULT_NR_SETTINGS.style) },
       { flag: "--preset ID", desc: `NR model preset hint 0..3; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.preset) },
       { flag: "--local-tone F", desc: "local tone-mapping strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localTone) },
