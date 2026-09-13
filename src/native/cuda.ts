@@ -19,6 +19,8 @@ const SYMBOLS = {
   cuDeviceGet: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
   // CUdevice_luid is 8 bytes, matching DXGI's LUID; the node mask is ignored here.
   cuDeviceGetLuid: { args: [FFIType.ptr, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
+  // CUuuid is 16 bytes; the same identity nvidia-smi prints as GPU-xxxxxxxx-...
+  cuDeviceGetUuid_v2: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
   cuDevicePrimaryCtxRetain: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
   cuDevicePrimaryCtxRelease_v2: { args: [FFIType.i32], returns: FFIType.i32 },
   cuCtxPushCurrent_v2: { args: [FFIType.u64], returns: FFIType.i32 },
@@ -89,6 +91,14 @@ export function cudaReleaseContext(ordinal: number): void {
 export interface CudaDeviceMap {
   /** Per input LUID, the CUDA ordinal whose LUID matches, or null when none does (or CUDA is unusable). */
   ordinals: (number | null)[];
+  /**
+   * Per input LUID, the matched device's UUID in nvidia-smi's form
+   * ("GPU-524e8373-5fe1-44b3-c0aa-cdbe917e7ed2"), or null alongside a null
+   * ordinal. Unlike a LUID, which Windows reissues at every boot, or a DXGI
+   * index, which changes between runs, the UUID names the same GPU forever, so
+   * it is what a stored adapter choice is keyed by.
+   */
+  uuids: (string | null)[];
   /** How many devices the driver lists; null when it could not be asked. */
   deviceCount: number | null;
   /** Why CUDA could not be asked (nvcuda.dll missing, cuInit failed); null when it answered. */
@@ -108,29 +118,42 @@ export interface CudaDeviceMap {
  */
 export function cudaDevicesForLuids(luids: readonly { luidLow: number; luidHigh: number }[]): CudaDeviceMap {
   const ordinals: (number | null)[] = luids.map(() => null);
+  const uuids: (string | null)[] = luids.map(() => null);
   let count: number;
   try {
     const out = new OutU32();
     ck(cu().cuDeviceGetCount(out.ptr) as number, "cuDeviceGetCount");
     count = out.value;
   } catch (error) {
-    return { ordinals, deviceCount: null, error: (error as Error).message };
+    return { ordinals, uuids, deviceCount: null, error: (error as Error).message };
   }
   const luid = new Uint8Array(8);
   const view = new DataView(luid.buffer);
   const nodeMask = new Uint32Array(1);
   for (let ordinal = 0; ordinal < count; ordinal++) {
+    const dev = device(ordinal);
     luid.fill(0);
     // Not every driver/device pair supports the query; a failure just means this
     // device cannot be matched, not that the whole lookup failed.
-    if ((cu().cuDeviceGetLuid(ptr(luid), ptr(nodeMask), device(ordinal)) as number) !== 0) continue;
+    if ((cu().cuDeviceGetLuid(ptr(luid), ptr(nodeMask), dev) as number) !== 0) continue;
     const low = view.getUint32(0, true);
     const high = view.getInt32(4, true);
+    let uuid: string | null = null;
     luids.forEach((wanted, i) => {
-      if (ordinals[i] === null && (wanted.luidLow >>> 0) === low && wanted.luidHigh === high) ordinals[i] = ordinal;
+      if (ordinals[i] !== null || (wanted.luidLow >>> 0) !== low || wanted.luidHigh !== high) return;
+      ordinals[i] = ordinal;
+      uuids[i] = uuid ??= deviceUuid(dev);
     });
   }
-  return { ordinals, deviceCount: count, error: null };
+  return { ordinals, uuids, deviceCount: count, error: null };
+}
+
+/** A device's UUID as nvidia-smi prints it, or null when the driver will not report one. */
+function deviceUuid(dev: number): string | null {
+  const bytes = new Uint8Array(16);
+  if ((cu().cuDeviceGetUuid_v2(ptr(bytes), dev) as number) !== 0) return null;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `GPU-${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 export function cudaSynchronize(): void {
