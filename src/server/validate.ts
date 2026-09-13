@@ -121,6 +121,13 @@ export function validateJobRequest(value: unknown): string | null {
   if (v.engine !== "bypass" && v.engine !== "nr" && v.engine !== "sr") return 'engine must be "sr", "nr" or "bypass".';
   if (v.motion !== "none" && v.motion !== "flow") return 'motion must be "none" or "flow".';
   if (v.dllDir !== undefined && typeof v.dllDir !== "string") return "dllDir must be a string when present.";
+  if (v.adapterUuid !== undefined) {
+    if (typeof v.adapterUuid !== "string" || !/^GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v.adapterUuid)) {
+      return 'adapterUuid must be a CUDA device UUID as GET /api/probe lists it ("GPU-" followed by 8-4-4-4-12 hex digits).';
+    }
+    // Frame generation runs in dlssg-worker.exe on the default device; a stored GPU choice cannot apply to it.
+    if (v.frameGen !== undefined) return "adapterUuid does not apply to frame generation, which always runs on the default device; omit it.";
+  }
   if (!isObject(v.settings)) return "settings must be an object.";
   if (!isObject(v.scale)) return "scale must be an object.";
   const problem = first(
