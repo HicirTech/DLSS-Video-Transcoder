@@ -14,21 +14,22 @@ import { Mono, Section } from "./Section";
 interface SettingsPanelProps {
   /** The last probe, which lists the GPUs a job can be sent to; null until one has run. */
   probe: ProbeReport | null;
+  probing: boolean;
   onProbe: () => void;
 }
 
 /** Sentinel for the automatic choice in the GPU select; the stored value for it is null. */
 const AUTO_GPU = "auto";
 
-export function SettingsPanel({ probe, onProbe }: SettingsPanelProps) {
+export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
   // useId, not a constant: every tab stays mounted, so two panels can render
   // this component at once and a fixed id would appear twice in one document.
   const gpuLabelId = useId();
   const { settings, setNr, setAdapterUuid, reset, replaceAll } = useSettings();
   const toast = useToast();
   const [loading, setLoading] = useState(false);
-  // Only adapters a job would accept are offered: NVIDIA hardware with a CUDA device behind it.
-  const gpus = (probe?.adapters ?? []).filter((a) => a.isNvidia && !a.software && a.cudaUuid !== null);
+  // Only adapters a job would accept are offered; the probe judged that by the rule jobs apply.
+  const gpus = (probe?.adapters ?? []).filter((a) => a.eligible && a.cudaUuid !== null);
   const storedIsListed = settings.adapterUuid === null || gpus.some((a) => a.cudaUuid === settings.adapterUuid);
 
   const loadServerDefaults = async (): Promise<void> => {
@@ -64,7 +65,9 @@ export function SettingsPanel({ probe, onProbe }: SettingsPanelProps) {
                 </MenuItem>
               ))}
               {storedIsListed ? null : (
-                <MenuItem value={settings.adapterUuid!}>Stored choice {settings.adapterUuid} (not in the last probe)</MenuItem>
+                <MenuItem value={settings.adapterUuid!}>
+                  Stored choice {settings.adapterUuid} ({probe ? "not in the last probe" : "run the probe to confirm it is present"})
+                </MenuItem>
               )}
             </Select>
           </FormControl>
@@ -77,8 +80,8 @@ export function SettingsPanel({ probe, onProbe }: SettingsPanelProps) {
             Frame generation always runs on the default device and ignores this.
           </Typography>
           {probe ? null : (
-            <Button variant="outlined" onClick={onProbe} sx={{ alignSelf: "flex-start" }}>
-              Run probe
+            <Button variant="outlined" disabled={probing} onClick={onProbe} sx={{ alignSelf: "flex-start" }}>
+              {probing ? "Probing..." : "Run probe"}
             </Button>
           )}
         </Stack>
