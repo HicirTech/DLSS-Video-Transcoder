@@ -29,23 +29,23 @@ export type MotionKind = "none" | "flow";
 export interface NrSettings {
   /**
    * NR model preset hint (DLSSNR.Hint.Render.Preset): 0 = Default, 1/2/3 = Preset #1/#2/#3.
-   * Experimental and content-dependent (per the reference project) — Default is recommended and is
-   * often the only one with a visible effect. Distinct from the SR model preset J/K/L/M.
+   * Distinct from the SR model preset J/K/L/M. Ignored by the installed runtime: see
+   * NR_SETTINGS_IGNORED_BY_RUNTIME.
    */
   preset: 0 | 1 | 2 | 3;
   /** Look style: 0 = Default, 1 = Natural, 2 = Cinematic. (Strong, visible effect.) */
   style: 0 | 1 | 2;
-  /** Overall neural-rendering strength, 0..2 (1 = default; the effect tends to plateau past ~1). */
+  /** Overall neural-rendering strength, 0..2 (1 = default); the installed runtime stops responding at NR_INTENSITY_EFFECTIVE_MAX. */
   intensity: number;
   /** Local tone-mapping strength (float). Typical 0..2, 1 = neutral. */
   localTone: number;
   /** Local detail / micro-structure strength (float). Typical 0..2, 1 = neutral. */
   localStructure: number;
-  /** Skin detail strength (float). Typical -1..2; -1 = runtime default. Affects skin regions only. */
+  /** Skin detail strength (float). Typical -1..2; -1 = runtime default. Skin regions only. Ignored by the installed runtime: see NR_SETTINGS_IGNORED_BY_RUNTIME. */
   skinStructure: number;
   /** Let the runtime derive the processed-region mask instead of processing the whole frame. */
   autoMask: boolean;
-  /** Protect overlays / text / sharp UI edges from being re-rendered. */
+  /** Protect overlays / text / sharp UI edges from being re-rendered. Ignored by the installed runtime: see NR_SETTINGS_IGNORED_BY_RUNTIME. */
   uiCorrection: boolean;
   /** Extra evaluations of the first frame so the temporal state settles (images use this). */
   warmupFrames: number;
@@ -93,11 +93,12 @@ export type FrameGenEngine = (typeof FRAME_GEN_ENGINES)[number];
 // The accepted values for every constrained setting, in one place: the UI clamps
 // to these and the API rejects outside them, so the two cannot drift apart.
 /**
- * Neural-rendering settings the installed runtime accepts but does not act on.
- * Measured with tests/diag-nr-settings.ts against nvngx_dlssnr.dll 310.8.2.0:
- * every value of these three produces byte-identical output, and intensity is
- * inert above 1.0. They stay in the request shape because a later DLL may
- * honour them; every surface that offers them says what happens today.
+ * Neural-rendering settings the installed runtime (NR_RUNTIME_MEASURED) accepts
+ * but does not act on: measured with tests/diag-nr-settings.ts, every value of
+ * each produces byte-identical output (intensity's own limit is
+ * NR_INTENSITY_EFFECTIVE_MAX). They stay in the request shape because a later
+ * DLL may honour them; every surface that offers them says what happens today,
+ * through NR_IGNORED_NOTE.
  *
  * Re-run that diagnostic after a runtime update before changing this list.
  */
@@ -106,8 +107,12 @@ export const NR_SETTINGS_IGNORED_BY_RUNTIME = ["preset", "skinStructure", "uiCor
 /** The runtime the list above was measured against; named wherever the list is explained. */
 export const NR_RUNTIME_MEASURED = "nvngx_dlssnr.dll 310.8.2.0";
 
-/** The one sentence every surface (CLI help, web editor) uses for a setting in NR_SETTINGS_IGNORED_BY_RUNTIME. */
-export const NR_IGNORED_NOTE = `the installed ${NR_RUNTIME_MEASURED} ignores it, every value gives the same image (measured with tests/diag-nr-settings.ts)`;
+/**
+ * The one clause every surface (CLI help, web editor) uses for a setting in
+ * NR_SETTINGS_IGNORED_BY_RUNTIME; subject-neutral so it reads after one control
+ * or several.
+ */
+export const NR_IGNORED_NOTE = `ignored by the installed ${NR_RUNTIME_MEASURED}: every value gives the same image (measured with tests/diag-nr-settings.ts)`;
 
 /** Whether the installed runtime acts on a setting; the UI disables the ones it does not. */
 export function nrSettingIgnored(name: keyof NrSettings): boolean {
@@ -225,6 +230,8 @@ export interface ProbeAdapter {
    * JobRequest.adapterUuid stores.
    */
   cudaUuid: string | null;
+  /** Whether a job would accept this adapter (NVIDIA hardware with a CUDA device), by the rule jobs apply. */
+  eligible: boolean;
 }
 
 /** The CUDA driver's side of the adapter list. */
