@@ -13,7 +13,14 @@ import { D3D12Device, GpuContext } from "../native/d3d12.ts";
 import { type AdapterInfo, DxgiFactory, type DxgiAdapter, isHardwareNvidia, selectAdapter } from "../native/dxgi.ts";
 
 export interface GpuOptions {
+  /** A DXGI index as `probe` listed it in this session; the CLI's choice. */
   adapterIndex?: number;
+  /**
+   * A CUDA device UUID ("GPU-..." as `probe` and nvidia-smi print it); the web
+   * UI's stored choice. DXGI indices change between runs and Windows reissues
+   * LUIDs at every boot, so this is the only form that can be kept.
+   */
+  adapterUuid?: string;
   debugLayer?: boolean;
 }
 
@@ -32,6 +39,8 @@ export interface GpuSession {
    * between them fail. openGpu refuses an adapter that has none.
    */
   readonly cudaOrdinal: number;
+  /** That device's UUID, the stable name for it across runs and boots; null only when the driver would not report one. */
+  readonly cudaUuid: string | null;
   close(): void;
 }
 
@@ -39,6 +48,7 @@ export interface GpuSession {
 export interface GpuCandidate {
   info: AdapterInfo;
   cudaOrdinal: number | null;
+  cudaUuid: string | null;
 }
 
 /** The driver-level half of a CUDA lookup, shared by every candidate: how many devices, or why none could be asked for. */
@@ -54,7 +64,7 @@ export interface GpuChoice {
 }
 
 const describe = (c: GpuCandidate): string =>
-  `${c.info.index}: ${c.info.name}${c.cudaOrdinal === null ? "" : ` (LUID ${c.info.luid}, CUDA device ${c.cudaOrdinal})`}`;
+  `${c.info.index}: ${c.info.name}${c.cudaOrdinal === null ? "" : ` (LUID ${c.info.luid}, CUDA device ${c.cudaOrdinal}${c.cudaUuid ? `, ${c.cudaUuid}` : ""})`}`;
 
 /** Why CUDA reports no device for an adapter, from what the driver actually said. */
 function cudaVerdict(cuda: CudaSummary, c: GpuCandidate): string {
@@ -117,12 +127,28 @@ export function chooseGpu(candidates: readonly GpuCandidate[], cuda: CudaSummary
 /** The adapter list as chooseGpu wants it, with one CUDA lookup for all of them. */
 export function gpuCandidates(adapters: readonly DxgiAdapter[]): { candidates: GpuCandidate[]; cuda: CudaDeviceMap } {
   const cuda = cudaDevicesForLuids(adapters.map((a) => a.info));
-  return { candidates: adapters.map((a, i) => ({ info: a.info, cudaOrdinal: cuda.ordinals[i]! })), cuda };
+  return { candidates: adapters.map((a, i) => ({ info: a.info, cudaOrdinal: cuda.ordinals[i]!, cudaUuid: cuda.uuids[i]! })), cuda };
 }
 
-/** One line naming the GPU a job runs on, for progress output: adapter, LUID and the CUDA device it resolved to. */
+/**
+ * The DXGI index a stored UUID names in this run, or null with the reason when
+ * no listed adapter has a CUDA device with that UUID. Pure, so the message can
+ * be tested; the UUIDs it offers are the ones a user can actually pick.
+ */
+export function adapterIndexForUuid(candidates: readonly GpuCandidate[], uuid: string): { index: number } | { index: null; reason: string } {
+  const match = candidates.find((c) => c.cudaUuid === uuid);
+  if (match) return { index: match.info.index };
+  const usable = candidates.filter((c) => c.cudaUuid !== null).map(describe).join(", ");
+  const listed = usable ? `Adapters with a CUDA device: ${usable}.` : "No listed NVIDIA adapter has a CUDA device.";
+  return {
+    index: null,
+    reason: `No adapter has a CUDA device with UUID ${uuid}. ${listed} Run \`probe\` for the current list, or clear the stored GPU choice to select automatically.`,
+  };
+}
+
+/** One line naming the GPU a job runs on, for progress output: adapter, LUID, CUDA device and its UUID. */
 export function describeGpu(session: GpuSession): string {
-  return `GPU: adapter ${session.adapter.info.index} ${session.adapter.info.name}, LUID ${session.adapter.info.luid}, CUDA device ${session.cudaOrdinal}`;
+  return `GPU: adapter ${session.adapter.info.index} ${session.adapter.info.name}, LUID ${session.adapter.info.luid}, CUDA device ${session.cudaOrdinal}${session.cudaUuid ? ` (${session.cudaUuid})` : ""}`;
 }
 
 export function openGpu(options: GpuOptions = {}): GpuSession {
@@ -131,14 +157,25 @@ export function openGpu(options: GpuOptions = {}): GpuSession {
   // Resolved once here rather than at every CUDA call: cuInit plus a LUID read
   // per device, and the answer cannot change while the session is open.
   const { candidates, cuda } = gpuCandidates(adapters);
-  const choice = chooseGpu(candidates, cuda, options.adapterIndex);
-  const adapter = choice.index === null ? null : adapters.find((a) => a.info.index === choice.index);
-  if (!adapter || choice.cudaOrdinal === null) {
+  // Every refusal below releases what was enumerated; nothing else is open yet.
+  const refused = (message: string): Error => {
     for (const a of adapters) a.release();
     factory.release();
-    throw new Error(choice.reasons.join(" "));
+    return new Error(message);
+  };
+  if (options.adapterIndex !== undefined && options.adapterUuid !== undefined) throw refused("Choose the GPU by adapter index or by UUID, not both.");
+  // A UUID is resolved to this run's index first, so the one choice rule below judges both forms alike.
+  let preferredIndex = options.adapterIndex;
+  if (options.adapterUuid !== undefined) {
+    const resolved = adapterIndexForUuid(candidates, options.adapterUuid);
+    if (resolved.index === null) throw refused(resolved.reason);
+    preferredIndex = resolved.index;
   }
+  const choice = chooseGpu(candidates, cuda, preferredIndex);
+  const adapter = choice.index === null ? undefined : adapters.find((a) => a.info.index === choice.index);
+  if (!adapter || choice.cudaOrdinal === null) throw refused(choice.reasons.join(" "));
   const cudaOrdinal = choice.cudaOrdinal;
+  const cudaUuid = candidates.find((c) => c.info.index === adapter.info.index)!.cudaUuid;
   let device: D3D12Device | null = null;
   let gpu: GpuContext;
   try {
@@ -158,6 +195,7 @@ export function openGpu(options: GpuOptions = {}): GpuSession {
     device,
     gpu,
     cudaOrdinal,
+    cudaUuid,
     close() {
       if (closed) return;
       closed = true;

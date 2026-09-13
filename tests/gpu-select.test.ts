@@ -7,9 +7,11 @@
 import { describe, expect, test } from "bun:test";
 import type { AdapterInfo } from "../src/native/dxgi.ts";
 import { selectAdapter } from "../src/native/dxgi.ts";
-import { chooseGpu, type CudaSummary, type GpuCandidate } from "../src/pipeline/gpu.ts";
+import { adapterIndexForUuid, chooseGpu, type CudaSummary, type GpuCandidate } from "../src/pipeline/gpu.ts";
 
 const RTX_LUID = "00000000-00018861";
+/** The 5090's CUDA UUID as nvidia-smi prints it; unlike the LUID it did not change across the reboot that moved the LUID to 00019354. */
+const RTX_UUID = "GPU-524e8373-5fe1-44b3-c0aa-cdbe917e7ed2";
 
 function adapter(index: number, name: string, opts: { nvidia?: boolean; software?: boolean; vramMB?: number; luid?: string } = {}): AdapterInfo {
   const vramMB = opts.vramMB ?? 0;
@@ -33,11 +35,11 @@ function adapter(index: number, name: string, opts: { nvidia?: boolean; software
 
 /** The development machine as DXGI listed it on 2026-09-11, with CUDA's answer per entry. */
 const DEV_BOX: GpuCandidate[] = [
-  { info: adapter(0, "AMD Radeon(TM) Graphics", { vramMB: 485, luid: "00000000-00019EF5" }), cudaOrdinal: null },
-  { info: adapter(1, "NVIDIA GeForce RTX 5090", { nvidia: true, vramMB: 32187, luid: RTX_LUID }), cudaOrdinal: 0 },
-  { info: adapter(2, "NVIDIA GeForce RTX 5090", { nvidia: true, vramMB: 32187, luid: "00000000-00026C40" }), cudaOrdinal: null },
-  { info: adapter(3, "NVIDIA GeForce RTX 5090", { nvidia: true, vramMB: 32187, luid: "00000000-00025AF8" }), cudaOrdinal: null },
-  { info: adapter(4, "Microsoft Basic Render Driver", { software: true, luid: "00000000-00019E7F" }), cudaOrdinal: null },
+  { info: adapter(0, "AMD Radeon(TM) Graphics", { vramMB: 485, luid: "00000000-00019EF5" }), cudaOrdinal: null, cudaUuid: null },
+  { info: adapter(1, "NVIDIA GeForce RTX 5090", { nvidia: true, vramMB: 32187, luid: RTX_LUID }), cudaOrdinal: 0, cudaUuid: RTX_UUID },
+  { info: adapter(2, "NVIDIA GeForce RTX 5090", { nvidia: true, vramMB: 32187, luid: "00000000-00026C40" }), cudaOrdinal: null, cudaUuid: null },
+  { info: adapter(3, "NVIDIA GeForce RTX 5090", { nvidia: true, vramMB: 32187, luid: "00000000-00025AF8" }), cudaOrdinal: null, cudaUuid: null },
+  { info: adapter(4, "Microsoft Basic Render Driver", { software: true, luid: "00000000-00019E7F" }), cudaOrdinal: null, cudaUuid: null },
 ];
 const ONE_DEVICE: CudaSummary = { deviceCount: 1, error: null };
 
@@ -68,21 +70,21 @@ describe("chooseGpu, auto", () => {
 
   test("a CUDA-backed NVIDIA adapter beats a larger CUDA-less one", () => {
     const candidates: GpuCandidate[] = [
-      { info: adapter(0, "NVIDIA GeForce RTX 5090", { nvidia: true, vramMB: 32187 }), cudaOrdinal: null },
-      { info: adapter(1, "NVIDIA GeForce RTX 4060", { nvidia: true, vramMB: 8188 }), cudaOrdinal: 0 },
+      { info: adapter(0, "NVIDIA GeForce RTX 5090", { nvidia: true, vramMB: 32187 }), cudaOrdinal: null, cudaUuid: null },
+      { info: adapter(1, "NVIDIA GeForce RTX 4060", { nvidia: true, vramMB: 8188 }), cudaOrdinal: 0, cudaUuid: "GPU-4060" },
     ];
     expect(chooseGpu(candidates, ONE_DEVICE)).toEqual({ index: 1, cudaOrdinal: 0, reasons: [] });
   });
 
   test("two CUDA-backed adapters with equal VRAM resolve to the lowest CUDA ordinal in either order", () => {
-    const a: GpuCandidate = { info: adapter(0, "NVIDIA GeForce RTX 5090", { nvidia: true, vramMB: 32187, luid: "A" }), cudaOrdinal: 1 };
-    const b: GpuCandidate = { info: adapter(1, "NVIDIA GeForce RTX 5090", { nvidia: true, vramMB: 32187, luid: "B" }), cudaOrdinal: 0 };
+    const a: GpuCandidate = { info: adapter(0, "NVIDIA GeForce RTX 5090", { nvidia: true, vramMB: 32187, luid: "A" }), cudaOrdinal: 1, cudaUuid: "GPU-a" };
+    const b: GpuCandidate = { info: adapter(1, "NVIDIA GeForce RTX 5090", { nvidia: true, vramMB: 32187, luid: "B" }), cudaOrdinal: 0, cudaUuid: "GPU-b" };
     expect(chooseGpu([a, b], { deviceCount: 2, error: null }).cudaOrdinal).toBe(0);
     expect(chooseGpu([b, a], { deviceCount: 2, error: null }).cudaOrdinal).toBe(0);
   });
 
   test("with no CUDA-backed NVIDIA adapter, the best NVIDIA one is named with the reason it is refused", () => {
-    const candidates = DEV_BOX.map((c) => ({ ...c, cudaOrdinal: null }));
+    const candidates = DEV_BOX.map((c) => ({ ...c, cudaOrdinal: null, cudaUuid: null }));
     const choice = chooseGpu(candidates, { deviceCount: 0, error: null });
     expect(choice.index).toBe(1);
     expect(choice.cudaOrdinal).toBeNull();
@@ -92,7 +94,7 @@ describe("chooseGpu, auto", () => {
   });
 
   test("when CUDA could not be queried, the reason carries the driver error instead of blaming the adapter", () => {
-    const candidates = DEV_BOX.map((c) => ({ ...c, cudaOrdinal: null }));
+    const candidates = DEV_BOX.map((c) => ({ ...c, cudaOrdinal: null, cudaUuid: null }));
     const choice = chooseGpu(candidates, { deviceCount: null, error: "CUDA cuInit failed: NO_DEVICE (100)" });
     expect(choice.reasons[0]).toContain("CUDA could not be queried: CUDA cuInit failed: NO_DEVICE (100).");
   });
@@ -117,14 +119,14 @@ describe("chooseGpu, explicit index", () => {
     const reason = choice.reasons[0]!;
     expect(reason).toContain("Adapter 2 (NVIDIA GeForce RTX 5090, LUID 00000000-00026C40) has no CUDA device behind it");
     expect(reason).toContain("CUDA lists 1 device(s), none reporting this adapter's LUID 00000000-00026C40.");
-    expect(reason).toContain(`Adapters with a CUDA device: 1: NVIDIA GeForce RTX 5090 (LUID ${RTX_LUID}, CUDA device 0).`);
+    expect(reason).toContain(`Adapters with a CUDA device: 1: NVIDIA GeForce RTX 5090 (LUID ${RTX_LUID}, CUDA device 0, ${RTX_UUID}).`);
     expect(reason).toContain("DXGI indices can change between runs; match by LUID.");
   });
 
   test("a non-NVIDIA adapter gets one reason, which names the adapters that qualify", () => {
     const choice = chooseGpu(DEV_BOX, ONE_DEVICE, 0);
     expect(choice.reasons).toEqual([
-      `Adapter 0 (AMD Radeon(TM) Graphics) is not an NVIDIA GPU, and DLSS runs only on NVIDIA. Adapters with a CUDA device: 1: NVIDIA GeForce RTX 5090 (LUID ${RTX_LUID}, CUDA device 0).`,
+      `Adapter 0 (AMD Radeon(TM) Graphics) is not an NVIDIA GPU, and DLSS runs only on NVIDIA. Adapters with a CUDA device: 1: NVIDIA GeForce RTX 5090 (LUID ${RTX_LUID}, CUDA device 0, ${RTX_UUID}).`,
     ]);
   });
 
@@ -137,6 +139,28 @@ describe("chooseGpu, explicit index", () => {
   test("an index that is not listed names the list", () => {
     const choice = chooseGpu(DEV_BOX, ONE_DEVICE, 9);
     expect(choice.index).toBeNull();
-    expect(choice.reasons[0]).toStartWith("No adapter at index 9. Available adapters: 0: AMD Radeon(TM) Graphics, 1: NVIDIA GeForce RTX 5090 (LUID 00000000-00018861, CUDA device 0), 2: NVIDIA GeForce RTX 5090, ");
+    expect(choice.reasons[0]).toStartWith(`No adapter at index 9. Available adapters: 0: AMD Radeon(TM) Graphics, 1: NVIDIA GeForce RTX 5090 (LUID 00000000-00018861, CUDA device 0, ${RTX_UUID}), 2: NVIDIA GeForce RTX 5090, `);
+  });
+});
+
+describe("adapterIndexForUuid", () => {
+  // The stored form of a GPU choice: a LUID is reissued at every boot (this
+  // machine's 5090 went from 00018861 to 00019354 overnight) and a DXGI index
+  // changes between runs, while the CUDA UUID names the same card forever.
+  test("resolves the stored UUID to this run's index whatever the enumeration order", () => {
+    for (const order of rotations(DEV_BOX)) {
+      const resolved = adapterIndexForUuid(order, RTX_UUID);
+      expect(resolved.index).not.toBeNull();
+      expect(order.find((c) => c.info.index === resolved.index)!.cudaUuid).toBe(RTX_UUID);
+    }
+  });
+
+  test("a UUID no listed adapter carries is refused with the ones a user can pick", () => {
+    const resolved = adapterIndexForUuid(DEV_BOX, "GPU-00000000-0000-0000-0000-000000000000");
+    expect(resolved.index).toBeNull();
+    if (resolved.index !== null) return;
+    expect(resolved.reason).toContain("No adapter has a CUDA device with UUID GPU-00000000-0000-0000-0000-000000000000.");
+    expect(resolved.reason).toContain(`Adapters with a CUDA device: 1: NVIDIA GeForce RTX 5090 (LUID ${RTX_LUID}, CUDA device 0, ${RTX_UUID}).`);
+    expect(resolved.reason).toContain("clear the stored GPU choice");
   });
 });
