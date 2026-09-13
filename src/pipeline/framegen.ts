@@ -30,6 +30,7 @@ import { type RunParams, runOverlapped, runSequential } from "./framegen-run.ts"
 import { Stage, openGuideWorker } from "./framegen-stage.ts";
 import { verifyOutputVideo } from "./framegen-verify.ts";
 import {
+  FRAMEGEN_CUDA_DEVICE,
   type FrameGenEngine,
   type InterpolationPlan,
   NearestTimestampWriter,
@@ -242,7 +243,8 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   // Only re-open the source as a second input when it actually has audio to carry;
   // otherwise ffmpeg needlessly demuxes/decodes the whole source again.
   const wantAudio = info.hasAudio;
-  const resolvedCodec = resolveEncodeCodec(options.codec ?? "h264_nvenc", ffmpeg);
+  // Probed on the device the encode will use: dlssg-worker's, the default one.
+  const resolvedCodec = resolveEncodeCodec(options.codec ?? "h264_nvenc", ffmpeg, FRAMEGEN_CUDA_DEVICE);
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
 
   let sink: EncodeSink;
