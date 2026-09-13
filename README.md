@@ -241,7 +241,7 @@ Verified against the source on 2026-09-10.
 | DLSS version enumeration | ✅ `versions` | ✅ (`/api/catalog`) | shown in the version picker |
 | DLSS version selection | ✅ SR (`sr --dlss-version`) | ✅ (sr/nr) | alternate DLLs may fail to init on newer drivers |
 | Browser file upload | n/a | ✅ | POST /api/upload; stored under logs/uploads/ |
-| NR look controls | ✅ (`nr`) | ✅ | style / intensity(0–2) / tone / structure apply strongly; preset exposed (experimental); global tone not applied |
+| NR look controls | ✅ (`nr`) | ✅ | style / intensity (effective to 1) / tone / structure / auto mask apply; model preset and skin structure are shown disabled and UI correction is CLI-only, because the installed runtime ignores them (measured) |
 | NVENC (GPU) video encode | ✅ if requested | ✅ if selected | frame-gen GPU-encodes by default |
 | GPU optical flow (NVOFA) | ✅ (video/fg motion) | ✅ | hardware flow engine, ~5.7× faster than CPU, auto CPU fallback; `probe` reports whether it comes up and its size limits |
 | RTX Video Super Resolution / TrueHDR | ❌ | ❌ | DLLs present but no code path uses them |
