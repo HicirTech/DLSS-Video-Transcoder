@@ -88,12 +88,12 @@ describe("enhanceStill", () => {
   test("an opaque source is untouched by the rule", () => {
     const src = frame();
     for (let i = 3; i < src.rgba.length; i += 4) src.rgba[i] = 255;
-    let seen: Uint8Array | null = null;
+    const seen: { colour: Uint8Array | null } = { colour: null };
     const out = enhanceStill(src, (colour) => {
-      seen = colour;
+      seen.colour = colour;
       return { rgba: new Uint8Array(colour), width: src.width, height: src.height };
     });
-    expect(seen).toEqual(src.rgba);
+    expect(seen.colour).toEqual(src.rgba);
     expect(out.rgba).toEqual(src.rgba);
   });
 });
