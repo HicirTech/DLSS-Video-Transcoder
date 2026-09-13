@@ -43,8 +43,6 @@ export interface NrSettings {
   localStructure: number;
   /** Skin detail strength (float). Typical -1..2; -1 = runtime default. Affects skin regions only. */
   skinStructure: number;
-  /** Global tone-mapping strength, or null. NOTE: not applied by the current runtime. */
-  globalTone: number | null;
   /** Let the runtime derive the processed-region mask instead of processing the whole frame. */
   autoMask: boolean;
   /** Protect overlays / text / sharp UI edges from being re-rendered. */
@@ -60,7 +58,6 @@ export const DEFAULT_NR_SETTINGS: NrSettings = {
   localTone: 1,
   localStructure: 1,
   skinStructure: -1,
-  globalTone: null,
   autoMask: false,
   uiCorrection: false,
   warmupFrames: 4,
@@ -105,6 +102,17 @@ export type FrameGenEngine = (typeof FRAME_GEN_ENGINES)[number];
  * Re-run that diagnostic after a runtime update before changing this list.
  */
 export const NR_SETTINGS_IGNORED_BY_RUNTIME = ["preset", "skinStructure", "uiCorrection"] as const;
+
+/** The runtime the list above was measured against; named wherever the list is explained. */
+export const NR_RUNTIME_MEASURED = "nvngx_dlssnr.dll 310.8.2.0";
+
+/** The one sentence every surface (CLI help, web editor) uses for a setting in NR_SETTINGS_IGNORED_BY_RUNTIME. */
+export const NR_IGNORED_NOTE = `the installed ${NR_RUNTIME_MEASURED} ignores it, every value gives the same image (measured with tests/diag-nr-settings.ts)`;
+
+/** Whether the installed runtime acts on a setting; the UI disables the ones it does not. */
+export function nrSettingIgnored(name: keyof NrSettings): boolean {
+  return (NR_SETTINGS_IGNORED_BY_RUNTIME as readonly string[]).includes(name);
+}
 
 /** Where intensity stops making a difference on the runtime measured above. */
 export const NR_INTENSITY_EFFECTIVE_MAX = 1;
