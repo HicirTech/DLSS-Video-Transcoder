@@ -134,7 +134,7 @@ function Shell() {
           <JobsPanel jobs={feed.jobs} now={now} connected={feed.connected} onRefresh={() => void feed.refresh()} />
         </TabPanel>
         <TabPanel active={tab === 4}>
-          <SettingsPanel probe={probe} onProbe={() => void runProbe()} />
+          <SettingsPanel probe={probe} probing={probing} onProbe={() => void runProbe()} />
         </TabPanel>
       </Container>
     </Box>
