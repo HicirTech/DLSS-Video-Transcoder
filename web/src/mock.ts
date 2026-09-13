@@ -28,6 +28,7 @@ export const MOCK_PROBE: ProbeReport = {
       software: false,
       cudaOrdinal: 0,
       cudaUuid: "GPU-2f6b1c3e-9a4d-4b7e-8c1a-5d2e3f4a6b7c",
+      eligible: true,
     },
     {
       index: 1,
@@ -40,6 +41,7 @@ export const MOCK_PROBE: ProbeReport = {
       software: false,
       cudaOrdinal: null,
       cudaUuid: null,
+      eligible: false,
     },
     {
       index: 2,
@@ -52,6 +54,7 @@ export const MOCK_PROBE: ProbeReport = {
       software: true,
       cudaOrdinal: null,
       cudaUuid: null,
+      eligible: false,
     },
   ],
   selectedAdapter: 0,
