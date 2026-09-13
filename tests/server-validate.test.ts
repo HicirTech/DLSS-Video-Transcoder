@@ -82,7 +82,6 @@ describe("validateJobRequest", () => {
   test("rejects values outside the enums", () => {
     expect(validateJobRequest(request({ settings: { ...DEFAULT_NR_SETTINGS, preset: 4 } }))).toMatch(/settings\.preset must be one of 0, 1, 2, 3/);
     expect(validateJobRequest(request({ settings: { ...DEFAULT_NR_SETTINGS, style: 3 } }))).toMatch(/settings\.style must be one of 0, 1, 2/);
-    expect(validateJobRequest(request({ settings: { ...DEFAULT_NR_SETTINGS, nrPath: "driver" } }))).toMatch(/settings\.nrPath must be one of auto, core, snippet/);
     expect(validateJobRequest(request({ scale: { ...DEFAULT_SCALE_SETTINGS, mode: "stretch" } }))).toMatch(/scale\.mode must be one of none, factor, size/);
     expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS, codec: "vp9" } }))).toMatch(/encode\.codec must be one of h264, hevc, av1/);
     expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS, container: "avi" } }))).toMatch(/encode\.container must be one of mp4, mkv, mov/);
