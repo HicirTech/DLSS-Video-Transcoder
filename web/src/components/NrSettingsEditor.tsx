@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { Box, FormControl, FormControlLabel, InputLabel, MenuItem, Select, Stack, Switch, Typography } from "@mui/material";
-import type { NrSettings } from "../../../src/server/api-types";
+import { NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, type NrSettings, nrSettingIgnored, SETTING_RANGES } from "../../../src/server/api-types";
 import { SliderRow } from "./SliderRow";
 
 interface NrSettingsEditorProps {
@@ -9,6 +9,7 @@ interface NrSettingsEditorProps {
 }
 
 const NEUTRAL_MARKS = [{ value: 0 }, { value: 1, label: "default" }, { value: 2 }];
+const INTENSITY_MARKS = [{ value: 0 }, { value: NR_INTENSITY_EFFECTIVE_MAX, label: "default" }];
 const SKIN_MARKS = [{ value: -1, label: "default" }, { value: 0 }, { value: 1, label: "neutral" }, { value: 2 }];
 
 function formatSkin(value: number): string {
@@ -17,8 +18,10 @@ function formatSkin(value: number): string {
 
 /**
  * Look controls for DLSS neural rendering (feature 18): style, model preset and the strength
- * sliders. `warmupFrames` is edited in the Settings tab, and there is no global-tone control
- * because the current runtime ignores that parameter.
+ * sliders. `warmupFrames` is edited in the Settings tab. A control the installed runtime
+ * ignores (nrSettingIgnored, measured) is shown disabled rather than hidden, so re-enabling it
+ * after a runtime update is a change to that list alone; UI correction has no counterpart in
+ * the reference tool and is not offered here at all.
  */
 export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
   // useId, not a constant: every tab stays mounted, so two panels can render
@@ -45,7 +48,7 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
                 <MenuItem value={2}>Cinematic</MenuItem>
               </Select>
             </FormControl>
-            <FormControl fullWidth>
+            <FormControl fullWidth disabled={nrSettingIgnored("preset")}>
               <InputLabel id={presetLabelId}>Model preset</InputLabel>
               <Select<NrSettings["preset"]>
                 labelId={presetLabelId}
@@ -61,9 +64,8 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
             </FormControl>
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-            Style sets the overall look (strong effect). Model preset, UI correction and skin
-            structure are sent to the runtime but the installed DLSS 5 DLL ignores them — every
-            value produces the same image. Intensity stops responding above 1.
+            Style sets the overall look (strong effect). Model preset and skin structure are disabled because{" "}
+            {NR_IGNORED_NOTE}.
           </Typography>
         </Box>
 
@@ -76,17 +78,6 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
             Let the runtime derive the region mask instead of processing the whole frame.
           </Typography>
         </Box>
-        <Box>
-          <FormControlLabel
-            control={
-              <Switch checked={value.uiCorrection} onChange={(_event, checked) => update({ uiCorrection: checked })} />
-            }
-            label="UI correction"
-          />
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", ml: 4.5, mt: -0.5 }}>
-            Protect overlays, text and sharp UI edges from re-rendering.
-          </Typography>
-        </Box>
       </Stack>
 
       <Stack spacing={1.5}>
@@ -94,9 +85,9 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
           label="Intensity"
           value={value.intensity}
           min={0}
-          max={2}
-          marks={NEUTRAL_MARKS}
-          hint="Overall neural-rendering strength. 0 = original, 1 = default (effect tends to plateau past ~1)."
+          max={NR_INTENSITY_EFFECTIVE_MAX}
+          marks={INTENSITY_MARKS}
+          hint={`Overall neural-rendering strength. 0 = original, ${NR_INTENSITY_EFFECTIVE_MAX} = default and also the most the installed runtime responds to; the API still accepts up to ${SETTING_RANGES.intensity.max}.`}
           onChange={(intensity) => update({ intensity })}
         />
         <SliderRow
@@ -124,7 +115,8 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
           max={2}
           marks={SKIN_MARKS}
           format={formatSkin}
-          hint="Detail strength on skin regions only. Leftmost = runtime default; 1 = neutral."
+          disabled={nrSettingIgnored("skinStructure")}
+          hint="Detail strength on skin regions only. Leftmost = runtime default; 1 = neutral. Disabled: see the note above."
           onChange={(skinStructure) => update({ skinStructure: skinStructure < 0 ? -1 : skinStructure })}
         />
       </Stack>
