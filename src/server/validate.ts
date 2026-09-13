@@ -66,8 +66,6 @@ function checkNrSettings(v: Record<string, unknown>): string | null {
     checkNumber(v.localStructure, "localStructure", "settings.localStructure"),
     checkNumber(v.skinStructure, "skinStructure", "settings.skinStructure"),
     checkNumber(v.warmupFrames, "warmupFrames", "settings.warmupFrames"),
-    // globalTone is not applied by the current runtime, but it is part of the contract.
-    v.globalTone === null || (typeof v.globalTone === "number" && Number.isFinite(v.globalTone)) ? null : "settings.globalTone must be a finite number or null.",
     checkBoolean(v.autoMask, "settings.autoMask"),
     checkBoolean(v.uiCorrection, "settings.uiCorrection"),
   );
