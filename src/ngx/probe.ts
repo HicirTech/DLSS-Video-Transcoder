@@ -184,6 +184,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
       isNvidia: a.info.isNvidia,
       software: a.info.software,
       cudaOrdinal: candidates[i]!.cudaOrdinal,
+      cudaUuid: candidates[i]!.cudaUuid,
     }));
     // The same rule a job applies (openGpu), so the verdict here and a refusal
     // there can never disagree. An ineligible choice is still diagnosed below:
