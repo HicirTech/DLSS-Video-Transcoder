@@ -1,8 +1,7 @@
-import { useId, useState } from "react";
-import { Button, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
+import { useState } from "react";
+import { Button, Stack, Typography } from "@mui/material";
 import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
-import type { NrPath } from "../../../src/server/api-types";
 import { api } from "../api";
 import { errorMessage } from "../errors";
 import { STORAGE_KEY, useSettings } from "../hooks/useSettings";
@@ -11,16 +10,7 @@ import { LogPanel } from "./LogPanel";
 import { NumberField } from "./NumberField";
 import { Mono, Section } from "./Section";
 
-const NR_PATH_OPTIONS: Array<{ value: NrPath; label: string; hint: string }> = [
-  { value: "auto", label: "Auto (recommended)", hint: "Prefer the neural rendering built into your GPU driver, and fall back to the standalone runtime DLL if the driver cannot run it." },
-  { value: "core", label: "Driver built-in (_nvngx.dll)", hint: "Always use the neural rendering built into your GPU driver." },
-  { value: "snippet", label: "Standalone runtime DLL (nvngx_dlssnr.dll)", hint: "Load the standalone neural rendering DLL directly, bypassing the driver's built-in copy." },
-];
-
 export function SettingsPanel() {
-  // useId, not a constant: every tab stays mounted, so two panels can render
-  // this component at once and a fixed id would appear twice in one document.
-  const nrPathLabelId = useId();
   const { settings, setNr, reset, replaceAll } = useSettings();
   const toast = useToast();
   const [loading, setLoading] = useState(false);
@@ -38,33 +28,8 @@ export function SettingsPanel() {
     }
   };
 
-  const selectedPath = NR_PATH_OPTIONS.find((option) => option.value === settings.nr.nrPath);
-
   return (
     <Stack spacing={3} sx={{ maxWidth: 720 }}>
-      <Section title="Neural rendering runtime">
-        <Stack spacing={1}>
-          <FormControl sx={{ maxWidth: 420 }}>
-            <InputLabel id={nrPathLabelId}>Neural rendering path</InputLabel>
-            <Select<NrPath>
-              labelId={nrPathLabelId}
-              label="Neural rendering path"
-              value={settings.nr.nrPath}
-              onChange={(event) => setNr({ ...settings.nr, nrPath: event.target.value })}
-            >
-              {NR_PATH_OPTIONS.map((option) => (
-                <MenuItem key={option.value} value={option.value}>
-                  {option.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <Typography variant="caption" color="text.secondary">
-            {selectedPath?.hint}
-          </Typography>
-        </Stack>
-      </Section>
-
       <Section title="Temporal warm-up">
         <Stack spacing={1}>
           <NumberField
