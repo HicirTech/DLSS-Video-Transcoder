@@ -40,10 +40,7 @@ function mergeKnown<T extends object>(base: T, candidate: unknown): T {
   for (const key of Object.keys(base) as Array<keyof T & string>) {
     const value = candidate[key];
     if (value === undefined) continue;
-    const baseValue = base[key];
-    const accepted =
-      baseValue === null ? value === null || typeof value === "number" : typeof value === typeof baseValue;
-    if (accepted) result[key] = value as T[keyof T & string];
+    if (typeof value === typeof base[key]) result[key] = value as T[keyof T & string];
   }
   return result;
 }
@@ -87,6 +84,8 @@ export function loadSettings(raw: string | null): StoredSettings {
       localTone: clamp(nr.localTone, "localTone", defaults.nr.localTone),
       localStructure: clamp(nr.localStructure, "localStructure", defaults.nr.localStructure),
       skinStructure: clamp(nr.skinStructure, "skinStructure", defaults.nr.skinStructure),
+      // Not offered in the UI any more (the runtime ignores it), so a value stored by an older build is not carried on.
+      uiCorrection: defaults.nr.uiCorrection,
       warmupFrames: clamp(nr.warmupFrames, "warmupFrames", defaults.nr.warmupFrames),
     },
     scale: {
