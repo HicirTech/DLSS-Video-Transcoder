@@ -9,7 +9,7 @@ import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings, EngineKind, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { DEFAULT_ENCODE_SETTINGS } from "../server/api-types.ts";
 import { createEngine, type Engine } from "./engine.ts";
-import { resolveEncodeCodec } from "./encode-select.ts";
+import { nvencGpuArgs, resolveEncodeCodec } from "./encode-select.ts";
 import { ratMul, type Rational, rational } from "./rational.ts";
 import { createMotionEstimator } from "./flow.ts";
 import { FrameReader } from "./frame-reader.ts";
@@ -223,8 +223,14 @@ export function videoInfoFrom(data: ProbeJson, input: string): VideoInfo {
   };
 }
 
-export function encoderArgs(encode: EncodeSettings): string[] {
+/**
+ * ffmpeg's output-side encoder argv for the rawvideo sinks. `cudaOrdinal` pins
+ * the NVENC encoders to the job's CUDA device (the renderer's, see
+ * GpuSession.cudaOrdinal); the CPU codecs ignore it.
+ */
+export function encoderArgs(encode: EncodeSettings, cudaOrdinal: number): string[] {
   const q = String(Math.max(0, Math.min(51, Math.round(encode.quality))));
+  const gpu = nvencGpuArgs(cudaOrdinal);
   switch (encode.codec) {
     case "h264":
       return ["-c:v", "libx264", "-preset", "medium", "-crf", q, "-pix_fmt", "yuv420p"];
@@ -233,11 +239,11 @@ export function encoderArgs(encode: EncodeSettings): string[] {
     case "av1":
       return ["-c:v", "libsvtav1", "-preset", "6", "-crf", q, "-pix_fmt", "yuv420p"];
     case "h264_nvenc":
-      return ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0", "-pix_fmt", "yuv420p"];
+      return ["-c:v", "h264_nvenc", ...gpu, "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0", "-pix_fmt", "yuv420p"];
     case "hevc_nvenc":
-      return ["-c:v", "hevc_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0", "-pix_fmt", "yuv420p", "-tag:v", "hvc1"];
+      return ["-c:v", "hevc_nvenc", ...gpu, "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0", "-pix_fmt", "yuv420p", "-tag:v", "hvc1"];
     case "av1_nvenc":
-      return ["-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0", "-pix_fmt", "yuv420p"];
+      return ["-c:v", "av1_nvenc", ...gpu, "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0", "-pix_fmt", "yuv420p"];
     default:
       throw new Error(`Unknown codec "${String(encode.codec)}". Choose one of: h264, hevc, av1, h264_nvenc, hevc_nvenc, av1_nvenc.`);
   }
@@ -518,7 +524,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
           ffmpeg, "-v", "error", "-y",
           "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${outWidth}x${outHeight}`, "-r", info.fpsText, "-i", "pipe:0",
           ...(wantAudio ? ["-i", options.input] : []),
-          "-map", "0:v:0", ...audioArgs, ...encoderArgs(encode), ...aspectArgs(info.displayAspect, outWidth, outHeight, null), ...faststart,
+          "-map", "0:v:0", ...audioArgs, ...encoderArgs(encode, cudaOrdinal), ...aspectArgs(info.displayAspect, outWidth, outHeight, null), ...faststart,
           ...(wantAudio ? ["-shortest"] : []),
           output,
         ],
