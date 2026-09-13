@@ -14,7 +14,9 @@ export interface ImageJobOptions {
   engine: EngineKind;
   scale: ScaleSettings;
   settings: NrSettings;
+  /** One of the two, never both: see GpuOptions. */
   adapterIndex?: number;
+  adapterUuid?: string;
   debugLayer?: boolean;
   runtimeDir?: string;
   /** Specific DLSS DLL folder to load (version switching); defaults to the runtime feature folder. */
@@ -85,7 +87,7 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
     0.1,
     `decoded ${decoded.width}x${decoded.height}, ${upscaling ? `upscaling to ${target.width}x${target.height}` : `working size ${target.width}x${target.height}`}`,
   );
-  const session = openGpu({ adapterIndex: options.adapterIndex, debugLayer: options.debugLayer });
+  const session = openGpu({ adapterIndex: options.adapterIndex, adapterUuid: options.adapterUuid, debugLayer: options.debugLayer });
   progress(0.1, describeGpu(session));
   let passes = 0;
   let result: RgbaImage;

@@ -45,6 +45,7 @@ async function run(message: RunMessage): Promise<void> {
         settings: request.settings,
         runtimeDir: message.runtimeDir,
         dllDir: request.dllDir,
+        adapterUuid: request.adapterUuid,
         appDataPath: message.appDataPath,
         onProgress: (fraction, text) => {
           post({ type: "progress", id, fraction, message: text });
@@ -84,6 +85,7 @@ async function run(message: RunMessage): Promise<void> {
       encode: request.encode,
       runtimeDir: message.runtimeDir,
       dllDir: request.dllDir,
+      adapterUuid: request.adapterUuid,
       appDataPath: message.appDataPath,
       onProgress: (fraction, text, frames) => {
         post({ type: "progress", id, fraction, message: text });
