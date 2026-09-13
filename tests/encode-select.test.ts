@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { buildNvencProbeArgs, cpuSiblingCodec, isNvenc, preferredDefaultCodec, resolveEncodeCodec } from "../src/pipeline/encode-select.ts";
+import { buildNvencProbeArgs, cpuSiblingCodec, isNvenc, nvencGpuArgs, preferredDefaultCodec, resolveEncodeCodec } from "../src/pipeline/encode-select.ts";
+import { encoderArgs } from "../src/pipeline/video.ts";
 
 describe("encode-select", () => {
   test("isNvenc identifies the hardware encoders", () => {
@@ -33,6 +34,22 @@ describe("encode-select", () => {
     expect(buildNvencProbeArgs("av1_nvenc", 0)).toContain("-gpu");
     const pinned = buildNvencProbeArgs("hevc_nvenc", 1);
     expect(pinned.slice(pinned.indexOf("-gpu"), pinned.indexOf("-gpu") + 2)).toEqual(["-gpu", "1"]);
+  });
+
+  test("nvencGpuArgs is the one place -gpu comes from, and ordinal 0 is a real device", () => {
+    expect(nvencGpuArgs(undefined)).toEqual([]);
+    expect(nvencGpuArgs(0)).toEqual(["-gpu", "0"]);
+    expect(nvencGpuArgs(3)).toEqual(["-gpu", "3"]);
+  });
+
+  test("encoderArgs pins every NVENC encoder to the job's CUDA device and leaves CPU codecs alone", () => {
+    for (const codec of ["h264_nvenc", "hevc_nvenc", "av1_nvenc"] as const) {
+      const args = encoderArgs({ codec, quality: 20, container: "mp4", copyAudio: false }, 1);
+      expect(args.slice(args.indexOf("-c:v"), args.indexOf("-c:v") + 4)).toEqual(["-c:v", codec, "-gpu", "1"]);
+    }
+    for (const codec of ["h264", "hevc", "av1"] as const) {
+      expect(encoderArgs({ codec, quality: 20, container: "mp4", copyAudio: false }, 1)).not.toContain("-gpu");
+    }
   });
 
   test("resolveEncodeCodec passes CPU codecs through without probing", () => {
