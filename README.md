@@ -163,8 +163,9 @@ driver, NGX core, runtime DLLs, caller-shim self-test):
 - **A CUDA device is required.** `sr`, `nr` and video jobs run on the DXGI adapter's CUDA device
   (in-process NVENC and the hardware optical-flow engine live there); an adapter without one — the
   duplicate "RTX 5090" entries DXGI lists here, a non-NVIDIA GPU — is refused with the adapters that
-  qualify, and `probe` reports "not ready" for it. The ffmpeg NVENC fallback (rawvideo path) uses
-  ffmpeg's default device. Frame generation always uses the default device (see `--adapter`).
+  qualify, and `probe` reports "not ready" for it. The ffmpeg NVENC fallback (rawvideo path) is
+  pinned to the same CUDA device with `-gpu`. Frame generation always uses CUDA device 0 (see
+  `--adapter`).
 - The `nr` engine exposes the reference project's controls — **model preset**, **style**, **intensity**
   (0–2), **local tone** (0–2), **local structure** (0–2) and **skin structure** (-1–2, -1 = runtime
   default, skin only). Style and the strength sliders have a strong, visible effect; **model preset**
