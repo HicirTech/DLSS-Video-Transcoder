@@ -2,11 +2,11 @@
  * Single-image job: PNG in, engine, PNG out.
  */
 import { basename, dirname, extname, join } from "node:path";
-import { decodePng, encodePng, isPng } from "../codec/png.ts";
+import { decodePng, encodePng, isPng, type RgbaImage } from "../codec/png.ts";
 import type { EngineKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { createEngine } from "./engine.ts";
 import { describeGpu, openGpu } from "./gpu.ts";
-import { evenSize, resizeRgba } from "./resize.ts";
+import { attachAlpha, evenSize, resizePlane, resizeRgba, splitAlpha } from "./resize.ts";
 
 export interface ImageJobOptions {
   input: string;
@@ -51,6 +51,23 @@ export function defaultOutputPath(input: string, engine: EngineKind, extension =
   return join(dirname(input), `${stem}.${engine}${extension}`);
 }
 
+/**
+ * Run a still through `enhance` on its colour only, then hand the source alpha
+ * back at the output's size. The neural engines are defined on colour: DLSS SR
+ * resamples a fourth channel like colour and feature 18 writes 255 into it
+ * (both measured on a soft-edged alpha), so alpha never enters the network and
+ * is resized with the same bilinear kernel the colour path uses — at 1:1 it is
+ * the source alpha byte for byte. Every still path (processImage, the sr and nr
+ * commands) goes through here so the rule has one owner. `enhance` receives the
+ * colour with alpha 255 and returns the output frame, which is modified in place.
+ */
+export function enhanceStill(source: RgbaImage, enhance: (colour: Uint8Array) => RgbaImage): RgbaImage {
+  const { colour, alpha } = splitAlpha(source.rgba);
+  const out = enhance(colour);
+  attachAlpha(out.rgba, resizePlane(alpha, source.width, source.height, out.width, out.height));
+  return out;
+}
+
 export async function processImage(options: ImageJobOptions): Promise<ImageJobResult> {
   const started = performance.now();
   const progress = options.onProgress ?? (() => {});
@@ -68,12 +85,10 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
     0.1,
     `decoded ${decoded.width}x${decoded.height}, ${upscaling ? `upscaling to ${target.width}x${target.height}` : `working size ${target.width}x${target.height}`}`,
   );
-  const working = upscaling ? decoded.rgba : resizeRgba(decoded.rgba, decoded.width, decoded.height, target.width, target.height);
-
   const session = openGpu({ adapterIndex: options.adapterIndex, debugLayer: options.debugLayer });
   progress(0.1, describeGpu(session));
   let passes = 0;
-  let result: Uint8Array;
+  let result: RgbaImage;
   try {
     const engine = createEngine(options.engine, session, {
       width: renderWidth,
@@ -86,18 +101,18 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
       appDataPath: options.appDataPath,
     });
     try {
-      // A still image has no history; run extra passes so temporal state settles.
-      const total = options.engine !== "bypass" ? Math.max(1, options.settings.warmupFrames + 1) : 1;
-      result = working;
-      for (let i = 0; i < total; i++) {
-        result = engine.process({ rgba: working, reset: i === 0, motion: null });
-        passes++;
-        progress(0.1 + (0.8 * passes) / total, `pass ${passes}/${total} on ${engine.name}`);
-      }
-      if (engine.outputWidth !== target.width || engine.outputHeight !== target.height) {
-        target.width = engine.outputWidth;
-        target.height = engine.outputHeight;
-      }
+      result = enhanceStill(decoded, (colour) => {
+        const working = upscaling ? colour : resizeRgba(colour, decoded.width, decoded.height, target.width, target.height);
+        // A still image has no history; run extra passes so temporal state settles.
+        const total = options.engine !== "bypass" ? Math.max(1, options.settings.warmupFrames + 1) : 1;
+        let rgba = working;
+        for (let i = 0; i < total; i++) {
+          rgba = engine.process({ rgba: working, reset: i === 0, motion: null });
+          passes++;
+          progress(0.1 + (0.8 * passes) / total, `pass ${passes}/${total} on ${engine.name}`);
+        }
+        return { rgba, width: engine.outputWidth, height: engine.outputHeight };
+      });
     } finally {
       engine.close();
     }
@@ -107,14 +122,14 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
 
   progress(0.92, "encoding PNG");
   const output = options.output ?? defaultOutputPath(options.input, options.engine);
-  await Bun.write(output, encodePng({ width: target.width, height: target.height, rgba: result }, { level: 6 }));
+  await Bun.write(output, encodePng(result, { level: 6 }));
   progress(1, "done");
   return {
     output,
     inputWidth: decoded.width,
     inputHeight: decoded.height,
-    width: target.width,
-    height: target.height,
+    width: result.width,
+    height: result.height,
     engine: options.engine,
     passes,
     ms: Math.round(performance.now() - started),
