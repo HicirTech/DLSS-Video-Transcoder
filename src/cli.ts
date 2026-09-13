@@ -11,7 +11,7 @@ import { PROBE_ENTRIES, PROBE_INITS, runProbe } from "./ngx/probe.ts";
 import { DlssNrSession } from "./ngx/nr-render.ts";
 import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
-import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, NR_PRESETS, NR_STYLES, type ProbeAdapter, type ProbeOpticalFlow, SETTING_RANGES } from "./server/api-types.ts";
+import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLES, type ProbeAdapter, type ProbeOpticalFlow, SETTING_RANGES } from "./server/api-types.ts";
 import { DlssRenderPreset, DLSS_RATIO, perfQualityName, qualityForFactor } from "./ngx/results.ts";
 import { processFrameGen } from "./pipeline/framegen.ts";
 import { FRAMEGEN_ENGINES } from "./pipeline/framegen-plan.ts";
@@ -245,14 +245,14 @@ const COMMANDS: readonly CommandSpec[] = [
       { name: "output.png", desc: "destination; defaults to <input>.nr.png next to the input" },
     ],
     options: [
-      { flag: "--intensity F", desc: "overall strength, 0..2; the installed runtime stops responding above 1, so 1, 1.5 and 2 give the same image", def: String(DEFAULT_NR_SETTINGS.intensity) },
+      { flag: "--intensity F", desc: `overall strength, 0..2; the installed ${NR_RUNTIME_MEASURED} stops responding above ${NR_INTENSITY_EFFECTIVE_MAX}, so 1, 1.5 and 2 give the same image`, def: String(DEFAULT_NR_SETTINGS.intensity) },
       { flag: "--style N", desc: "look style: 0 = Default, 1 = Natural, 2 = Cinematic (strong, visible effect)", def: String(DEFAULT_NR_SETTINGS.style) },
-      { flag: "--preset ID", desc: "NR model preset hint 0..3; the installed runtime ignores it — all four give the same image (tests/diag-nr-settings.ts)", def: String(DEFAULT_NR_SETTINGS.preset) },
+      { flag: "--preset ID", desc: `NR model preset hint 0..3; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.preset) },
       { flag: "--local-tone F", desc: "local tone-mapping strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localTone) },
       { flag: "--local-structure F", desc: "local detail / structure strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localStructure) },
-      { flag: "--skin-structure F", desc: "detail strength on skin regions; -1 = runtime default, typical 0..2. The installed runtime ignores it — every value gives the same image", def: String(DEFAULT_NR_SETTINGS.skinStructure) },
+      { flag: "--skin-structure F", desc: `detail strength on skin regions; -1 = runtime default, typical 0..2; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.skinStructure) },
       { flag: "--auto-mask", desc: "let the runtime derive the processed-region mask instead of the whole frame", def: "off" },
-      { flag: "--ui-correction", desc: "protect overlays / text / sharp UI edges from being re-rendered; the installed runtime ignores it — on and off give the same image", def: "off" },
+      { flag: "--ui-correction", desc: `protect overlays / text / sharp UI edges from being re-rendered; ${NR_IGNORED_NOTE}`, def: "off" },
       RUNTIME_OPT,
       ADAPTER_OPT,
     ],
@@ -577,7 +577,8 @@ async function main(): Promise<void> {
       const enhanced = enhanceStill(image, (colour) => ({ rgba: nr.evaluate(colour, true), width: image.width, height: image.height }));
       await Bun.write(output, encodePng(enhanced, { level: 6 }));
       nr.close();
-      console.log(`DLSS NR: ${image.width}x${image.height} enhanced (intensity ${settings.intensity}, preset ${settings.preset}) in ${(performance.now() - started).toFixed(1)} ms`);
+      // Only settings the runtime acts on are worth reporting; the preset is not one of them.
+      console.log(`DLSS NR: ${image.width}x${image.height} enhanced (style ${settings.style}, intensity ${settings.intensity}) in ${(performance.now() - started).toFixed(1)} ms`);
       console.log(`wrote ${output}`);
       process.exit(0);
     }
