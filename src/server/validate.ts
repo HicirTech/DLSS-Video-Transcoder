@@ -11,7 +11,6 @@ import {
   ENCODE_CODECS,
   ENCODE_CONTAINERS,
   FRAME_GEN_ENGINES,
-  NR_PATHS,
   NR_PRESETS,
   NR_STYLES,
   SCALE_MODES,
@@ -62,7 +61,6 @@ function checkNrSettings(v: Record<string, unknown>): string | null {
   return first(
     checkEnum(v.preset, NR_PRESETS, "settings.preset"),
     checkEnum(v.style, NR_STYLES, "settings.style"),
-    checkEnum(v.nrPath, NR_PATHS, "settings.nrPath"),
     checkNumber(v.intensity, "intensity", "settings.intensity"),
     checkNumber(v.localTone, "localTone", "settings.localTone"),
     checkNumber(v.localStructure, "localStructure", "settings.localStructure"),
