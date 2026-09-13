@@ -383,7 +383,7 @@ function printProbe(report: Awaited<ReturnType<typeof runProbe>>): void {
   lines.push("");
   lines.push("Adapters:");
   // "n/a" when CUDA could not be asked at all, so a driver problem does not read as "this adapter has no CUDA device".
-  const cudaColumn = (a: ProbeAdapter): string => (report.cuda.error !== null ? "n/a" : a.cudaOrdinal === null ? "none" : String(a.cudaOrdinal));
+  const cudaColumn = (a: ProbeAdapter): string => (report.cuda.error !== null ? "n/a" : a.cudaOrdinal === null ? "none" : `${a.cudaOrdinal}${a.cudaUuid ? ` (${a.cudaUuid})` : ""}`);
   for (const a of report.adapters) {
     const mark = a.index === report.selectedAdapter ? "*" : " ";
     lines.push(`  ${mark} [${a.index}] ${a.name}  vendor=0x${a.vendorId.toString(16)}  vram=${a.dedicatedVideoMemoryMB} MB  luid=${a.luid}  cudaDevice=${cudaColumn(a)}${a.software ? "  (software)" : ""}`);
