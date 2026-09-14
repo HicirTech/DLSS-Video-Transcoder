@@ -13,202 +13,102 @@ with a **React + Material UI** web front end. DLSS runtimes are version-switchab
 ![DLSS Neural Rendering parameter matrix — style vs. intensity](docs/images/nr-matrix.png)
 
 <sub>Rows top→bottom: style Default / Natural / Cinematic. Columns left→right: intensity 0.0 / 0.5 /
-1.0 (0.0 = original). The NR model preset (0–3) is accepted by the API but the installed runtime
-ignores it (measured: every value gives the same image), so the UI shows it disabled.</sub>
+1.0 (0.0 = original).</sub>
 
-> **Status (2026-09-09).** Runs on the project's RTX 5090. The **web UI** covers the whole pipeline —
-> SR upscaling, Neural Rendering, Frame Generation, DLSS version selection and browser upload — and the
-> **command line** offers the same features for scripting. GPU-resident pipelining and RTX Video SR
-> remain open; the [Feature status](#feature-status) table says what is verified vs. still gated. DLL
-> presence alone is not proof a feature works — everything below was exercised on real hardware.
+> **Status.** Runs on the project's RTX 5090. The **web UI** covers the whole pipeline — SR
+> upscaling, Neural Rendering, Frame Generation, DLSS version selection and browser upload — and the
+> **command line** offers the same features for scripting. See [Feature status](#feature-status) below.
 
 ---
 
 ## Requirements
 
-- **Windows 11**, an **NVIDIA RTX GPU** (developed and tested on an RTX 5090) with a current driver
-  (NGX core `_nvngx.dll` is loaded from the driver; not shipped here).
-- **[Bun](https://bun.sh)** (project uses `@types/bun` ^1.4). Native access is via `bun:ffi`.
+- **Windows 11**, an **NVIDIA RTX GPU** (developed on an RTX 5090) with a current driver.
+- **[Bun](https://bun.sh)** (project uses `@types/bun` ^1.4).
 - **NVIDIA DLSS runtime DLLs** placed under `runtime/` (see [Runtime folder](#runtime-folder)).
-  These are **not** redistributed in this repo — you supply your own licensed copies.
-- **ffmpeg / ffprobe** for video (bundled under `runtime/ffmpeg/bin`, or on `PATH`, or via
-  `FFMPEG_PATH` / `FFPROBE_PATH`).
+  These are **not** redistributed — you supply your own licensed copies.
+- **ffmpeg / ffprobe** for video (bundled under `runtime/ffmpeg/bin`, on `PATH`, or via env vars).
 
 ## Install & run
 
 ```bash
 bun install
+bun run dev              # start server at http://localhost:4080
+bun run typecheck        # tsc --noEmit
+bun test                 # unit suite (pure logic, no GPU)
+bun run cli <command>    # see CLI reference below
 ```
 
-Place the required DLSS DLLs under `runtime/` (see below), then start the server (web UI + API):
-
-```bash
-bun run dev
-```
-
-Open **http://localhost:4080/**. Other scripts:
-
-```bash
-bun run typecheck   # tsc --noEmit
-bun test            # the unit suite (pure logic, no GPU needed)
-bun run cli <command> [options]   # the DLSS command line (see below)
-```
-
-Server environment variables: `PORT` (default **4080**), `NR_HOST` (default **127.0.0.1** — the API
-has no authentication, so it binds loopback until you opt out), `NR_RUNTIME_DIR` (default
-`<repo>/runtime`), `NR_APPDATA` (default `<repo>/logs`), `NODE_ENV=production` (disables Bun dev
-bundling).
+Server env vars: `PORT` (default **4080**), `NR_HOST` (default **127.0.0.1**, loopback only),
+`NR_RUNTIME_DIR`, `NR_APPDATA`, `NODE_ENV=production`.
 
 ---
 
 ## Command line
 
-`bun run cli <command> [args] [options]` (or `bun run src/cli.ts …`). Run `bun run cli help` for the
-overview, or `bun run cli help <command>` / `<command> --help` for details — the in-code `COMMANDS`
-spec is the source of truth for that help.
-
 | Command | What it does |
 | --- | --- |
-| `probe` | Inspect GPU / driver / NGX core / `runtime/` and report which DLSS features are ready. Exits 0 only when neural rendering is ready, so a script can gate on it. |
-| `sr <in.png> [out.png]` | **DLSS Super Resolution (feature 1)** — real upscaling of a PNG. The only true upscaler. |
-| `nr <in.png> [out.png]` | **DLSS Neural Rendering (feature 18)** — enhance a PNG at the same size (no upscale). |
-| `fg <in.mp4> [out.mp4]` | **DLSS Frame Generation (feature 11)** — interpolate a video to a higher frame rate. |
-| `versions` | List every installed DLSS runtime DLL per feature (version / source / folder). |
-| `forwarder` | (Re)generate the `nvngx.dll` shim NGX requires (auto-built by `sr`/`nr` when missing). |
-| `help [command]` | Overview, or per-command help. |
+| `probe` | Inspect GPU / driver / NGX core / `runtime/`; exits 0 only when neural rendering is ready. |
+| `sr <in.png> [out.png]` | **DLSS Super Resolution (feature 1)** — real PNG upscaling. |
+| `nr <in.png> [out.png]` | **DLSS Neural Rendering (feature 18)** — enhance a PNG at the same size. |
+| `fg <in.mp4> [out.mp4]` | **DLSS Frame Generation (feature 11)** — interpolate to higher frame rate. |
+| `versions` | List every installed DLSS runtime DLL per feature. |
+| `forwarder` | (Re)generate the `nvngx.dll` shim NGX requires. |
+| `help [command]` | Overview or per-command help. |
 
-Shared options, and which commands take them:
+### Key options
 
-- `--adapter N` (GPU index as `probe` listed it, default auto) — `probe`, `sr`, `nr`. Auto picks the
-  NVIDIA adapter with the most VRAM **that has a CUDA device behind it**; DXGI can list one GPU several
-  times (this machine shows three "RTX 5090" entries) and only one entry has CUDA. DXGI indices can
-  change between runs, so take the index from a `probe` in the same session; an adapter without a CUDA
-  device is refused with the ones that have one, LUIDs and CUDA UUIDs included. Frame generation has no adapter
-  selection: it runs in NVIDIA's `dlssg-worker.exe`, which always takes the default device, and its
-  NVENC/NVOFA helpers follow it to CUDA device 0.
-- `--runtime DIR` (default `<repo>/runtime`) — `probe`, `sr`, `nr`, `fg`, `versions`. `forwarder`
-  writes where `--out` points instead.
+- **`sr`** — `--factor N` (2; DLSS ratio), `--preset NAME` (L; model preset), `--dlss-version VER`, `--adapter N`
+- **`nr`** — `--intensity F` (1, 0–2), `--style N` (0; Default / Natural / Cinematic), `--local-tone F` (1),
+  `--local-structure F` (1), `--auto-mask`, `--adapter N`
+- **`fg`** — `--fps RATE`, `--multiplier N` (2), `--engine auto|native|cascade`, `--codec NAME` (NVENC default),
+  `--quality N` (0–51, lower = better, 20)
 
-Every command rejects an option it does not declare, single dash included, and prints that
-command's help. A declared flag whose value is missing, empty or another flag is a usage error too,
-rather than a silent fall back to the default.
+Shared: `--adapter N` (GPU index from a prior `probe` output), `--runtime DIR`. Every command rejects
+unknown flags; per-command `--help` lists all options with defaults.
 
-Key per-command options (defaults in parentheses):
-
-- **`sr`** — `--factor N` (2; snapped to the nearest fixed DLSS mode, named as the NGX enum does:
-  `1.00`=DLAA, `1.50`=MaxQuality, `1.72`=Balanced, `2.00`=MaxPerf, `3.00`=UltraPerformance. A
-  factor above 1 never snaps to DLAA, so asking to upscale cannot return the same size, and `sr`
-  prints the mode and ratio it chose. UltraQuality is not offered: the installed runtime refuses
-  it at every ratio), `--preset NAME` (L;
-  `Default`, `A`–`F`, `J`–`O` — which model each one selects belongs to the installed
-  `nvngx_dlss.dll`, not to this tool), `--dlss-version VER` (bundled DLL; prefix match against
-  `versions`).
-- **`nr`** — `--intensity F` (1; overall strength 0–2), `--style N` (0; 0 = Default, 1 = Natural,
-  2 = Cinematic — strong, visible effect), `--local-tone F` (1; 0–2, 1 = neutral),
-  `--local-structure F` (1; 0–2, 1 = neutral), `--skin-structure F` (-1; -1 = runtime default,
-  otherwise 0–2), `--preset ID` (0; 0–3), `--auto-mask` / `--ui-correction` (both off).
-
-  Not every one of those reaches the picture. Measured against the installed
-  `nvngx_dlssnr.dll` 310.8.2.0 by sweeping each setting alone and hashing the output
-  (`bun run tests/diag-nr-settings.ts`): **`--preset`, `--skin-structure` and `--ui-correction` are
-  ignored by this runtime** — every value gives a byte-identical image — and `--intensity` stops
-  responding above 1, so 1, 1.5 and 2 are the same. `--style`, `--local-tone`, `--local-structure`
-  and `--auto-mask` all work. The settings are still sent, in case a later DLL honours them; re-run
-  that diagnostic after a runtime update.
-- **`fg`** — `--fps RATE` (output frame rate: 23.976, 25, 29.97, 30, 50, 59.94, 60, 90, 119.88, 120,
-  144, 165, 180, 240, 360, 480, or an exact `num/den`; default: source fps × `--multiplier`),
-  `--multiplier N` (2; used when `--fps` is absent), `--engine MODE` (auto; `auto` = one native
-  multi-frame DLSSG session when output ÷ source is an exact integer the runtime supports **and HAGS is
-  on** (2× native needs no HAGS), otherwise a cascade of 2× stages chained in memory — 1 stage for 2×,
-  2 for 4×, else 3 on an 8× grid — placing the nearest frame on each instant of the exact target clock;
-  `native` / `cascade` force a path; the bundled dlssg-worker synthesises only 1 frame per interval, so
-  3× and above run as a cascade and `auto` falls back to it automatically when a native multi-frame
-  session is refused, HAGS or not), `--codec NAME` (default: GPU NVENC when available, else libx264),
-  `--quality N` (encoder quality, CRF for CPU / CQ for NVENC, 0–51, lower = better, 20). The output
-  always keeps the source duration (frame count = ⌈duration × rate⌉) and the original audio, and is
-  verified after muxing.
+---
 
 ## Web UI
 
-Served by the Bun server at `/` (Bun bundles `web/index.html` directly — no separate build step).
-For front-end-only work, `bun run web/mock-server.ts` serves the UI with mock data on
-http://127.0.0.1:3080/, and appending `?mock=1` uses an in-browser mock client.
+At **http://localhost:4080/** — no separate build step (Bun serves `web/index.html`).
+For front-end-only work: `bun run web/mock-server.ts` on port 3080, or append `?mock=1`.
 
-**What the UI does today:** run **image** and **video** jobs with three engines — `sr` (DLSS Super
-Resolution upscaling to the chosen output size), `nr` (DLSS Neural Rendering enhancement), and
-`bypass` (a plain GPU passthrough copy, for A/B comparison); **DLSS Frame Generation** for video
-(pick any output rate from the 23.976–480 list and the path: auto / native / cascade); **DLSS DLL
-version selection** per feature; **browser file upload** for the input; a live job queue with
-WebSocket progress; a before/after compare view; a hardware/runtime **probe** panel; and encode
-settings for video (codec incl. NVENC, quality 0–51 with 18 as default, container mp4/mkv/mov, audio).
-Optical-flow motion can be enabled for video. The **Settings** tab picks the GPU image and video jobs
-run on, from the adapters the last probe found eligible; the choice is stored by the CUDA device
-UUID (nvidia-smi's `GPU-…`), which survives reboots where a DXGI index or LUID does not. Frame
-generation ignores it and always uses the default device.
+**Image tab** — SR upscale / Neural Rendering / bypass engine, DLSS version, output size, NR look controls.  
+**Video tab** — Frame Generation (240+ fps target list), NVENC encoding, neural-rendering controls.  
+**Probe tab** — hardware/runtime check (adapters, CUDA device, optical-flow limits, DLLs, shim).
 
-**Image tab** — choose an engine (SR upscale / Neural Rendering / bypass), a DLSS version, the output
-size and the look controls:
+### Caveats
 
-![Neural Render — image job](docs/images/ui-image.png)
-
-**Video tab** — DLSS Frame Generation, engine/motion, NVENC encoding and the neural-rendering controls:
-
-![Neural Render — video job with frame generation](docs/images/ui-video.png)
-
-**Probe tab** — hardware/runtime check (adapters with their CUDA device, hardware optical-flow limits,
-driver, NGX core, runtime DLLs, caller-shim self-test):
-
-![Neural Render — hardware and runtime probe](docs/images/ui-probe.png)
-
-**Notes / honest caveats:**
-
-- **A CUDA device is required.** `sr`, `nr` and video jobs run on the DXGI adapter's CUDA device
-  (in-process NVENC and the hardware optical-flow engine live there); an adapter without one — the
-  duplicate "RTX 5090" entries DXGI lists here, a non-NVIDIA GPU — is refused with the adapters that
-  qualify, and `probe` reports "not ready" for it. The ffmpeg NVENC fallback (rawvideo path) is
-  pinned to the same CUDA device with `-gpu`. Frame generation always uses CUDA device 0 (see
-  `--adapter`).
-- The `nr` engine exposes the reference project's controls — **style**, **intensity**, **local tone**
-  (0–2), **local structure** (0–2), **auto mask**, plus **model preset** (0–3) and **skin structure**
-  (-1–2). Style, intensity, local tone, local structure and auto mask have a visible effect; the
-  installed `nvngx_dlssnr.dll` 310.8.2.0 ignores model preset, skin structure and UI correction
-  (measured with `tests/diag-nr-settings.ts`: every value gives the same image), so the UI shows
-  the first two disabled and does not offer UI correction (the CLI flag stays). Intensity is
-  effective up to 1: the slider ends there, the API still accepts up to 2.
-- **DLSS version selection**: the picker defaults to the bundled DLL. Loading an alternate (not
-  driver-matched) DLSS DLL can intermittently fail to initialise on newer drivers (a known
-  DLSS-Swapper behaviour); the job then reports a clear error and you can retry or pick another.
-- Uploaded files are stored server-side under `logs/uploads/`; the browser sends the file to the
-  server, which runs entirely on your machine.
+- A **CUDA device is required**; non-NVIDIA or duplicate DXGI entries are rejected.
+- Alternate DLSS DLLs may fail to initialise on newer drivers; the job reports a clear error.
+- NR style, intensity (effective to 1), local tone/structure, and auto mask apply; model preset
+  and skin structure are shown disabled (the installed runtime ignores them).
 
 ## HTTP API
 
-All JSON unless noted. Base is same-origin.
+All JSON, same-origin base:
 
 | Method & path | Returns |
 | --- | --- |
-| `GET /api/probe` | `ProbeReport` (runs the hardware/runtime probe; can take seconds) |
-| `GET /api/runtime` | `ProbeReport["runtime"]` |
-| `GET /api/tools` | `ToolsReport` (ffmpeg / ffprobe / NVENC availability) |
-| `GET /api/catalog` | Runtime DLL catalog (per-feature versions) |
-| `GET /api/settings/defaults` | `{ settings, scale, encode }` defaults |
-| `GET /api/jobs` · `POST /api/jobs` | list jobs · submit a `JobRequest` → `JobStatus` (201) |
-| `GET /api/jobs/:id` · `POST /api/jobs/:id/cancel` | one job · cancel it |
-| `GET /api/file?path=<abs>` | raw bytes of a local file (previews; absolute path only). Unauthenticated: reachable only from loopback unless you set `NR_HOST` |
-| `POST /api/upload` | multipart `file` upload → `{ path, name, size }` (201); `path` is the saved absolute path to use as job input |
+| `GET /api/probe` | ProbeReport (hardware/runtime probe) |
+| `GET /api/runtime` | Runtime report |
+| `GET /api/tools` | ffmpeg / ffprobe / NVENC availability |
+| `GET /api/catalog` | DLL version catalog |
+| `GET /api/settings/defaults` | defaults |
+| `GET|POST /api/jobs` | list / submit job |
+| `GET /api/jobs/:id` · `POST /api/jobs/:id/cancel` | status / cancel |
+| `GET /api/file?path=<abs>` | raw bytes (previews; absolute path only) |
+| `POST /api/upload` | multipart upload → `{ path, name, size }` |
 | `WS /ws` | server→client `WsEvent` stream (`hello` / `job` / `log`) |
 
-`JobRequest`: `{ kind: "image"|"video", input, output?, engine: "sr"|"nr"|"bypass",
-motion: "none"|"flow", settings, scale, encode?, frameGen?: { targetFps?, multiplier?, engine? },
-dllDir?, adapterUuid? }`. `adapterUuid` is a CUDA device UUID as `GET /api/probe` lists it per
-adapter (`GPU-…`); image and video jobs only, rejected together with `frameGen`. A submitted
-`output` must be absolute and inside the app-data folder, the runtime folder or the input's own
-directory. Payload shapes are defined in
-[`src/server/api-types.ts`](src/server/api-types.ts).
+Full request/response shapes in [`src/server/api-types.ts`](src/server/api-types.ts).
+
+---
 
 ## Runtime folder
 
-`runtime/` is git-ignored (except its `README.md`); you place licensed NVIDIA binaries yourself.
+`runtime/` is git-ignored (except its `README.md`):
 
 ```
 runtime/
@@ -218,57 +118,33 @@ runtime/
   dlssg/dlssg-worker.exe  frame-gen worker process
   dlssnr/nvngx_dlssnr.dll DLSS Neural Rendering   (feature 18)  [required]
   ffmpeg/bin/{ffmpeg,ffprobe}.exe
-  host/, rtx_video/       out-of-process host / RTX Video assets (see status)
 ```
 
-- The driver's NGX core `_nvngx.dll` is loaded from the installed driver, never from here.
-- The shim exists because NGX rejects calls whose return address is not inside a module named
-  `nvngx.dll`; every NGX call is routed through it.
-- Feature 11 runs out-of-process in NVIDIA's `dlssg-worker.exe`; features 1 and 18 run in-process.
+The driver's NGX core `_nvngx.dll` is loaded from the installed driver. The shim exists because NGX
+rejects calls whose return address is not inside a module named `nvngx.dll`. Feature 11 runs
+out-of-process; features 1 and 18 run in-process.
 
 ## Tests
 
-`bun test` runs the whole suite — all pure logic, **no GPU required**: the PNG codec,
-exact rational arithmetic, ffprobe interpretation (frame rates, rotation), encoder selection,
-frame-generation planning and the nearest-timestamp writer, optical-flow math, the version catalog,
-the forwarder shim, request validation, and the NGX parameter object. The `tests/diag-*.ts` and
-`tests/run-*.ts` scripts are manual GPU harnesses (run individually with `bun run tests/<file>.ts`),
-not part of the suite.
+`bun test` — pure logic suite: PNG codec, rational arithmetic, ffprobe parsing, encoder selection,
+frame-gen planning, optical-flow math, version catalog, forwarder shim, request validation.
+Manual GPU harnesses live in `tests/diag-*.ts` / `tests/run-*.ts`.
 
 ## Feature status
 
-Verified against the source on 2026-09-10.
-
-| Capability | CLI | Web UI | Notes |
-| --- | --- | --- | --- |
-| DLSS SR upscaling (feature 1) | ✅ `sr` | ✅ (`sr` engine) | real render/output split in image & video |
-| DLSS Neural Rendering (feature 18) | ✅ `nr` (PNG) | ✅ (`nr` engine, image & video) | wired into the pipeline |
-| DLSS Frame Generation (feature 11) | ✅ `fg` | ✅ (video tab) | native 2× per session; 3×/4× run as a cascade of 2× stages |
-| DLSS version enumeration | ✅ `versions` | ✅ (`/api/catalog`) | shown in the version picker |
-| DLSS version selection | ✅ SR (`sr --dlss-version`) | ✅ (sr/nr) | alternate DLLs may fail to init on newer drivers |
-| Browser file upload | n/a | ✅ | POST /api/upload; stored under logs/uploads/ |
-| NR look controls | ✅ (`nr`) | ✅ | style / intensity (effective to 1) / tone / structure / auto mask apply; model preset and skin structure are shown disabled and UI correction is CLI-only, because the installed runtime ignores them (measured) |
-| NVENC (GPU) video encode | ✅ if requested | ✅ if selected | frame-gen GPU-encodes by default |
-| GPU optical flow (NVOFA) | ✅ (video/fg motion) | ✅ | hardware flow engine, ~5.7× faster than CPU, auto CPU fallback; `probe` reports whether it comes up and its size limits |
-| RTX Video Super Resolution / TrueHDR | ❌ | ❌ | DLLs present but no code path uses them |
-
-### Known limitations
-
-- **Throughput.** Decode, DLSS and NVENC each run on their own thread, and video is encoded in-process
-  on the GPU (ffmpeg only muxes the elementary stream with `-c:v copy`). For Neural Rendering the
-  output additionally stays GPU-resident: DLSS renders into a D3D12 buffer shared with CUDA and NVENC
-  encodes from that pointer, so no readback happens. _Measured on an RTX 5090 at 1080p, h264_nvenc:_
-  neural rendering 79 fps single-thread → 163 fps threaded → **213 fps** GPU-resident; bypass
-  transcode 108 → **228 fps**. The path is chosen automatically: NR + NVENC at even, in-cap dimensions
-  takes the GPU-resident path (NVENC limits: H.264 ≤ 4096, HEVC ≤ 8192); other engines, CPU codecs and
-  AV1 use the threaded or single-thread rawvideo path.
-- **Input-side zero-copy is not done** — decoding still goes through an ffmpeg rawvideo pipe, which is
-  now the ceiling. In-process NVDEC → CUDA would remove it.
-- **RTX Video Super Resolution / TrueHDR** are not implemented (the DLLs under `runtime/rtx_video` are
-  unused).
-- Feature 18 does not consume motion vectors, so `nr` ignores the motion setting.
+| Capability | CLI | Web UI |
+| --- | --- | --- |
+| DLSS SR upscaling (feature 1) | ✅ `sr` | ✅ (`sr`) |
+| DLSS Neural Rendering (feature 18) | ✅ `nr` (PNG) | ✅ (`nr`, image & video) |
+| DLSS Frame Generation (feature 11) | ✅ `fg` | ✅ (video tab) |
+| DLSS version enumeration / selection | ✅ `versions` + `--dlss-version` | ✅ (picker) |
+| Browser file upload | — | ✅ (POST /api/upload) |
+| NR look controls | ✅ (`nr`) | ✅ |
+| NVENC GPU encode | ✅ if requested | ✅ if selected |
+| GPU optical flow (NVOFA) | ✅ (video/fg motion) | ✅ |
+| RTX Video Super Resolution / TrueHDR | ❌ | ❌ (DLLs present, unused code path) |
 
 ## License
 
-This project's own code is provided as-is. NVIDIA DLSS runtime DLLs, ffmpeg, and ReShade are
-**not** included and are subject to their own licenses; you must obtain and place them yourself.
+This project's own code is provided as-is. NVIDIA DLSS DLLs, ffmpeg, and ReShade are **not**
+included — subject to their own licenses; obtain and place them yourself.
