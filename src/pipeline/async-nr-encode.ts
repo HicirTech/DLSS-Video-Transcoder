@@ -15,8 +15,10 @@ import { AsyncSubmit } from "../native/async-submit.ts";
 import { closeHandle } from "../native/cuda-interop.ts";
 import { D3D12_HEAP_TYPE_UPLOAD, type D3D12Fence, type D3D12Resource } from "../native/d3d12.ts";
 import type { DlssNrSession } from "../ngx/nr-render.ts";
+import { throwIfAborted } from "./cancel.ts";
 import type { GpuSession } from "./gpu.ts";
 import type { NvencSdkCodec } from "./nvenc.ts";
+import { WorkerPairRun } from "./worker-pair-run.ts";
 
 export interface AsyncNrEncodeParams {
   session: GpuSession;
@@ -34,6 +36,10 @@ export interface AsyncNrEncodeParams {
   guide: (rgba: Uint8Array, index: number) => { reset: boolean; sceneCut: boolean };
   onProgress?: (fraction: number, message: string, frames?: number) => void;
   poolSize?: number;
+  /** Cooperative cancellation: until the encode is finishing, the run stops at the next frame and rejects with JobCancelledError. */
+  signal?: AbortSignal;
+  /** Called once as the run starts finishing; see VideoJobOptions.onFinishing. */
+  onFinishing?: () => void;
 }
 
 /**
@@ -104,6 +110,8 @@ function startWorkers(): { encodeWorker: Worker; decodeWorker: Worker } {
 }
 
 export function runAsyncNrEncode(p: AsyncNrEncodeParams): Promise<{ frames: number; sceneCuts: number }> {
+  // Before anything below is allocated or spawned.
+  throwIfAborted(p.signal);
   const progress = p.onProgress ?? (() => {});
   const K = p.poolSize ?? 4;
   const frameBytes = p.width * p.height * 4;
@@ -121,48 +129,51 @@ export function runAsyncNrEncode(p: AsyncNrEncodeParams): Promise<{ frames: numb
 
   return new Promise((resolve, reject) => {
     const freeSlots: number[] = []; for (let i = 0; i < K; i++) freeSlots.push(i);
-    let frames = 0, acked = 0, sceneCuts = 0, decodeEnded = false, settled = false;
+    let frames = 0, sceneCuts = 0, decodeEnded = false;
     // Any reply from the encode worker means it handled "open", which closes
     // the NT handles; one that died before that leaves them to this side.
     let handlesClosedByWorker = false;
 
-    const cleanup = (): void => {
-      try { decodeWorker.terminate(); } catch { /* */ }
-      try { encodeWorker.terminate(); } catch { /* */ }
-      if (!handlesClosedByWorker) closeSharedHandles(pool.bufferHandles, pool.fenceHandle);
-      releaseSharedPool(pool);
+    // The pool goes only after the encode worker has closed NVENC and dropped
+    // its CUDA imports of it, whichever way the run ends.
+    const run = new WorkerPairRun<{ frames: number; sceneCuts: number }>({
+      decodeWorker, encodeWorker, signal: p.signal, onFinishing: p.onFinishing, resolve, reject,
+      release: () => {
+        if (!handlesClosedByWorker) closeSharedHandles(pool.bufferHandles, pool.fenceHandle);
+        releaseSharedPool(pool);
+      },
+    });
+    const maybeFinish = (): void => {
+      if (run.running && decodeEnded && run.framesWritten === frames) run.finish();
     };
-    const fail = (message: string): void => { if (settled) return; settled = true; cleanup(); reject(new Error(message)); };
-    const maybeFinish = (): void => { if (!settled && decodeEnded && acked === frames) encodeWorker.postMessage({ type: "finish" }); };
-
-    decodeWorker.addEventListener("error", (e) => fail(`decode worker crashed: ${(e as ErrorEvent).message}`));
-    encodeWorker.addEventListener("error", (e) => fail(`encode worker crashed: ${(e as ErrorEvent).message}`));
 
     encodeWorker.onmessage = (e: MessageEvent) => {
       const m = e.data as { type: string; slot?: number; message?: string };
       handlesClosedByWorker = true;
+      if (m.type === "encoded") run.recordEncoded();
+      // After a stop the encoder may still answer "opened" or "encoded": neither may start the decoder or report progress.
+      if (!run.active) return;
       if (m.type === "opened") {
         decodeWorker.postMessage({ type: "start", ffmpeg: p.ffmpeg, args: p.decodeArgs, frameBytes });
         decodeWorker.postMessage({ type: "credit", n: K });
       } else if (m.type === "encoded") {
-        acked++;
         freeSlots.push(m.slot!);
         if (!decodeEnded) decodeWorker.postMessage({ type: "credit", n: 1 });
         const total = p.totalFrames;
-        progress(total ? Math.min(0.98, acked / total) : 0.5, `frame ${acked}/${total ?? "?"}`, acked);
+        const written = run.framesWritten;
+        progress(total ? Math.min(0.98, written / total) : 0.5, `frame ${written}/${total ?? "?"}`, written);
         maybeFinish();
       } else if (m.type === "done") {
-        if (settled) return;
-        settled = true; cleanup(); resolve({ frames, sceneCuts });
+        run.succeed({ frames, sceneCuts });
       } else if (m.type === "error") {
-        fail(`encode: ${m.message}`);
+        run.fail(`encode: ${m.message}`);
       }
     };
 
     decodeWorker.onmessage = (e: MessageEvent) => {
       const m = e.data as { type: string; buf?: ArrayBuffer; message?: string };
+      if (!run.active) return;
       if (m.type === "frame") {
-        if (settled) return;
         try {
           const rgba = new Uint8Array(m.buf!);
           const g = p.guide(rgba, frames);
@@ -173,11 +184,11 @@ export function runAsyncNrEncode(p: AsyncNrEncodeParams): Promise<{ frames: numb
           const value = pool.submit.submit(slot);
           frames++;
           encodeWorker.postMessage({ type: "frame", slot, value });
-        } catch (err) { fail(`engine: ${(err as Error).message}`); }
+        } catch (err) { run.fail(`engine: ${(err as Error).message}`); }
       } else if (m.type === "end") {
         decodeEnded = true; maybeFinish();
       } else if (m.type === "error") {
-        fail(`decode: ${m.message}`);
+        run.fail(`decode: ${m.message}`);
       }
     };
 
