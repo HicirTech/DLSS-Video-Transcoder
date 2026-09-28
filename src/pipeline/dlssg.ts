@@ -10,6 +10,7 @@
  * user-supplied runtime folder.
  */
 import { join } from "node:path";
+import { ABORT_TIMEOUT_MS } from "./worker-abort.ts";
 
 const SETUP_MAGIC = 0x31534746; // 'FGS1'
 const SETUP_OUT_MAGIC = 0x31524746; // 'FGR1'
@@ -275,12 +276,31 @@ export class DlssgSession {
     return frames;
   }
 
-  async close(): Promise<void> {
+  /**
+   * End the worker's input and wait up to `timeoutMs` for it to exit; a worker
+   * still running then is killed, so a wedged one cannot hold up the job's
+   * teardown (it releases its own D3D12 device and NGX feature on exit). A
+   * healthy worker exits well inside a second: after a cancel on 2.mp4 every
+   * dlssg-worker.exe was gone within 0.76 s (RTX 5090, 2026-09-28).
+   */
+  async close(timeoutMs = ABORT_TIMEOUT_MS): Promise<void> {
     try {
       (this.proc.stdin as { end(): unknown }).end();
-      await this.proc.exited;
     } catch {
-      this.proc.kill();
+      // the pipe is already closed
     }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const exitedInTime = await Promise.race([
+      this.proc.exited.then(() => true, () => true),
+      new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); }),
+    ]);
+    clearTimeout(timer);
+    if (exitedInTime) return;
+    try {
+      this.proc.kill();
+    } catch {
+      // exited in the meantime
+    }
+    await this.proc.exited.catch(() => 0);
   }
 }
