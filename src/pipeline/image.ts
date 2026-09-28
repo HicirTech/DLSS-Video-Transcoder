@@ -4,6 +4,7 @@
 import { basename, dirname, extname, join } from "node:path";
 import { decodePng, encodePng, isPng, type RgbaImage } from "../codec/png.ts";
 import type { EngineKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
+import { throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine } from "./engine.ts";
 import { describeGpu, openGpu } from "./gpu.ts";
 import { attachAlpha, evenSize, resizePlane, resizeRgba, splitAlpha } from "./resize.ts";
@@ -23,6 +24,10 @@ export interface ImageJobOptions {
   dllDir?: string;
   appDataPath?: string;
   onProgress?: (fraction: number, message: string) => void;
+  /** Cooperative cancellation (see cancel.ts): checked before the GPU is opened and before every pass; nothing is written until the passes are done. */
+  signal?: AbortSignal;
+  /** Called once as the run starts finishing; see VideoJobOptions.onFinishing. */
+  onFinishing?: () => void;
 }
 
 export interface ImageJobResult {
@@ -63,9 +68,9 @@ export function defaultOutputPath(input: string, engine: EngineKind, extension =
  * commands) goes through here so the rule has one owner. `enhance` receives the
  * colour with alpha 255 and returns the output frame, which is modified in place.
  */
-export function enhanceStill(source: RgbaImage, enhance: (colour: Uint8Array) => RgbaImage): RgbaImage {
+export async function enhanceStill(source: RgbaImage, enhance: (colour: Uint8Array) => RgbaImage | Promise<RgbaImage>): Promise<RgbaImage> {
   const { colour, alpha } = splitAlpha(source.rgba);
-  const out = enhance(colour);
+  const out = await enhance(colour);
   attachAlpha(out.rgba, resizePlane(alpha, source.width, source.height, out.width, out.height));
   return out;
 }
@@ -87,6 +92,7 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
     0.1,
     `decoded ${decoded.width}x${decoded.height}, ${upscaling ? `upscaling to ${target.width}x${target.height}` : `working size ${target.width}x${target.height}`}`,
   );
+  await throwIfAbortedAfterYield(options.signal);
   const session = openGpu({ adapterIndex: options.adapterIndex, adapterUuid: options.adapterUuid, debugLayer: options.debugLayer });
   progress(0.1, describeGpu(session));
   let passes = 0;
@@ -103,12 +109,14 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
       appDataPath: options.appDataPath,
     });
     try {
-      result = enhanceStill(decoded, (colour) => {
+      result = await enhanceStill(decoded, async (colour) => {
         const working = upscaling ? colour : resizeRgba(colour, decoded.width, decoded.height, target.width, target.height);
         // A still image has no history; run extra passes so temporal state settles.
         const total = options.engine !== "bypass" ? Math.max(1, options.settings.warmupFrames + 1) : 1;
         let rgba = working;
         for (let i = 0; i < total; i++) {
+          // Each pass is synchronous FFI and never yields on its own.
+          await throwIfAbortedAfterYield(options.signal);
           rgba = engine.process({ rgba: working, reset: i === 0, motion: null });
           passes++;
           progress(0.1 + (0.8 * passes) / total, `pass ${passes}/${total} on ${engine.name}`);
@@ -122,6 +130,7 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
     session.close();
   }
 
+  options.onFinishing?.();
   progress(0.92, "encoding PNG");
   const output = options.output ?? defaultOutputPath(options.input, options.engine);
   await Bun.write(output, encodePng(result, { level: 6 }));
