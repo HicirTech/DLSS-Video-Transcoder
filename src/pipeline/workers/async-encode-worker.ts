@@ -38,16 +38,22 @@ self.onmessage = (e: MessageEvent<InMsg>) => {
       cudaCreateContext(m.ordinal);
       const inputs = m.bufHandles.map((h) => {
         const { extMem, devPtr } = importD3D12Buffer(h, m.size);
-        closeHandle(h);
         extMems.push(extMem);
         return { devPtr, pitch: m.pitch };
       });
       extSem = importD3D12Fence(m.fenceHandle);
-      closeHandle(m.fenceHandle);
       enc = NvencEncoder.open({ width: m.width, height: m.height, fpsNum: m.fpsNum, fpsDen: m.fpsDen, codec: m.codec, preset: "p5", cq: m.cq, ordinal: m.ordinal, inputs });
       sink = Bun.spawn([m.ffmpeg, ...m.sinkArgs], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
       self.postMessage({ type: "opened" });
-    } catch (err) { fail((err as Error).message ?? String(err)); }
+    } catch (err) {
+      fail((err as Error).message ?? String(err));
+    } finally {
+      // Importing does not take ownership of an NT handle (see cuda-interop.ts),
+      // so every handle is closed here, imported or not: one left open after a
+      // failed import keeps its D3D12 allocation alive.
+      for (const h of m.bufHandles) closeHandle(h);
+      closeHandle(m.fenceHandle);
+    }
   } else if (m.type === "frame") {
     chain = chain.then(async () => {
       if (failed || !enc || !sink) return;
