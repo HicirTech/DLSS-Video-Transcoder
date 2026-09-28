@@ -3,15 +3,46 @@
  * worker so the HTTP server never blocks on native calls.
  */
 import type { JobRequest, JobStatus, WsEvent } from "./api-types.ts";
-import type { RunMessage, WorkerMessage } from "../pipeline/worker.ts";
+import type { CancelMessage, RunMessage, WorkerMessage } from "../pipeline/worker.ts";
+import { ABORT_TIMEOUT_MS } from "../pipeline/worker-abort.ts";
 
 const LOG_LIMIT = 400;
 const MAX_JOBS = 200;
+/**
+ * How long a running job gets to stop on its own after a cancel before its
+ * thread is terminated regardless. A pipeline's teardown is bounded by
+ * ABORT_TIMEOUT_MS; the 3 s on top is a chosen margin for releasing the GPU
+ * session after it, not a measured one. Measured on 2.mp4 (RTX 5090,
+ * 2026-09-28), every path reached "cancelled" 26–343 ms after the request, so
+ * this only fires for a thread wedged in a synchronous call.
+ */
+const CANCEL_GRACE_MS = ABORT_TIMEOUT_MS + 3000;
+
+/**
+ * How long a job cancelled too late — already finishing its output — gets to
+ * complete before its thread is terminated anyway, so a finalise that has
+ * stalled (a network drive, say) cannot hold the one-job queue until a
+ * restart. Finalising measured 1.6–3.0 s for the 107–158 MB outputs of 2.mp4,
+ * and mp4 +faststart about 0.6 s per GB on local NVMe (RTX 5090 machine,
+ * 2026-09-28); 60 s is a chosen margin above that for large outputs on slow
+ * storage, not a measured bound.
+ */
+const FINISHING_GRACE_MS = 60_000;
+
+const CANCELLED_MESSAGE = "cancelled by user";
+const CANCELLING_MESSAGE = "cancelling";
+const TOO_LATE_MESSAGE = "finishing: the cancel arrived after the last frame, so the job completes and keeps its output";
 
 export interface JobManagerOptions {
   runtimeDir: string;
   appDataPath: string;
   broadcast: (event: WsEvent) => void;
+  /** Where a job runs; the default is a Worker thread on src/pipeline/worker.ts. Tests hand in a stand-in. */
+  createWorker?: () => Worker;
+  /** Overrides CANCEL_GRACE_MS (tests). */
+  cancelGraceMs?: number;
+  /** Overrides FINISHING_GRACE_MS (tests). */
+  finishingGraceMs?: number;
 }
 
 interface Entry {
@@ -20,6 +51,10 @@ interface Entry {
   worker: Worker | null;
   startedAtMs: number;
   lastFrameAtMs: number;
+  /** Set while a cancelled running job is expected to answer; fires terminate() if it does not in time. */
+  cancelTimer: ReturnType<typeof setTimeout> | null;
+  /** The job posted "finishing": a cancel can no longer stop it. */
+  finishing: boolean;
 }
 
 export class JobManager {
@@ -46,6 +81,7 @@ export class JobManager {
       output: request.output ?? null,
       engine: request.engine,
       state: "queued",
+      cancelRequest: "none",
       progress: 0,
       message: "queued",
       framesDone: 0,
@@ -57,7 +93,7 @@ export class JobManager {
       error: null,
       log: [],
     };
-    this.entries.set(id, { status, request, worker: null, startedAtMs: 0, lastFrameAtMs: 0 });
+    this.entries.set(id, { status, request, worker: null, startedAtMs: 0, lastFrameAtMs: 0, cancelTimer: null, finishing: false });
     this.order.push(id);
     this.evict();
     this.publish(status);
@@ -78,15 +114,63 @@ export class JobManager {
     }
   }
 
+  /**
+   * A queued job is cancelled outright. A running one is asked to stop and
+   * stays "running" with cancelRequest "pending" until its worker answers:
+   * cancelled — or done / failed when it had already started finishing,
+   * which it reports first ("too-late"), or when a failure got there first. The job's own teardown is what frees the
+   * GPU session and removes the partial output; terminate() skips both, so it
+   * is only the fallback for a worker that has not answered within
+   * CANCEL_GRACE_MS, or within FINISHING_GRACE_MS once it was too late.
+   */
   cancel(id: string): JobStatus | null {
     const entry = this.entries.get(id);
     if (!entry) return null;
-    if (entry.status.state === "queued" || entry.status.state === "running") {
-      entry.worker?.terminate();
-      entry.worker = null;
-      this.finish(entry, "cancelled", "cancelled by user");
+    const status = entry.status;
+    if (status.state === "queued") {
+      this.finish(entry, "cancelled", CANCELLED_MESSAGE);
+    } else if (status.state === "running" && status.cancelRequest === "none") {
+      if (entry.finishing) {
+        this.refuseCancel(entry);
+        return status;
+      }
+      const cancelMessage: CancelMessage = { type: "cancel" };
+      entry.worker?.postMessage(cancelMessage);
+      status.cancelRequest = "pending";
+      status.message = CANCELLING_MESSAGE;
+      this.terminateUnlessAnswered(entry, this.options.cancelGraceMs ?? CANCEL_GRACE_MS);
+      this.publish(status);
     }
-    return entry.status;
+    return status;
+  }
+
+  /** The job was already finishing, so the cancel cannot stop it; say so and give it FINISHING_GRACE_MS to complete. */
+  private refuseCancel(entry: Entry): void {
+    entry.status.cancelRequest = "too-late";
+    entry.status.message = TOO_LATE_MESSAGE;
+    this.terminateUnlessAnswered(entry, this.options.finishingGraceMs ?? FINISHING_GRACE_MS);
+    this.publish(entry.status);
+  }
+
+  /** (Re)arm the fallback that terminates a cancelled job whose worker has not answered within `graceMs`; finish() disarms it. */
+  private terminateUnlessAnswered(entry: Entry, graceMs: number): void {
+    if (entry.cancelTimer !== null) clearTimeout(entry.cancelTimer);
+    entry.cancelTimer = setTimeout(() => {
+      entry.cancelTimer = null;
+      const output = entry.status.output ?? "the default output path next to the input";
+      // Only video jobs have children; an image job writes its file only once it is finishing.
+      const leftovers =
+        entry.request.kind === "video"
+          ? `its ffmpeg or dlssg-worker processes may still be running and holding a partial output at ${output}, and `
+          : entry.finishing
+            ? `a partial output may remain at ${output}, and `
+            : "";
+      this.finish(
+        entry,
+        "cancelled",
+        `${CANCELLED_MESSAGE}, but the job did not end within ${graceMs / 1000} s and its thread was terminated: ${leftovers}the GPU memory it held stays allocated until the server is restarted.`,
+      );
+    }, graceMs);
   }
 
   private pump(): void {
@@ -100,7 +184,7 @@ export class JobManager {
     next.startedAtMs = performance.now();
     this.publish(next.status);
 
-    const worker = new Worker(new URL("../pipeline/worker.ts", import.meta.url).href);
+    const worker = this.options.createWorker ? this.options.createWorker() : new Worker(new URL("../pipeline/worker.ts", import.meta.url).href);
     next.worker = worker;
     worker.onmessage = (event: MessageEvent<WorkerMessage>) => this.onWorkerMessage(next, event.data);
     worker.onerror = (event: ErrorEvent) => {
@@ -121,7 +205,8 @@ export class JobManager {
     switch (message.type) {
       case "progress": {
         status.progress = Math.max(0, Math.min(1, message.fraction));
-        status.message = message.message;
+        // Once cancelled, the message says what became of the cancel; later progress must not hide it.
+        if (status.cancelRequest === "none") status.message = message.message;
         const frames = /frame (\d+)\/(\d+|\?)/.exec(message.message);
         if (frames) {
           status.framesDone = Number(frames[1]);
@@ -146,6 +231,13 @@ export class JobManager {
         status.log.push(message.error);
         this.finish(entry, "failed", message.error.split("\n")[0] ?? "failed");
         break;
+      case "finishing":
+        entry.finishing = true;
+        if (status.cancelRequest === "pending") this.refuseCancel(entry);
+        break;
+      case "cancelled":
+        this.finish(entry, "cancelled", CANCELLED_MESSAGE);
+        break;
     }
   }
 
@@ -156,6 +248,12 @@ export class JobManager {
     status.finishedAt = new Date().toISOString();
     if (state === "done") status.progress = 1;
     if (state === "failed") status.error = message;
+    if (entry.cancelTimer !== null) {
+      clearTimeout(entry.cancelTimer);
+      entry.cancelTimer = null;
+    }
+    // By now the worker has either answered (its teardown is done) or is being
+    // given up on; terminate() only reclaims the thread.
     entry.worker?.terminate();
     entry.worker = null;
     if (this.active === status.id) this.active = null;
