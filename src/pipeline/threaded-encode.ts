@@ -13,7 +13,9 @@
  * which is what NVENC's no-B-frame config expects. A credit window bounds frames
  * in flight (decode->main->encode) and so memory use to ~`window` frames.
  */
+import { throwIfAborted } from "./cancel.ts";
 import type { Engine } from "./engine.ts";
+import { WorkerPairRun } from "./worker-pair-run.ts";
 
 export interface ThreadedEncodeParams {
   engine: Engine;
@@ -35,60 +37,67 @@ export interface ThreadedEncodeParams {
   onProgress?: (fraction: number, message: string, frames?: number) => void;
   /** Max frames in flight across the whole pipeline (default 8). */
   window?: number;
+  /** Cooperative cancellation: until the encode is finishing, the run stops at the next frame and rejects with JobCancelledError. */
+  signal?: AbortSignal;
+  /** Called once as the run starts finishing; see VideoJobOptions.onFinishing. */
+  onFinishing?: () => void;
+  /** Where the decode and encode workers run; tests hand in stand-ins. */
+  createWorker?: (script: URL) => Worker;
 }
 
 export function runThreadedEncode(p: ThreadedEncodeParams): Promise<{ frames: number; sceneCuts: number }> {
+  throwIfAborted(p.signal);
   const progress = p.onProgress ?? (() => {});
   const window = p.window ?? 8;
+  const createWorker = p.createWorker ?? ((script: URL) => new Worker(script.href));
   return new Promise((resolve, reject) => {
-    const decodeW = new Worker(new URL("./workers/decode-worker.ts", import.meta.url).href);
-    const encodeW = new Worker(new URL("./workers/encode-worker.ts", import.meta.url).href);
+    const decodeW = createWorker(new URL("./workers/decode-worker.ts", import.meta.url));
+    let encodeW: Worker;
+    try {
+      encodeW = createWorker(new URL("./workers/encode-worker.ts", import.meta.url));
+    } catch (error) {
+      decodeW.terminate(); // both workers or neither
+      throw error;
+    }
 
     let sent = 0; // frames handed to the encode worker
-    let acked = 0; // frames the encode worker has finished
     let frames = 0; // frames processed by the engine
     let sceneCuts = 0;
     let decodeEnded = false;
-    let finishSent = false;
-    let settled = false;
 
-    const cleanup = (): void => { try { decodeW.terminate(); } catch { /* */ } try { encodeW.terminate(); } catch { /* */ } };
-    const fail = (message: string): void => { if (settled) return; settled = true; cleanup(); reject(new Error(message)); };
+    // The engine belongs to the caller; the workers are all this run owns.
+    const run = new WorkerPairRun<{ frames: number; sceneCuts: number }>({
+      decodeWorker: decodeW, encodeWorker: encodeW, signal: p.signal, onFinishing: p.onFinishing, resolve, reject,
+    });
     const finishIfDone = (): void => {
-      if (!settled && !finishSent && decodeEnded && acked === sent) {
-        finishSent = true;
-        encodeW.postMessage({ type: "finish" });
-      }
+      if (run.running && decodeEnded && run.framesWritten === sent) run.finish();
     };
-
-    decodeW.addEventListener("error", (e) => fail(`decode worker crashed: ${(e as ErrorEvent).message}`));
-    encodeW.addEventListener("error", (e) => fail(`encode worker crashed: ${(e as ErrorEvent).message}`));
 
     encodeW.onmessage = (event: MessageEvent) => {
       const msg = event.data as { type: string; message?: string };
+      if (msg.type === "encoded") run.recordEncoded();
+      // After a stop the encoder may still answer "opened" or "encoded": neither may start the decoder or report progress.
+      if (!run.active) return;
       if (msg.type === "opened") {
         decodeW.postMessage({ type: "start", ffmpeg: p.ffmpeg, args: p.decodeArgs, frameBytes: p.frameBytes });
         decodeW.postMessage({ type: "credit", n: window });
       } else if (msg.type === "encoded") {
-        acked++;
         if (!decodeEnded) decodeW.postMessage({ type: "credit", n: 1 });
         const total = p.totalFrames;
-        progress(total ? Math.min(0.98, acked / total) : 0.5, `frame ${acked}/${total ?? "?"}`, acked);
+        const written = run.framesWritten;
+        progress(total ? Math.min(0.98, written / total) : 0.5, `frame ${written}/${total ?? "?"}`, written);
         finishIfDone();
       } else if (msg.type === "done") {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        resolve({ frames, sceneCuts });
+        run.succeed({ frames, sceneCuts });
       } else if (msg.type === "error") {
-        fail(`encode: ${msg.message}`);
+        run.fail(`encode: ${msg.message}`);
       }
     };
 
     decodeW.onmessage = (event: MessageEvent) => {
       const msg = event.data as { type: string; index?: number; buf?: ArrayBuffer; frames?: number; message?: string };
+      if (!run.active) return;
       if (msg.type === "frame") {
-        if (settled) return;
         try {
           const rgba = new Uint8Array(msg.buf!);
           const g = p.guide(rgba, frames);
@@ -99,13 +108,13 @@ export function runThreadedEncode(p: ThreadedEncodeParams): Promise<{ frames: nu
           encodeW.postMessage({ type: "frame", index: msg.index, buf: out }, [out]);
           sent++;
         } catch (error) {
-          fail(`engine: ${(error as Error).message}`);
+          run.fail(`engine: ${(error as Error).message}`);
         }
       } else if (msg.type === "end") {
         decodeEnded = true;
         finishIfDone();
       } else if (msg.type === "error") {
-        fail(`decode: ${msg.message}`);
+        run.fail(`decode: ${msg.message}`);
       }
     };
 
