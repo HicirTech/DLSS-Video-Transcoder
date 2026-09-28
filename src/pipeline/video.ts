@@ -9,6 +9,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings, EngineKind, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { DEFAULT_ENCODE_SETTINGS } from "../server/api-types.ts";
+import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine, type Engine } from "./engine.ts";
 import { nvencGpuArgs, resolveEncodeCodec } from "./encode-select.ts";
 import { framesWrittenOf, removePartialOutput } from "./partial-output.ts";
@@ -43,6 +44,14 @@ export interface VideoJobOptions {
   appDataPath?: string;
   /** `frames` is set for per-frame updates so callers can skip logging them. */
   onProgress?: (fraction: number, message: string, frames?: number) => void;
+  /** Cooperative cancellation (see cancel.ts): checked at every frame until the encode is finishing, which then completes. */
+  signal?: AbortSignal;
+  /**
+   * Called once when the run passes the point where a cancel can stop it: every
+   * frame is encoded and only finalising the output is left, which completes
+   * or fails. The job manager stops waiting on a cancel then.
+   */
+  onFinishing?: () => void;
 }
 
 export interface VideoJobResult {
@@ -363,6 +372,8 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const renderHeight = upscaling ? info.height : target.height;
   progress(0, `source ${info.width}x${info.height}${info.displayAspect ? ` (non-square pixels, display ${info.displayAspect.num}:${info.displayAspect.den})` : ""} ${info.codec} ${info.fpsText} fps, ${info.frames ?? "?"} frames; ${upscaling ? `upscaling to ${target.width}x${target.height}` : `working size ${target.width}x${target.height}`}`);
 
+  // The probe above is synchronous; a cancel sent during it is only delivered after a yield.
+  await throwIfAbortedAfterYield(options.signal);
   const session = openGpu({ adapterIndex: options.adapterIndex, adapterUuid: options.adapterUuid, debugLayer: options.debugLayer });
   progress(0, describeGpu(session));
   // session.cudaOrdinal, not adapterIndex: see GpuSession.cudaOrdinal. Every
@@ -413,7 +424,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
           session, nr, ffmpeg, decodeArgs, sinkArgs,
           width: target.width, height: target.height, rowPitch: layout.rowPitch, totalBytes: layout.totalBytes,
           enc: { fpsNum: num, fpsDen: den, codec: nrNative.codec, cq: encode.quality, ordinal: cudaOrdinal },
-          totalFrames: info.frames, guide, onProgress: progress,
+          totalFrames: info.frames, guide, onProgress: progress, signal: options.signal, onFinishing: options.onFinishing,
         });
         if (r.frames === 0) throw new Error("No frames were decoded from the input. The file may be empty, corrupt, or not a video ffmpeg can read.");
         progress(1, `encoded ${r.frames} frames to ${output}${r.sceneCuts ? ` (${r.sceneCuts} scene cuts reset history)` : ""}`);
@@ -522,7 +533,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
       const result = await runThreadedEncode({
         engine, ffmpeg, decodeArgs: decodeArgv, frameBytes, sinkArgs,
         enc: { width: outWidth, height: outHeight, fpsNum: num, fpsDen: den, codec: nativeTarget.codec, preset: "p5", cq: encode.quality, ordinal: cudaOrdinal },
-        totalFrames: info.frames, guide, onProgress: progress,
+        totalFrames: info.frames, guide, onProgress: progress, signal: options.signal, onFinishing: options.onFinishing,
       });
       frames = result.frames;
       sceneCuts = result.sceneCuts;
@@ -545,6 +556,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
         // Kept one frame ahead: the decode of frame n+1 overlaps the GPU pass on n.
         let pending = reader.next(frameBytes);
         for (;;) {
+          throwIfAborted(options.signal);
           const rgba = await pending;
           if (!rgba) break;
           pending = reader.next(frameBytes);
@@ -557,6 +569,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
           const total = info.frames;
           progress(total ? Math.min(0.98, frames / total) : 0.5, `frame ${frames}/${total ?? "?"}`, frames);
         }
+        options.onFinishing?.();
         encoder.stdin.end();
       } catch (error) {
         // Both children are ours: kill them and wait, so the encoder has released
