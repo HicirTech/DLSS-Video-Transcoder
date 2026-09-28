@@ -65,9 +65,9 @@ describe("resizePlane", () => {
 });
 
 describe("enhanceStill", () => {
-  test("an engine that writes 255 into alpha (feature 18, measured) cannot lose the source transparency", () => {
+  test("an engine that writes 255 into alpha (feature 18, measured) cannot lose the source transparency", async () => {
     const src = frame();
-    const out = enhanceStill(src, (colour) => {
+    const out = await enhanceStill(src, (colour) => {
       expect(colour.filter((_, i) => i % 4 === 3).every((a) => a === 255)).toBe(true);
       const rgba = new Uint8Array(colour);
       for (let i = 3; i < rgba.length; i += 4) rgba[i] = 255;
@@ -77,19 +77,19 @@ describe("enhanceStill", () => {
     expect(alpha).toEqual(splitAlpha(src.rgba).alpha);
   });
 
-  test("an upscaling engine gets alpha back at the output size, resized like the colour would be", () => {
+  test("an upscaling engine gets alpha back at the output size, resized like the colour would be", async () => {
     const src = frame();
-    const out = enhanceStill(src, (colour) => ({ rgba: resizeRgba(colour, src.width, src.height, 8, 6), width: 8, height: 6 }));
+    const out = await enhanceStill(src, (colour) => ({ rgba: resizeRgba(colour, src.width, src.height, 8, 6), width: 8, height: 6 }));
     const expected = resizePlane(splitAlpha(src.rgba).alpha, src.width, src.height, 8, 6);
     expect(splitAlpha(out.rgba).alpha).toEqual(expected);
     expect(out.width).toBe(8);
   });
 
-  test("an opaque source is untouched by the rule", () => {
+  test("an opaque source is untouched by the rule", async () => {
     const src = frame();
     for (let i = 3; i < src.rgba.length; i += 4) src.rgba[i] = 255;
     const seen: { colour: Uint8Array | null } = { colour: null };
-    const out = enhanceStill(src, (colour) => {
+    const out = await enhanceStill(src, (colour) => {
       seen.colour = colour;
       return { rgba: new Uint8Array(colour), width: src.width, height: src.height };
     });
