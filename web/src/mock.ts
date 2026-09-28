@@ -277,6 +277,7 @@ export function createSeedJobs(now: number = Date.now()): JobStatus[] {
       output: "C:\\Users\\tim\\Pictures\\lake-sunrise-nr.png",
       engine: "nr",
       state: "done",
+      cancelRequest: "none",
       progress: 1,
       message: "Done",
       framesDone: 1,
@@ -300,6 +301,7 @@ export function createSeedJobs(now: number = Date.now()): JobStatus[] {
       output: "D:\\Footage\\drone-coast-4k-nr.mp4",
       engine: "nr",
       state: "running",
+      cancelRequest: "none",
       progress: 0.42,
       message: "Frame 1210/2880",
       framesDone: 1210,
@@ -324,6 +326,7 @@ export function createSeedJobs(now: number = Date.now()): JobStatus[] {
       output: null,
       engine: "nr",
       state: "failed",
+      cancelRequest: "none",
       progress: 0,
       message: "Feature creation failed",
       framesDone: 0,
@@ -347,6 +350,7 @@ export function createSeedJobs(now: number = Date.now()): JobStatus[] {
       output: null,
       engine: "bypass",
       state: "queued",
+      cancelRequest: "none",
       progress: 0,
       message: "Queued behind 1 job",
       framesDone: 0,
@@ -365,6 +369,7 @@ export function createSeedJobs(now: number = Date.now()): JobStatus[] {
       output: null,
       engine: "nr",
       state: "cancelled",
+      cancelRequest: "pending",
       progress: 0.4,
       message: "Cancelled by user",
       framesDone: 0,
@@ -461,6 +466,7 @@ export class MockJobEngine {
       output: request.output && request.output.trim() !== "" ? request.output : outputPathFor(request),
       engine: request.engine,
       state: "queued",
+      cancelRequest: "none",
       progress: 0,
       message: "Queued",
       framesDone: 0,
@@ -480,18 +486,33 @@ export class MockJobEngine {
     return cloneJob(job);
   }
 
+  /** As the server does: a queued job is cancelled at once, a running one is "cancelling" until its pipeline has stopped. */
   cancel(id: string): JobStatus | undefined {
     const job = this.jobs.get(id);
     if (!job) return undefined;
-    if (job.state === "queued" || job.state === "running") {
+    if (job.state === "queued") {
       this.clearTimer(id);
-      job.state = "cancelled";
-      job.finishedAt = timestamp();
-      job.message = "Cancelled by user";
-      this.appendLog(job, "[job] cancelled by user");
+      this.markCancelled(job);
+    } else if (job.state === "running" && job.cancelRequest === "none") {
+      this.clearTimer(id);
+      job.cancelRequest = "pending";
+      job.message = "cancelling";
       this.emitJob(job);
+      // One tick stands in for the pipeline's teardown.
+      this.timers.set(id, setTimeout(() => {
+        this.timers.delete(id);
+        this.markCancelled(job);
+      }, this.tickMs));
     }
     return cloneJob(job);
+  }
+
+  private markCancelled(job: JobStatus): void {
+    job.state = "cancelled";
+    job.finishedAt = timestamp();
+    job.message = "Cancelled by user";
+    this.appendLog(job, "[job] cancelled by user");
+    this.emitJob(job);
   }
 
   subscribe(listener: Listener): () => void {
