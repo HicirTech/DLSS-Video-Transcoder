@@ -5,11 +5,13 @@
  * threaded NVENC, single-thread rawvideo) and the GPU session's lifetime.
  * ffmpeg / ffprobe are external tools found via tools.ts.
  */
+import { existsSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings, EngineKind, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { DEFAULT_ENCODE_SETTINGS } from "../server/api-types.ts";
 import { createEngine, type Engine } from "./engine.ts";
 import { nvencGpuArgs, resolveEncodeCodec } from "./encode-select.ts";
+import { framesWrittenOf, removePartialOutput } from "./partial-output.ts";
 import { ratMul, type Rational, rational } from "./rational.ts";
 import { createMotionEstimator } from "./flow.ts";
 import { FrameReader } from "./frame-reader.ts";
@@ -352,6 +354,8 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const rawTarget = resolveTargetSize(info.width, info.height, options.scale);
   const target = { width: evenSize(rawTarget.width), height: evenSize(rawTarget.height) };
   const output = options.output ?? defaultVideoOutput(options.input, options.engine, requestedEncode.container);
+  // Whether the destination is ours to delete after an abnormal end: see partial-output.ts.
+  const outputExisted = existsSync(output);
   // SR upscales inside DLSS: decode at source size and let the engine write the
   // target size. Other engines get frames pre-scaled to the target by ffmpeg.
   const upscaling = options.engine === "sr";
@@ -414,6 +418,10 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
         if (r.frames === 0) throw new Error("No frames were decoded from the input. The file may be empty, corrupt, or not a video ffmpeg can read.");
         progress(1, `encoded ${r.frames} frames to ${output}${r.sceneCuts ? ` (${r.sceneCuts} scene cuts reset history)` : ""}`);
         return { output, width: target.width, height: target.height, fps: info.fps, frames: r.frames, sceneCuts: r.sceneCuts, engine: options.engine, ms: Math.round(performance.now() - started) };
+      } catch (error) {
+        // The orchestrator has already made the mux ffmpeg release the file.
+        removePartialOutput(output, framesWrittenOf(error), outputExisted);
+        throw error;
       } finally {
         nr.close();
       }
@@ -533,28 +541,41 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
         { stdin: "pipe", stdout: "ignore", stderr: "pipe" },
       );
       const reader = new FrameReader(decoder.stdout);
-      // Kept one frame ahead: the decode of frame n+1 overlaps the GPU pass on n.
-      let pending = reader.next(frameBytes);
-      for (;;) {
-        const rgba = await pending;
-        if (!rgba) break;
-        pending = reader.next(frameBytes);
-        const g = guide(rgba, frames);
-        if (g.sceneCut) sceneCuts++;
-        const result = engine.process({ rgba, reset: g.reset, motion: g.motion });
-        const wrote = encoder.stdin.write(result);
-        if (wrote instanceof Promise) await wrote;
-        frames++;
-        const total = info.frames;
-        progress(total ? Math.min(0.98, frames / total) : 0.5, `frame ${frames}/${total ?? "?"}`, frames);
+      try {
+        // Kept one frame ahead: the decode of frame n+1 overlaps the GPU pass on n.
+        let pending = reader.next(frameBytes);
+        for (;;) {
+          const rgba = await pending;
+          if (!rgba) break;
+          pending = reader.next(frameBytes);
+          const g = guide(rgba, frames);
+          if (g.sceneCut) sceneCuts++;
+          const result = engine.process({ rgba, reset: g.reset, motion: g.motion });
+          const wrote = encoder.stdin.write(result);
+          if (wrote instanceof Promise) await wrote;
+          frames++;
+          const total = info.frames;
+          progress(total ? Math.min(0.98, frames / total) : 0.5, `frame ${frames}/${total ?? "?"}`, frames);
+        }
+        encoder.stdin.end();
+      } catch (error) {
+        // Both children are ours: kill them and wait, so the encoder has released
+        // the output file by the time the catch below deletes it.
+        try { decoder.kill(); } catch {}
+        try { encoder.kill(); } catch {}
+        await Promise.allSettled([decoder.exited, encoder.exited]);
+        throw error;
       }
-      encoder.stdin.end();
       const [decodeExit, encodeExit] = await Promise.all([decoder.exited, encoder.exited]);
       const decodeErr = (await new Response(decoder.stderr).text()).trim();
       const encodeErr = (await new Response(encoder.stderr).text()).trim();
       if (decodeExit !== 0) throw new Error(`ffmpeg decode failed (${decodeExit}): ${decodeErr}`);
       if (encodeExit !== 0) throw new Error(`ffmpeg encode failed (${encodeExit}): ${encodeErr}`);
     }
+  } catch (error) {
+    // The threaded orchestrator reports its count on the error; the rawvideo loop counted here.
+    removePartialOutput(output, useThreaded ? framesWrittenOf(error) : frames, outputExisted);
+    throw error;
   } finally {
     estimator?.close();
     engine.close();
