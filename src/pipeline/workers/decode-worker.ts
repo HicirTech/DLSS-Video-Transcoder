@@ -10,15 +10,23 @@
  * bounds how far decode runs ahead and so the memory it ties up.
  */
 import { FrameReader } from "../frame-reader.ts";
+import { type AbortRequest, answerAbort } from "../worker-abort.ts";
 
 interface StartMsg { type: "start"; ffmpeg: string; args: string[]; frameBytes: number }
 interface CreditMsg { type: "credit"; n: number }
-type InMsg = StartMsg | CreditMsg;
+type InMsg = StartMsg | CreditMsg | AbortRequest;
 
 declare const self: Worker;
 
 let credits = 0;
 let wake: (() => void) | null = null;
+let proc: ReturnType<typeof Bun.spawn> | null = null;
+let aborted = false;
+
+/** Release a read waiting on a credit. */
+function wakeReader(): void {
+  if (wake) { const w = wake; wake = null; w(); }
+}
 
 function awaitCredit(): Promise<void> {
   if (credits > 0) return Promise.resolve();
@@ -31,13 +39,21 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
     void run(msg);
   } else if (msg.type === "credit") {
     credits += msg.n;
-    if (wake) { const w = wake; wake = null; w(); }
+    wakeReader();
+  } else if (msg.type === "abort") {
+    aborted = true;
+    // Woken, the read loop sees `aborted` and returns instead of waiting on a credit that never comes.
+    wakeReader();
+    void answerAbort(self, proc);
   }
 };
 
 async function run(msg: StartMsg): Promise<void> {
+  // A "start" queued behind an "abort" must not spawn: the abort was already
+  // acknowledged, so nothing would ever kill that ffmpeg.
+  if (aborted) return;
   try {
-    const proc = Bun.spawn([msg.ffmpeg, ...msg.args], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    proc = Bun.spawn([msg.ffmpeg, ...msg.args], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
     // Drain stderr concurrently so a chatty ffmpeg can't fill the stderr pipe,
     // block, and stall stdout (which would hang the read loop below).
     let stderrText = "";
@@ -46,8 +62,9 @@ async function run(msg: StartMsg): Promise<void> {
     let index = 0;
     for (;;) {
       await awaitCredit();
+      if (aborted) return; // the abort handler acknowledges; nothing more is posted
       const frame = await reader.next(msg.frameBytes);
-      if (!frame) break;
+      if (!frame || aborted) break;
       credits--;
       self.postMessage({ type: "frame", index, buf: frame.buffer }, [frame.buffer]);
       index++;
@@ -55,12 +72,14 @@ async function run(msg: StartMsg): Promise<void> {
     await stderrDrained;
     const err = stderrText.trim();
     const code = await proc.exited;
+    if (aborted) return;
     if (code !== 0) {
       self.postMessage({ type: "error", message: `ffmpeg decode failed (${code}): ${err}` });
       return;
     }
     self.postMessage({ type: "end", frames: index });
   } catch (error) {
+    if (aborted) return;
     self.postMessage({ type: "error", message: (error as Error).message ?? String(error) });
   }
 }
