@@ -203,7 +203,7 @@ export interface JobStatus {
   output: string | null;
   engine: EngineKind;
   state: JobState;
-  cancelRequest?: CancelRequest;
+  cancelRequest: CancelRequest;
   /** 0..1 */
   progress: number;
   message: string;
