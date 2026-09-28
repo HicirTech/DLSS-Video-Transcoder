@@ -10,6 +10,7 @@
  * blocks and DLSS frame i+1 overlaps NVENC frame i on the GPU.
  */
 import { NvencEncoder, type NvencSdkCodec } from "../nvenc.ts";
+import { type AbortRequest, answerAbort } from "../worker-abort.ts";
 import { importD3D12Buffer, importD3D12Fence, waitExternalSemaphore, destroyExternalMemory, destroyExternalSemaphore, closeHandle } from "../../native/cuda-interop.ts";
 import { cudaCreateContext, cudaSynchronize } from "../../native/cuda.ts";
 
@@ -19,7 +20,7 @@ interface OpenMsg {
   bufHandles: number[]; fenceHandle: number; size: number;
   width: number; height: number; pitch: number; fpsNum: number; fpsDen: number; codec: NvencSdkCodec; cq: number; ordinal: number;
 }
-type InMsg = OpenMsg | { type: "frame"; slot: number; value: bigint } | { type: "finish" };
+type InMsg = OpenMsg | { type: "frame"; slot: number; value: bigint } | { type: "finish" } | AbortRequest;
 
 declare const self: Worker;
 let enc: NvencEncoder | null = null;
@@ -27,9 +28,27 @@ let sink: ReturnType<typeof Bun.spawn> | null = null;
 let extSem = 0n;
 let extMems: bigint[] = [];
 let chain: Promise<void> = Promise.resolve();
-let failed = false;
+/** No more work: set by a failure or an abort. */
+let stopped = false;
 
-const fail = (message: string): void => { if (!failed) { failed = true; self.postMessage({ type: "error", message }); } };
+const fail = (message: string): void => { if (!stopped) { stopped = true; self.postMessage({ type: "error", message }); } };
+
+/**
+ * Close NVENC, then the CUDA imports its inputs alias. Both finish and abort
+ * reach this, in either order (an abort follows a finish whose mux failed), so
+ * a second call must find nothing left to destroy.
+ */
+function releaseEncoder(): void {
+  try {
+    enc?.close();
+  } finally {
+    enc = null;
+    for (const extMem of extMems) { try { destroyExternalMemory(extMem); } catch { /* keep releasing the rest */ } }
+    extMems = [];
+    if (extSem !== 0n) { try { destroyExternalSemaphore(extSem); } catch { /* */ } }
+    extSem = 0n;
+  }
+}
 
 self.onmessage = (e: MessageEvent<InMsg>) => {
   const m = e.data;
@@ -56,7 +75,7 @@ self.onmessage = (e: MessageEvent<InMsg>) => {
     }
   } else if (m.type === "frame") {
     chain = chain.then(async () => {
-      if (failed || !enc || !sink) return;
+      if (stopped || !enc || !sink) return;
       waitExternalSemaphore(extSem, m.value); // enqueue "wait fence >= value" on the CUDA stream
       cudaSynchronize(); // block this worker until the DLSS copy for this frame is done
       const pkt = enc.encodeGpuResident(m.slot);
@@ -64,17 +83,19 @@ self.onmessage = (e: MessageEvent<InMsg>) => {
       if (w instanceof Promise) await w;
       self.postMessage({ type: "encoded", slot: m.slot });
     }).catch((err) => fail((err as Error).message ?? String(err)));
+  } else if (m.type === "abort") {
+    // Immediate, not chained: queued frames are dropped; the encoder's own
+    // CUDA work is finished by close(), so the shared buffers can be released.
+    stopped = true;
+    void answerAbort(self, sink, releaseEncoder);
   } else if (m.type === "finish") {
     chain = chain.then(async () => {
-      if (failed || !enc || !sink) return;
+      if (stopped || !enc || !sink) return;
       enc.finish();
       (sink.stdin as { end(): unknown }).end();
       const err = (await new Response(sink.stderr as ReadableStream<Uint8Array>).text()).trim();
       const code = await sink.exited;
-      enc.close();
-      for (const em of extMems) { try { destroyExternalMemory(em); } catch { /* */ } }
-      try { destroyExternalSemaphore(extSem); } catch { /* */ }
-      enc = null;
+      releaseEncoder();
       if (code !== 0) { fail(`ffmpeg mux failed (${code}): ${err}`); return; }
       self.postMessage({ type: "done" });
     }).catch((err) => fail((err as Error).message ?? String(err)));
