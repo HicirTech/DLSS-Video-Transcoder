@@ -187,6 +187,15 @@ export interface JobRequest {
 
 export type JobState = "queued" | "running" | "done" | "failed" | "cancelled";
 
+/**
+ * Whether a cancel was sent to a running job and what it did; kept after the
+ * job ends. "pending": the job was asked to stop; it normally ends
+ * "cancelled", but a failure that got there first still ends it "failed".
+ * "too-late": the job had already started finishing its output, which it
+ * completes. A queued job that is cancelled never ran, so it keeps "none".
+ */
+export type CancelRequest = "none" | "pending" | "too-late";
+
 export interface JobStatus {
   id: string;
   kind: "image" | "video";
@@ -194,6 +203,7 @@ export interface JobStatus {
   output: string | null;
   engine: EngineKind;
   state: JobState;
+  cancelRequest?: CancelRequest;
   /** 0..1 */
   progress: number;
   message: string;
