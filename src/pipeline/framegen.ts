@@ -19,7 +19,7 @@
  *
  * Ported from the reference project's frame_interpolation package.
  */
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings } from "../server/api-types.ts";
 import { DlssgSession, probeDlssgCached } from "./dlssg.ts";
@@ -27,6 +27,7 @@ import { resolveEncodeCodec } from "./encode-select.ts";
 import { EncodeSink, buildFrameGenEncodeArgs } from "./framegen-encode-sink.ts";
 import { FrameReader } from "./frame-reader.ts";
 import { type RunParams, runOverlapped, runSequential } from "./framegen-run.ts";
+import { removePartialOutput } from "./partial-output.ts";
 import { Stage, openGuideWorker } from "./framegen-stage.ts";
 import { verifyOutputVideo } from "./framegen-verify.ts";
 import {
@@ -102,19 +103,6 @@ export interface FrameGenResult {
 function defaultFrameGenOutput(input: string): string {
   const ext = extname(input);
   return join(dirname(input), `${basename(input, ext)}.dlssg.mp4`);
-}
-
-/**
- * Whether a failed run may delete the file at its output path. The encode ffmpeg
- * is spawned with `-y`, but its input is a pipe, so it creates or truncates the
- * destination only once the first frame reaches its stdin — measured on the
- * bundled build (runtime/ffmpeg/bin 9.0.1) for both the mux argv and the
- * rawvideo argv. A run that wrote no frame has therefore not touched a file that
- * was already there, and the default output name is `<input>.dlssg.mp4`, which
- * is exactly what a previous good run of the same command wrote.
- */
-export function failedRunOwnsOutput(framesWritten: number, outputExisted: boolean): boolean {
-  return framesWritten > 0 || !outputExisted;
 }
 
 /** Frames the decoder may emit beyond the container's duration x rate: its CFR resample rounds at the tail. */
@@ -374,9 +362,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     try { decoder.kill(); } catch {}
     await sink.abort();
     await Promise.allSettled([decoder.exited, decodeErrDrained]);
-    if (failedRunOwnsOutput(writer.nextIndex, outputExisted)) {
-      try { if (existsSync(output)) unlinkSync(output); } catch {}
-    }
+    removePartialOutput(output, sink.framesWritten, outputExisted);
     throw error;
   } finally {
     sink.close();
