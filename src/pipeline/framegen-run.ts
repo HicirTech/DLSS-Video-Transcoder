@@ -5,6 +5,7 @@
  * a full queue and memory stays under a fixed ceiling. runSequential is the
  * in-order fallback for frames too large for that window.
  */
+import { raceAbort, throwIfAborted } from "./cancel.ts";
 import type { FrameReader } from "./frame-reader.ts";
 import type { NearestTimestampWriter, TimedFrame } from "./framegen-plan.ts";
 import type { AnalyzedFrame, PreparedFrame, Stage } from "./framegen-stage.ts";
@@ -25,8 +26,10 @@ export interface RunParams {
   capacity: number;
   /** Called with the number of source frames stage 0 has evaluated. */
   onProcessed: (count: number) => void;
-  /** Throws when the run should abort (e.g. nothing generated after enough intervals). */
+  /** Throws when the run should abort (e.g. nothing generated after enough intervals); called after each stage-0 evaluation. */
   check: () => void;
+  /** Cooperative cancellation: checked on every turn of the frame loop, including runs with no DLSSG stage. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -83,8 +86,13 @@ export async function runOverlapped(p: RunParams): Promise<RunResult> {
     for (const item of items) await writer.push(item);
     return items.length;
   };
+  // An evaluation blocked on a wedged dlssg-worker never settles, so an abort
+  // wakes the loop itself. Left registered: the signal belongs to this job and
+  // ends with it, and once the loop is done `wake` is null.
+  p.signal?.addEventListener("abort", () => wake?.(), { once: true });
 
   for (;;) {
+    throwIfAborted(p.signal);
     // Harvest everything that finished. Results own their buffers until consumed.
     while (done.length) {
       const d = done.shift()!;
@@ -161,9 +169,10 @@ export async function runOverlapped(p: RunParams): Promise<RunResult> {
 export async function runSequential(p: RunParams): Promise<RunResult> {
   let decoded = 0;
   let guideSeq = 0;
-  for (;;) {
+  /** One source frame through every stage into the writer; false at the end of the stream. */
+  const step = async (): Promise<boolean> => {
     const rgba = await p.reader.next(p.frameBytes);
-    if (!rgba) break;
+    if (!rgba) return false;
     let items: TimedFrame[] = [{ rgba, timestamp: ratDiv(rational(decoded), p.sourceRate), segment: 0, provenance: "Source", sourceIndex: decoded }];
     for (const stage of p.stages) {
       const next: TimedFrame[] = [];
@@ -171,6 +180,12 @@ export async function runSequential(p: RunParams): Promise<RunResult> {
       items = next;
     }
     for (const item of items) await p.writer.push(item);
+    return true;
+  };
+  for (;;) {
+    throwIfAborted(p.signal);
+    // Raced as well as checked: a wedged dlssg-worker would block a step forever.
+    if (!(await raceAbort(p.signal, step()))) break;
     decoded++;
     p.onProcessed(decoded);
     p.check();
