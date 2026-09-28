@@ -9,12 +9,7 @@ import type { NvencSdkCodec } from "./nvenc.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "./framegen-plan.ts";
 import { formatRational, type Rational } from "./rational.ts";
 import { aspectArgs, encoderArgs, nvencNativeTarget } from "./video.ts";
-
-/**
- * How long abort() waits for the worker to kill its ffmpeg and release the
- * output file before giving up and terminating the thread regardless.
- */
-const ABORT_TIMEOUT_MS = 5000;
+import { abortWorkers } from "./worker-abort.ts";
 
 export interface FrameGenEncodeArgs {
   ffmpeg: string;
@@ -103,7 +98,6 @@ export class EncodeSink {
   private failure: Error | null = null;
   private openSettle: { resolve: (sink: EncodeSink) => void; reject: (error: Error) => void } | null = null;
   private finishSettle: { resolve: () => void; reject: (error: Error) => void } | null = null;
-  private abortSettle: (() => void) | null = null;
 
   private constructor(private readonly worker: Worker, private readonly maxFramesInFlight: number) {
     worker.onmessage = (event: MessageEvent) => {
@@ -122,10 +116,6 @@ export class EncodeSink {
         const settle = this.finishSettle;
         this.finishSettle = null;
         settle?.resolve();
-      } else if (m.type === "aborted") {
-        const settle = this.abortSettle;
-        this.abortSettle = null;
-        settle?.();
       } else if (m.type === "error") {
         this.fail(new Error(m.message ?? "frame-generation encode worker failed"));
       }
@@ -149,9 +139,6 @@ export class EncodeSink {
     const finish = this.finishSettle;
     this.finishSettle = null;
     finish?.reject(this.failure);
-    const abort = this.abortSettle;
-    this.abortSettle = null;
-    abort?.();
     // Wake every writer so it observes the failure instead of waiting for a credit that will never come.
     for (const wake of this.waiters.splice(0)) wake();
   }
@@ -186,18 +173,7 @@ export class EncodeSink {
 
   /** Kill ffmpeg and wait for it to release the output file so the caller can delete it. */
   async abort(): Promise<void> {
-    if (!this.crashed) {
-      await new Promise<void>((resolve) => {
-        this.abortSettle = resolve;
-        try {
-          this.worker.postMessage({ type: "abort" });
-        } catch {
-          resolve();
-          return;
-        }
-        setTimeout(resolve, ABORT_TIMEOUT_MS);
-      });
-    }
+    if (!this.crashed) await abortWorkers([this.worker]);
     this.close();
   }
 
