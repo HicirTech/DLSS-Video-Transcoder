@@ -528,7 +528,7 @@ async function main(): Promise<void> {
         runtimeDir,
         dllDir,
       });
-      const enhanced = enhanceStill(image, (colour) => ({ rgba: sr.evaluate(colour, true), width: outputWidth, height: outputHeight }));
+      const enhanced = await enhanceStill(image, (colour) => ({ rgba: sr.evaluate(colour, true), width: outputWidth, height: outputHeight }));
       await Bun.write(output, encodePng(enhanced, { level: 6 }));
       sr.close();
       // The mode name and the ratio it snapped to, not the PerfQuality index: the
@@ -574,7 +574,7 @@ async function main(): Promise<void> {
         settings,
         runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
       });
-      const enhanced = enhanceStill(image, (colour) => ({ rgba: nr.evaluate(colour, true), width: image.width, height: image.height }));
+      const enhanced = await enhanceStill(image, (colour) => ({ rgba: nr.evaluate(colour, true), width: image.width, height: image.height }));
       await Bun.write(output, encodePng(enhanced, { level: 6 }));
       nr.close();
       // Only settings the runtime acts on are worth reporting; the preset is not one of them.
