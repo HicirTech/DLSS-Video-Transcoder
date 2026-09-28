@@ -9,6 +9,7 @@
 import { DlssgSession } from "./dlssg.ts";
 import type { TimedFrame } from "./framegen-plan.ts";
 import { type Rational, ratAdd, ratMul, ratSub, rational } from "./rational.ts";
+import { ABORT_TIMEOUT_MS } from "./worker-abort.ts";
 export interface PreparedFrame {
   frame: TimedFrame;
   previousTimestamp: Rational | null;
@@ -155,13 +156,14 @@ export class Stage {
     return output;
   }
 
+  /** Bounded by ABORT_TIMEOUT_MS as a whole, the budget every pipeline's teardown fits (worker-abort.ts). */
   async close(): Promise<void> {
     // The guide thread owns an NVOFA session on the process-wide CUDA primary
     // context, so terminating the thread does not release it. Ask it to close,
     // then terminate whatever is left. The packer thread holds no such session.
     await releaseGuideThread(this.guide);
     if (this.packer) try { this.packer.terminate(); } catch {}
-    await this.session.close();
+    await this.session.close(ABORT_TIMEOUT_MS - GUIDE_CLOSE_TIMEOUT_MS);
   }
 }
 
