@@ -10,7 +10,6 @@
  * user-supplied runtime folder.
  */
 import { join } from "node:path";
-import { ABORT_TIMEOUT_MS } from "./worker-abort.ts";
 
 const SETUP_MAGIC = 0x31534746; // 'FGS1'
 const SETUP_OUT_MAGIC = 0x31524746; // 'FGR1'
@@ -283,7 +282,7 @@ export class DlssgSession {
    * healthy worker exits well inside a second: after a cancel on 2.mp4 every
    * dlssg-worker.exe was gone within 0.76 s (RTX 5090, 2026-09-28).
    */
-  async close(timeoutMs = ABORT_TIMEOUT_MS): Promise<void> {
+  async close(timeoutMs: number): Promise<void> {
     try {
       (this.proc.stdin as { end(): unknown }).end();
     } catch {
