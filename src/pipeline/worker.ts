@@ -3,6 +3,7 @@
  * bun:ffi works inside workers, so the GPU session lives entirely here.
  */
 import type { JobRequest } from "../server/api-types.ts";
+import { JobCancelledError } from "./cancel.ts";
 import { processImage } from "./image.ts";
 
 declare const self: Worker;
@@ -15,11 +16,27 @@ export interface RunMessage {
   appDataPath: string;
 }
 
+/**
+ * Stop the running job cooperatively: the pipeline stops at its next frame,
+ * tears down (children killed, GPU objects released, an owned partial output
+ * deleted) and answers "cancelled" — unless it has already posted "finishing",
+ * in which case it completes. Terminating the thread instead runs none of that.
+ */
+export interface CancelMessage {
+  type: "cancel";
+}
+
 export type WorkerMessage =
   | { type: "progress"; id: string; fraction: number; message: string }
   | { type: "log"; id: string; line: string }
+  /** The job is past the point where a cancel can stop it; it ends done or failed. */
+  | { type: "finishing"; id: string }
   | { type: "done"; id: string; output: string; detail: Record<string, unknown> }
-  | { type: "failed"; id: string; error: string };
+  | { type: "failed"; id: string; error: string }
+  | { type: "cancelled"; id: string };
+
+/** Cancels the one job this worker runs; aborted by a CancelMessage. */
+const jobCancellation = new AbortController();
 
 function post(message: WorkerMessage): void {
   self.postMessage(message);
@@ -28,6 +45,7 @@ function post(message: WorkerMessage): void {
 async function run(message: RunMessage): Promise<void> {
   const { id, request } = message;
   const log = (line: string) => post({ type: "log", id, line });
+  const onFinishing = (): void => post({ type: "finishing", id });
   try {
     if (request.engine === "nr") {
       // Side-effect import: registers the engine with createEngine's factory.
@@ -47,6 +65,8 @@ async function run(message: RunMessage): Promise<void> {
         dllDir: request.dllDir,
         adapterUuid: request.adapterUuid,
         appDataPath: message.appDataPath,
+        signal: jobCancellation.signal,
+        onFinishing,
         onProgress: (fraction, text) => {
           post({ type: "progress", id, fraction, message: text });
           log(text);
@@ -66,6 +86,8 @@ async function run(message: RunMessage): Promise<void> {
         quality: request.encode?.quality,
         codec: request.encode?.codec,
         runtimeDir: message.runtimeDir,
+        signal: jobCancellation.signal,
+        onFinishing,
         onProgress: (fraction, text, frames) => {
           post({ type: "progress", id, fraction, message: text });
           if (frames === undefined) log(text);
@@ -87,6 +109,8 @@ async function run(message: RunMessage): Promise<void> {
       dllDir: request.dllDir,
       adapterUuid: request.adapterUuid,
       appDataPath: message.appDataPath,
+      signal: jobCancellation.signal,
+      onFinishing,
       onProgress: (fraction, text, frames) => {
         post({ type: "progress", id, fraction, message: text });
         if (frames === undefined) log(text);
@@ -94,10 +118,16 @@ async function run(message: RunMessage): Promise<void> {
     });
     post({ type: "done", id, output: result.output, detail: { ...result } });
   } catch (error) {
+    // Thrown and caught on this thread: only the "cancelled" message crosses to the server.
+    if (error instanceof JobCancelledError) {
+      post({ type: "cancelled", id });
+      return;
+    }
     post({ type: "failed", id, error: error instanceof Error ? (error.stack ?? error.message) : String(error) });
   }
 }
 
-self.onmessage = (event: MessageEvent<RunMessage>) => {
+self.onmessage = (event: MessageEvent<RunMessage | CancelMessage>) => {
   if (event.data?.type === "run") void run(event.data);
+  else if (event.data?.type === "cancel") jobCancellation.abort();
 };
