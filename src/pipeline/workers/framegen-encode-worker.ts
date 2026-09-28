@@ -12,6 +12,7 @@
  */
 import { FRAMEGEN_CUDA_DEVICE } from "../framegen-plan.ts";
 import { NvencEncoder, probeNvencCaps, type NvencSdkCodec } from "../nvenc.ts";
+import { type AbortRequest, answerAbort } from "../worker-abort.ts";
 
 interface OpenMsg {
   type: "open";
@@ -27,7 +28,7 @@ interface FrameMsg {
   type: "frame";
   rgba: Uint8Array;
 }
-type InMsg = OpenMsg | FrameMsg | { type: "finish" } | { type: "abort" };
+type InMsg = OpenMsg | FrameMsg | { type: "finish" } | AbortRequest;
 
 declare const self: Worker;
 
@@ -119,12 +120,6 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
     // Immediate, not chained: stop feeding ffmpeg, kill it and release the
     // output file so the caller can delete it, then acknowledge.
     stopped = true;
-    void (async () => {
-      try { proc?.kill(); } catch {}
-      try { enc?.close(); } catch {}
-      enc = null;
-      try { await proc?.exited; } catch {}
-      self.postMessage({ type: "aborted" });
-    })();
+    void answerAbort(self, proc, () => { enc?.close(); enc = null; });
   }
 };
