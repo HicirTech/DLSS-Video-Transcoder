@@ -95,6 +95,7 @@ export interface OpenEncode {
 export class EncodeSink {
   usesNvenc = false;
   note = "";
+  private written = 0;
   /** The worker thread died: it can answer nothing, so abort() does not ask it to. */
   private crashed = false;
   private inFlight = 0;
@@ -115,6 +116,7 @@ export class EncodeSink {
         settle?.resolve(this);
       } else if (m.type === "encoded") {
         this.inFlight--;
+        this.written++;
         this.waiters.shift()?.();
       } else if (m.type === "done") {
         const settle = this.finishSettle;
@@ -132,6 +134,11 @@ export class EncodeSink {
       this.crashed = true;
       this.fail(new Error(`frame-generation encode worker crashed: ${(e as ErrorEvent).message}`));
     });
+  }
+
+  /** Frames the worker has written into ffmpeg's stdin: the count partial-output.ts judges ownership by. */
+  get framesWritten(): number {
+    return this.written;
   }
 
   private fail(error: Error): void {
