@@ -22,6 +22,7 @@
 import { existsSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings } from "../server/api-types.ts";
+import { throwIfAborted } from "./cancel.ts";
 import { DlssgSession, probeDlssgCached } from "./dlssg.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
 import { EncodeSink, buildFrameGenEncodeArgs } from "./framegen-encode-sink.ts";
@@ -44,6 +45,7 @@ import { parseRational, ratDiv, ratMul, ratToNumber, rational } from "./rational
 import { evenSize } from "./resize.ts";
 import { findTool } from "./tools.ts";
 import { probeVideo } from "./video.ts";
+import { ABORT_TIMEOUT_MS } from "./worker-abort.ts";
 
 export interface FrameGenOptions {
   input: string;
@@ -67,6 +69,10 @@ export interface FrameGenOptions {
   /** Output codec; defaults to NVENC H.264 when available, else CPU libx264. */
   codec?: EncodeSettings["codec"];
   onProgress?: (fraction: number, message: string, frames?: number) => void;
+  /** Cooperative cancellation (see cancel.ts): checked on every turn of the frame loop until the encode is finishing, which then completes. */
+  signal?: AbortSignal;
+  /** Called once as the run starts finishing; see VideoJobOptions.onFinishing. */
+  onFinishing?: () => void;
 }
 
 export interface FrameGenResult {
@@ -166,6 +172,7 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
 async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenResult> {
   const started = performance.now();
   const progress = options.onProgress ?? (() => {});
+  throwIfAborted(options.signal);
   const ffmpeg = findTool("ffmpeg");
   const ffprobe = findTool("ffprobe");
   if (!ffmpeg || !ffprobe)
@@ -271,6 +278,9 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   const writer = new NearestTimestampWriter((frame) => sink.write(frame), targetRate);
   const zeros = new Uint16Array(width * height * 2);
   const stages: Stage[] = [];
+  // Once, whichever of the failure path and `finally` gets there first.
+  let stagesClosed: Promise<unknown> | null = null;
+  const closeStages = (): Promise<unknown> => (stagesClosed ??= Promise.allSettled(stages.map((stage) => stage.close())));
   const capacity = Math.floor(DEFAULT_BUFFER_LIMIT / frameBytes);
   let mode: FrameGenResult["mode"] = "overlapped";
   let inputFrames = 0;
@@ -300,7 +310,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
       const [sessionResult, guideResult, packerResult] = results;
       if (sessionResult.status === "rejected" || guideResult.status === "rejected" || packerResult.status === "rejected") {
         // Release whatever came up so a partial failure leaks nothing.
-        if (sessionResult.status === "fulfilled") await sessionResult.value.close();
+        if (sessionResult.status === "fulfilled") await sessionResult.value.close(ABORT_TIMEOUT_MS);
         for (const r of [guideResult, packerResult]) if (r.status === "fulfilled" && r.value) try { r.value.worker.terminate(); } catch {}
         throw results.find((r): r is PromiseRejectedResult => r.status === "rejected")!.reason;
       }
@@ -334,6 +344,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
       // expectedDecoded, not nb_frames: the decode is CFR-resampled, so the container count can be short and the bar would pass 100 %.
       onProcessed: (count) => progress(Math.min(0.96, count / expectedDecoded), `frame ${count}/~${expectedDecoded}`, count),
       check,
+      signal: options.signal,
     };
     const maxGenerated = Math.max(0, ...stages.map((s) => s.generatedCount));
     // Even one input/output transaction may exceed the credit window for enormous frames.
@@ -354,19 +365,22 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     if (inputFrames === 0) throw new Error("No frames were decoded from the input. The file may be empty, corrupt, or not a video ffmpeg can read.");
     // Clips shorter than the probe window still must not pass off a duplicate-frame resample as generation.
     if (expectsGeneration && stages[0]!.intervals >= 1 && noneGenerated()) throw frameGenDisabledError(plan, stages[0]?.session.disabledFrames ?? 0, caps.hagsEnabled);
+    // Not before the checks above: a FrameGenDisabledError from them makes an
+    // "auto" job re-run as a cascade, which must still be cancellable.
+    options.onFinishing?.();
     await sink.finish();
   } catch (error) {
     // abort() kills the worker's ffmpeg and waits for it to release the output
     // file, so the partial file can be deleted here and a failed job never
-    // leaves a misleading one behind.
+    // leaves a misleading one behind. The stages close at the same time, not
+    // after it: each is bounded by ABORT_TIMEOUT_MS on its own (worker-abort.ts).
     try { decoder.kill(); } catch {}
-    await sink.abort();
-    await Promise.allSettled([decoder.exited, decodeErrDrained]);
+    await Promise.allSettled([sink.abort(), closeStages(), decoder.exited, decodeErrDrained]);
     removePartialOutput(output, sink.framesWritten, outputExisted);
     throw error;
   } finally {
     sink.close();
-    await Promise.allSettled(stages.map((stage) => stage.close()));
+    await closeStages();
   }
 
   const decodeExit = await decoder.exited;
