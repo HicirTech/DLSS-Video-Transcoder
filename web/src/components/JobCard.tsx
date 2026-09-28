@@ -56,7 +56,8 @@ export function JobCard({ job, now, onCancel, cancelling = false, defaultExpande
         <Box sx={{ flex: 1 }} />
         <Mono dim>{job.id}</Mono>
         {active && onCancel ? (
-          <Button color="warning" startIcon={<CancelIcon />} disabled={cancelling} onClick={() => onCancel(job.id)}>
+          // Once the server has a cancel for this job, another click changes nothing: the message says how it is going.
+          <Button color="warning" startIcon={<CancelIcon />} disabled={cancelling || job.cancelRequest !== "none"} onClick={() => onCancel(job.id)}>
             Cancel
           </Button>
         ) : null}
