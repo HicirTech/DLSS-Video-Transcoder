@@ -95,6 +95,8 @@ export interface OpenEncode {
 export class EncodeSink {
   usesNvenc = false;
   note = "";
+  /** The worker thread died: it can answer nothing, so abort() does not ask it to. */
+  private crashed = false;
   private inFlight = 0;
   private readonly waiters: Array<() => void> = [];
   private failure: Error | null = null;
@@ -126,7 +128,10 @@ export class EncodeSink {
         this.fail(new Error(m.message ?? "frame-generation encode worker failed"));
       }
     };
-    worker.addEventListener("error", (e) => this.fail(new Error(`frame-generation encode worker crashed: ${(e as ErrorEvent).message}`)));
+    worker.addEventListener("error", (e) => {
+      this.crashed = true;
+      this.fail(new Error(`frame-generation encode worker crashed: ${(e as ErrorEvent).message}`));
+    });
   }
 
   private fail(error: Error): void {
@@ -174,16 +179,18 @@ export class EncodeSink {
 
   /** Kill ffmpeg and wait for it to release the output file so the caller can delete it. */
   async abort(): Promise<void> {
-    await new Promise<void>((resolve) => {
-      this.abortSettle = resolve;
-      try {
-        this.worker.postMessage({ type: "abort" });
-      } catch {
-        resolve();
-        return;
-      }
-      setTimeout(resolve, ABORT_TIMEOUT_MS);
-    });
+    if (!this.crashed) {
+      await new Promise<void>((resolve) => {
+        this.abortSettle = resolve;
+        try {
+          this.worker.postMessage({ type: "abort" });
+        } catch {
+          resolve();
+          return;
+        }
+        setTimeout(resolve, ABORT_TIMEOUT_MS);
+      });
+    }
     this.close();
   }
 
