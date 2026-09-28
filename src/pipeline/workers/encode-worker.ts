@@ -11,6 +11,7 @@
  * elementary stream stays in display order, matching NVENC's no-B-frame config.
  */
 import { NvencEncoder, type NvencSdkCodec } from "../nvenc.ts";
+import { type AbortRequest, answerAbort } from "../worker-abort.ts";
 
 interface OpenMsg {
   type: "open";
@@ -20,19 +21,26 @@ interface OpenMsg {
 }
 interface FrameMsg { type: "frame"; index: number; buf: ArrayBuffer }
 interface FinishMsg { type: "finish" }
-type InMsg = OpenMsg | FrameMsg | FinishMsg;
+type InMsg = OpenMsg | FrameMsg | FinishMsg | AbortRequest;
 
 declare const self: Worker;
 
 let encoder: NvencEncoder | null = null;
 let sink: ReturnType<typeof Bun.spawn> | null = null;
 let chain: Promise<void> = Promise.resolve();
-let failed = false;
+/** No more work: set by a failure or an abort. */
+let stopped = false;
 
 function fail(message: string): void {
-  if (failed) return;
-  failed = true;
+  if (stopped) return;
+  stopped = true;
   self.postMessage({ type: "error", message });
+}
+
+/** Both finish and abort reach this, in either order; the second call does nothing. */
+function closeEncoder(): void {
+  encoder?.close();
+  encoder = null;
 }
 
 self.onmessage = (event: MessageEvent<InMsg>) => {
@@ -47,21 +55,25 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
     }
   } else if (msg.type === "frame") {
     chain = chain.then(async () => {
-      if (failed || !encoder || !sink) return;
+      if (stopped || !encoder || !sink) return;
       const pkt = encoder.encode(new Uint8Array(msg.buf));
       const wrote = (sink.stdin as { write(b: Uint8Array): unknown }).write(pkt);
       if (wrote instanceof Promise) await wrote;
       self.postMessage({ type: "encoded", index: msg.index });
     }).catch((error) => fail((error as Error).message ?? String(error)));
+  } else if (msg.type === "abort") {
+    // Immediate, not chained: frames still queued are dropped, the file is
+    // released for deletion, and the GPU encoder is closed on this thread.
+    stopped = true;
+    void answerAbort(self, sink, closeEncoder);
   } else if (msg.type === "finish") {
     chain = chain.then(async () => {
-      if (failed || !encoder || !sink) return;
+      if (stopped || !encoder || !sink) return;
       encoder.finish();
       (sink.stdin as { end(): unknown }).end();
       const err = (await new Response(sink.stderr as ReadableStream<Uint8Array>).text()).trim();
       const code = await sink.exited;
-      encoder.close();
-      encoder = null;
+      closeEncoder();
       if (code !== 0) { fail(`ffmpeg mux failed (${code}): ${err}`); return; }
       self.postMessage({ type: "done" });
     }).catch((error) => fail((error as Error).message ?? String(error)));
