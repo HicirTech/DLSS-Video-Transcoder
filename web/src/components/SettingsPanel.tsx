@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { Button, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
 import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
-import type { ProbeReport } from "../../../src/server/api-types";
+import { FRAME_GEN_GPU_CHOICE, type ProbeReport } from "../../../src/server/api-types";
 import { api } from "../api";
 import { errorMessage } from "../errors";
 import { STORAGE_KEY, useSettings } from "../hooks/useSettings";
@@ -77,7 +77,7 @@ export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
                 ? `${gpus.length} GPU${gpus.length === 1 ? "" : "s"} with a CUDA device in the last probe. The choice is kept by the device's UUID, which survives reboots; the adapter index and LUID the probe shows do not.`
                 : "The last probe listed no NVIDIA adapter with a CUDA device, so only the automatic choice is available."
               : "Run the probe to list the GPUs a job can be sent to."}{" "}
-            Frame generation always runs on the default device and ignores this.
+            Frame generation ignores this: {FRAME_GEN_GPU_CHOICE}.
           </Typography>
           {probe ? null : (
             <Button variant="outlined" disabled={probing} onClick={onProbe} sx={{ alignSelf: "flex-start" }}>
