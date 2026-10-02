@@ -114,7 +114,7 @@ function heapProperties(type: number): NativeStruct {
 // Width u64 @16; Height u32 @24; DepthOrArraySize u16 @28; MipLevels u16 @30;
 // Format u32 @32; SampleDesc{Count @36, Quality @40}; Layout u32 @44; Flags u32 @48.
 // A buffer must be ROW_MAJOR with Height/Depth/MipLevels 1 and format UNKNOWN.
-function bufferDescription(sizeInBytes: number): NativeStruct {
+function bufferDescription(sizeInBytes: number, flags: number): NativeStruct {
   const desc = new NativeStruct(56);
   desc.u32(0, D3D12_RESOURCE_DIMENSION_BUFFER);
   desc.u64(8, 0);
@@ -126,7 +126,7 @@ function bufferDescription(sizeInBytes: number): NativeStruct {
   desc.u32(36, 1);
   desc.u32(40, 0);
   desc.u32(44, D3D12_TEXTURE_LAYOUT_ROW_MAJOR);
-  desc.u32(48, D3D12_RESOURCE_FLAG_NONE);
+  desc.u32(48, flags);
   return desc;
 }
 
@@ -220,6 +220,11 @@ export interface CopyLocation {
   footprint?: { offset: number; format: number; width: number; height: number; rowPitch: number };
 }
 
+interface BufferLocation {
+  resource: D3D12Resource;
+  offset: number;
+}
+
 function copyLocation(location: CopyLocation): NativeStruct {
   // D3D12_TEXTURE_COPY_LOCATION (d3d12.h, x64, 48 bytes): pResource @0; Type u32 @8;
   // then a union at @16 — either PlacedFootprint{Offset u64 @16, Format @24, Width @28,
@@ -243,20 +248,46 @@ function copyLocation(location: CopyLocation): NativeStruct {
 
 export class D3D12GraphicsCommandList extends ComObject {
   private open = true;
+  private readonly transitionedBuffers = new Set<D3D12Resource>();
 
   get isOpen(): boolean {
     return this.open;
   }
 
+  /**
+   * Buffers decay to COMMON once the ExecuteCommandLists that ran this list completes
+   * ("State decay to common", Microsoft Learn: Using resource barriers to synchronize
+   * resource states in Direct3D 12). Every list this process records next runs after
+   * this one on the same queue, so their barriers must start buffers from COMMON.
+   */
   close(): void {
     if (!this.open) return;
     this.callHr(9, { args: [], returns: FFIType.i32 }, "Close");
     this.open = false;
+    for (const buffer of this.transitionedBuffers) buffer.state = D3D12_RESOURCE_STATE_COMMON;
+    this.transitionedBuffers.clear();
   }
 
   reset(allocator: D3D12CommandAllocator): void {
     this.callHr(10, { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }, "Reset", allocator.ptr, null);
     this.open = true;
+  }
+
+  /**
+   * ID3D12GraphicsCommandList::CopyBufferRegion(pDstBuffer, DstOffset, pSrcBuffer,
+   * SrcOffset, NumBytes), vtable slot 15: d3d12.h lists Close 9, Reset 10,
+   * ClearState 11, DrawInstanced 12, DrawIndexedInstanced 13, Dispatch 14 before it.
+   */
+  copyBufferRegion(dst: BufferLocation, src: BufferLocation, byteCount: number): void {
+    this.call(
+      15,
+      { args: [FFIType.ptr, FFIType.u64, FFIType.ptr, FFIType.u64, FFIType.u64], returns: FFIType.void },
+      dst.resource.ptr,
+      BigInt(dst.offset),
+      src.resource.ptr,
+      BigInt(src.offset),
+      BigInt(byteCount),
+    );
   }
 
   copyTextureRegion(dst: CopyLocation, src: CopyLocation): void {
@@ -290,6 +321,7 @@ export class D3D12GraphicsCommandList extends ComObject {
     barrier.u32(24, newState);
     this.call(26, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.void }, 1, barrier.ptr);
     resource.state = newState;
+    if (resource.kind === "buffer") this.transitionedBuffers.add(resource);
   }
 
   uavBarrier(resource: D3D12Resource): void {
@@ -419,7 +451,17 @@ export class D3D12Device extends ComObject {
    * can mint an NT handle for CUDA to import as external memory. Starts in COMMON.
    */
   createSharedBuffer(sizeInBytes: number, label = `shared buffer ${sizeInBytes}B`): D3D12Resource {
-    const ptr = this.createCommitted(D3D12_HEAP_TYPE_DEFAULT, bufferDescription(sizeInBytes), D3D12_RESOURCE_STATE_COMMON, label, D3D12_HEAP_FLAG_SHARED);
+    const ptr = this.createCommitted(D3D12_HEAP_TYPE_DEFAULT, bufferDescription(sizeInBytes, D3D12_RESOURCE_FLAG_NONE), D3D12_RESOURCE_STATE_COMMON, label, D3D12_HEAP_FLAG_SHARED);
+    return new D3D12Resource(ptr, label, "buffer", sizeInBytes, 1, DXGI_FORMAT_UNKNOWN, sizeInBytes, D3D12_RESOURCE_STATE_COMMON);
+  }
+
+  /**
+   * A DEFAULT-heap committed buffer with ALLOW_UNORDERED_ACCESS, for a feature
+   * that writes a buffer output through a UAV; the CPU reaches it only through
+   * GPU copies (GpuContext.fillBuffers, GpuContext.readbackMany). Starts in COMMON.
+   */
+  createUnorderedAccessBuffer(sizeInBytes: number, label = `UAV buffer ${sizeInBytes}B`): D3D12Resource {
+    const ptr = this.createCommitted(D3D12_HEAP_TYPE_DEFAULT, bufferDescription(sizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS), D3D12_RESOURCE_STATE_COMMON, label);
     return new D3D12Resource(ptr, label, "buffer", sizeInBytes, 1, DXGI_FORMAT_UNKNOWN, sizeInBytes, D3D12_RESOURCE_STATE_COMMON);
   }
 
@@ -439,7 +481,7 @@ export class D3D12Device extends ComObject {
         : heapType === D3D12_HEAP_TYPE_READBACK
           ? D3D12_RESOURCE_STATE_COPY_DEST
           : D3D12_RESOURCE_STATE_COMMON;
-    const ptr = this.createCommitted(heapType, bufferDescription(sizeInBytes), state, label);
+    const ptr = this.createCommitted(heapType, bufferDescription(sizeInBytes, D3D12_RESOURCE_FLAG_NONE), state, label);
     return new D3D12Resource(ptr, label, "buffer", sizeInBytes, 1, DXGI_FORMAT_UNKNOWN, sizeInBytes, state);
   }
 }
