@@ -11,6 +11,7 @@ import {
   ENCODE_CODECS,
   ENCODE_CONTAINERS,
   FRAME_GEN_ENGINES,
+  FRAME_GEN_GPU_CHOICE,
   NR_PRESETS,
   NR_STYLES,
   SCALE_MODES,
@@ -125,8 +126,8 @@ export function validateJobRequest(value: unknown): string | null {
     if (typeof v.adapterUuid !== "string" || !/^GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v.adapterUuid)) {
       return 'adapterUuid must be a CUDA device UUID as GET /api/probe lists it ("GPU-" followed by 8-4-4-4-12 hex digits).';
     }
-    // Frame generation runs in dlssg-worker.exe on the default device; a stored GPU choice cannot apply to it.
-    if (v.frameGen !== undefined) return "adapterUuid does not apply to frame generation, which always runs on the default device; omit it.";
+    // Frame generation picks its GPU in its host process (README, "Shared options"); a stored GPU choice cannot apply to it.
+    if (v.frameGen !== undefined) return `adapterUuid does not apply to frame generation, which picks its GPU itself (${FRAME_GEN_GPU_CHOICE}); omit it.`;
   }
   if (!isObject(v.settings)) return "settings must be an object.";
   if (!isObject(v.scale)) return "scale must be an object.";
