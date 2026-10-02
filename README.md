@@ -144,11 +144,13 @@ http://127.0.0.1:3080/, and appending `?mock=1` uses an in-browser mock client.
 Resolution upscaling to the chosen output size), `nr` (DLSS Neural Rendering enhancement), and
 `bypass` (a plain GPU passthrough copy, for A/B comparison); **DLSS Frame Generation** for video
 (pick any output rate from the 23.976–480 list and the path: auto / native / cascade); **DLSS DLL
-version selection** per feature; **browser file upload** for the input; a live job queue with
+version selection** for SR and NR; **browser file upload** for the input; a live job queue with
 WebSocket progress; a before/after compare view; a hardware/runtime
 **probe** panel; and encode settings for video (codec incl. NVENC, quality 0–51 with 18 as default,
-container mp4/mkv/mov, audio).
-Optical-flow motion can be enabled for video. The **Settings** tab picks the GPU image and video jobs
+container mp4/mkv/mov, audio). Frame generation honours only the codec and quality: it always writes
+an mp4, always uses `runtime/dlssg/nvngx_dlssg.dll`, and ignores the engine, motion, output-size and
+neural-rendering settings. Optical-flow motion can be enabled for the other video jobs.
+The **Settings** tab picks the GPU image and video jobs
 run on, from the adapters the last probe found eligible; the choice is stored by the CUDA device
 UUID (nvidia-smi's `GPU-…`), which survives reboots where a DXGI index or LUID does not. Frame
 generation ignores it: its host process picks the GPU, as `--adapter` under "Shared options" describes.
