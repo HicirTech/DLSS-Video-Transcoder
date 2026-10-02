@@ -11,7 +11,7 @@ import { PROBE_ENTRIES, PROBE_INITS, runProbe } from "./ngx/probe.ts";
 import { DlssNrSession } from "./ngx/nr-render.ts";
 import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
-import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLES, type ProbeAdapter, type ProbeOpticalFlow, SETTING_RANGES } from "./server/api-types.ts";
+import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, FRAME_GEN_NATIVE_MAXIMUM, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLES, type ProbeAdapter, type ProbeOpticalFlow, SETTING_RANGES } from "./server/api-types.ts";
 import { DlssRenderPreset, DLSS_RATIO, perfQualityName, qualityForFactor } from "./ngx/results.ts";
 import { processFrameGen } from "./pipeline/framegen.ts";
 import { FRAMEGEN_ENGINES } from "./pipeline/framegen-plan.ts";
@@ -190,7 +190,7 @@ interface CommandSpec {
   readonly notes?: readonly string[];
 }
 
-const RUNTIME_OPT: OptionSpec = { flag: "--runtime DIR", desc: "runtime folder holding the NGX DLLs / workers", def: "<repo>/runtime" };
+const RUNTIME_OPT: OptionSpec = { flag: "--runtime DIR", desc: "runtime folder holding the NGX DLLs", def: "<repo>/runtime" };
 const ADAPTER_OPT: OptionSpec = { flag: "--adapter N", desc: "GPU adapter index as `probe` listed it in this session (DXGI indices can change between runs); the adapter must have a CUDA device. auto = the NVIDIA adapter with the most VRAM that has one", def: "auto" };
 
 const COMMANDS: readonly CommandSpec[] = [
@@ -259,7 +259,7 @@ const COMMANDS: readonly CommandSpec[] = [
   },
   {
     name: "fg",
-    summary: "DLSS Frame Generation (NGX feature 11): interpolate a video to a higher frame rate via dlssg-worker.exe.",
+    summary: "DLSS Frame Generation (NGX feature 11): interpolate a video to a higher frame rate.",
     usage: "bun run src/cli.ts fg <input.mp4> [output.mp4] [options]",
     args: [
       { name: "input.mp4", desc: "source video (any format ffmpeg can decode)" },
@@ -268,7 +268,7 @@ const COMMANDS: readonly CommandSpec[] = [
     options: [
       { flag: "--fps RATE", desc: "output frame rate: 23.976, 25, 29.97, 30, 50, 59.94, 60, 90, 119.88, 120, 144, 165, 180, 240, 360, 480, or an exact num/den; overrides --multiplier", def: "source fps x --multiplier" },
       { flag: "--multiplier N", desc: "output/input frame ratio when --fps is not given (2 = double fps)", def: "2" },
-      { flag: "--engine MODE", desc: "auto = native multi-frame when the runtime accepts it (exact integer ratio, HAGS on), else a cascade of 2x stages; the bundled worker only does 2x natively, so auto falls back to the cascade by itself; native or cascade force that path", def: "auto" },
+      { flag: "--engine MODE", desc: `auto = one native session when output/source is an exact integer from 2 up to ${FRAME_GEN_NATIVE_MAXIMUM} (3x and above only with HAGS on), else a cascade of 2x stages; when the runtime disables every interval of a native 3x+ session, auto re-runs it as a cascade; native or cascade force that path`, def: "auto" },
       { flag: "--codec NAME", desc: "encoder: h264, hevc, av1, or h264_nvenc/hevc_nvenc/av1_nvenc for GPU", def: "GPU NVENC when available, else libx264" },
       { flag: "--quality N", desc: "encoder quality (CRF for CPU, CQ for NVENC), 0..51 (lower = better)", def: "20" },
       RUNTIME_OPT,
