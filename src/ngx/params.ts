@@ -205,6 +205,8 @@ export const NgxParam = {
   FrameGenerationNeedsUpdatedDriver: "FrameGeneration.NeedsUpdatedDriver",
   FrameGenerationMinDriverVersionMajor: "FrameGeneration.MinDriverVersionMajor",
   FrameGenerationMinDriverVersionMinor: "FrameGeneration.MinDriverVersionMinor",
+  /** An NVSDK_NGX_Result stored as an int: why the feature could not start (nvsdk_ngx_defs_dlssg.h:48-52, NVIDIA/DLSS v310.9.1). */
+  FrameGenerationFeatureInitResult: "FrameGeneration.FeatureInitResult",
   RayReconstructionAvailable: "RayReconstruction.Available",
 } as const;
 
