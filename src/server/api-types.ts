@@ -90,6 +90,15 @@ export type FrameGenFps = (typeof FRAME_GEN_FPS_CHOICES)[number];
 export const FRAME_GEN_ENGINES = ["auto", "native", "cascade"] as const;
 export type FrameGenEngine = (typeof FRAME_GEN_ENGINES)[number];
 
+/**
+ * How far a native session reaches, in the words every surface that offers it uses. The runtime
+ * reports MultiFrameCountMax; 6x was measured with tests/diag-dlssg.ts.
+ */
+export const FRAME_GEN_NATIVE_MAXIMUM = "the runtime's MultiFrameCountMax + 1, 6x with the bundled nvngx_dlssg.dll 310.7.129 on an RTX 5090";
+
+/** Which GPU frame generation takes; a request cannot choose it (JobRequest.adapterUuid). */
+export const FRAME_GEN_GPU_CHOICE = "the DLSS Frame Generation host process takes the NVIDIA GPU with CUDA and the most VRAM, and its NVENC and NVOFA helpers use CUDA device 0";
+
 // The accepted values for every constrained setting, in one place: the UI clamps
 // to these and the API rejects outside them, so the two cannot drift apart.
 /**
@@ -164,10 +173,10 @@ export interface JobRequest {
     /** Convenience ratio when targetFps is absent: output = source rate x multiplier (2 = double the fps). */
     multiplier?: number;
     /**
-     * auto (default): native multi-frame DLSSG when target/source is an exact integer the
-     * runtime supports and HAGS is on, otherwise a cascade of 2x stages. The bundled
-     * dlssg-worker only ever synthesises one frame per interval — even with HAGS on — so
-     * auto falls back to the cascade on its own. native / cascade force a path.
+     * auto (default): one native DLSSG session when target/source is an exact integer from 2 up to
+     * FRAME_GEN_NATIVE_MAXIMUM and, from 3x up, HAGS is on; otherwise a cascade of 2x stages. When
+     * the runtime disables every interval of a native multi-frame session, auto re-runs the job as
+     * a cascade. native / cascade force a path.
      */
     engine?: FrameGenEngine;
   };
@@ -180,7 +189,7 @@ export interface JobRequest {
    * The GPU to run on, as the CUDA device UUID GET /api/probe lists per adapter
    * (ProbeAdapter.cudaUuid); omit for the automatic choice (the NVIDIA adapter
    * with the most VRAM that has a CUDA device). Image and video jobs only:
-   * frame generation always runs on the default device, so it rejects this.
+   * frame generation picks its GPU in its host process (FRAME_GEN_GPU_CHOICE), so it rejects this.
    */
   adapterUuid?: string;
 }
