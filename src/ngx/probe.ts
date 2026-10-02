@@ -15,7 +15,7 @@ import { parseVersionInfo } from "../native/version-info.ts";
 import { DEFAULT_FLOW_WIDTH, MIN_FLOW_SIDE } from "../pipeline/flow.ts";
 import { chooseGpu, gpuCandidates, isEligibleGpu } from "../pipeline/gpu.ts";
 import { probeNvof } from "../pipeline/nvof.ts";
-import { FEATURES, runtimeDllCandidates, type FeatureDescriptor, type FeatureKey } from "./runtime-catalog.ts";
+import { featureByKey, runtimeDllCandidates, type FeatureDescriptor } from "./runtime-catalog.ts";
 import type { ProbeAdapter, ProbeFeature, ProbeReport, RuntimeFile } from "../server/api-types.ts";
 import { FeatureCommonInfo, NgxCore, locateNgxCores } from "./core.ts";
 import { prepareForwarder, selfTestForwarder } from "./forwarder-runtime.ts";
@@ -49,8 +49,6 @@ export interface ProbeOptions {
   init?: ProbeInit;
   debugLayer?: boolean;
 }
-
-const featureByKey = (key: FeatureKey): FeatureDescriptor => FEATURES.find((f) => f.key === key)!;
 
 // Only the report's wording lives here. Which file each feature needs, and where
 // it may sit under runtime/, is runtime-catalog.ts's rule — so the report and
