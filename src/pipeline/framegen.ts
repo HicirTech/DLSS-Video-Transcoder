@@ -13,7 +13,7 @@
  *
  * The output frame count comes from the DECODED length — the frames ffmpeg
  * actually handed the pipeline, counted in the same clock as their timestamps —
- * never from a container frame count and never from how many frames the worker
+ * never from a container frame count and never from how many frames the host
  * returned, so the result matches the source length whatever was synthesised.
  * The muxed file is verified (frame count + rate) before the job reports success.
  *
@@ -23,9 +23,11 @@ import { existsSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings } from "../server/api-types.ts";
 import { throwIfAborted } from "./cancel.ts";
-import { DlssgSession, probeDlssgCached } from "./dlssg.ts";
+import { DlssgSession, probeDlssg } from "./dlssg.ts";
+import { motionFieldBytes } from "./dlssg-protocol.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
 import { EncodeSink, buildFrameGenEncodeArgs } from "./framegen-encode-sink.ts";
+import { noFramesGeneratedMessage } from "./framegen-host-messages.ts";
 import { FrameReader } from "./frame-reader.ts";
 import { type RunParams, runOverlapped, runSequential } from "./framegen-run.ts";
 import { removePartialOutput } from "./partial-output.ts";
@@ -38,6 +40,7 @@ import {
   NearestTimestampWriter,
   chooseInterpolationPlan,
   formatRate,
+  isNativeMultiFramePlan,
   resolveTargetRate,
 } from "./framegen-plan.ts";
 import type { NvencSdkCodec } from "./nvenc.ts";
@@ -111,14 +114,11 @@ function defaultFrameGenOutput(input: string): string {
   return join(dirname(input), `${basename(input, ext)}.dlssg.mp4`);
 }
 
-/** Frames the decoder may emit beyond the container's duration x rate: its CFR resample rounds at the tail. */
-const DECODE_TAIL_MARGIN = 8;
-
 /** Real inter-frame intervals to tolerate with zero synthesised frames before concluding generation is disabled. */
 const FG_PROBE_INTERVALS = 8;
 const DEFAULT_BUFFER_LIMIT = 1 << 30;
 
-/** Raised when the worker synthesised nothing; carries the plan so "auto" can retry with a cascade. Caught in processFrameGen below, nowhere else. */
+/** Raised when the host synthesised nothing; carries the plan so "auto" can retry with a cascade. Caught in processFrameGen below, nowhere else. */
 class FrameGenDisabledError extends Error {
   constructor(message: string, readonly plan: InterpolationPlan) {
     super(message);
@@ -126,41 +126,23 @@ class FrameGenDisabledError extends Error {
   }
 }
 
-/**
- * The writer would still emit a correctly timed file with nothing synthesised,
- * but it would be a duplicate-frame resample sold as frame generation, so the
- * job fails with the actual cause instead.
- */
-function frameGenDisabledError(plan: InterpolationPlan, disabledFrames: number, hagsEnabled: boolean): FrameGenDisabledError {
-  const wanted = `${formatRate(plan.sourceRate)} -> ${formatRate(plan.targetRate)} fps via ${plan.path}`;
-  const reported = disabledFrames ? `; the worker reported generation disabled for ${disabledFrames} frame(s)` : "";
-  const multiFrame = plan.path === "Native DLSSG" && plan.generatedPerInterval >= 2;
-  const hint = multiFrame
-    ? hagsEnabled
-      ? " This dlssg-worker build synthesises only one frame per interval (2x) even with HAGS on; the cascade engine reaches higher rates from 2x stages, and auto falls back to it automatically."
-      : " Multi-frame (3x and above) DLSS Frame Generation requires Windows hardware-accelerated GPU scheduling (HAGS), which is off on this machine: enable it under Settings > System > Display > Graphics > Default graphics settings and reboot, or use the cascade engine (auto falls back to it automatically)."
-    : " Check that the GPU driver is current and the dlssg runtime folder is complete; the cascade engine only needs 2x generation.";
-  return new FrameGenDisabledError(`DLSS Frame Generation produced no interpolated frames (${wanted})${reported}.${hint} No output was written.`, plan);
-}
-
-/** Runtime folders whose worker has refused a native multi-frame session in this process; "auto" skips the fail-fast probe for those. */
+/** Runtime folders whose host has refused a native multi-frame session in this process; "auto" skips the fail-fast probe for those. */
 const nativeMultiFrameRefused = new Set<string>();
 
 /**
- * An "auto" plan that chose native multi-frame and got nothing back is re-run
- * as a cascade of 2x stages, which only needs the 2x generation that always
- * works. This dlssg-worker build reports generation disabled for 3x and above
- * even with HAGS on, so the retry is the normal path, not an edge case.
+ * Engine "auto" plans one native session when the ratio is an exact integer up to the runtime's
+ * maximum, from 3x up only with HAGS on, and a cascade of 2x stages otherwise (framegen-plan.ts). A
+ * native multi-frame session that got nothing back is re-run as a cascade, which only needs 2x
+ * generation; the runtime folder is remembered, so its later "auto" jobs start as a cascade.
  */
 export async function processFrameGen(options: FrameGenOptions): Promise<FrameGenResult> {
   const engine = options.engine ?? "auto";
-  const workerDir = join(options.runtimeDir, "dlssg");
-  if (engine === "auto" && nativeMultiFrameRefused.has(workerDir)) return processFrameGenOnce({ ...options, engine: "cascade" });
+  if (engine === "auto" && nativeMultiFrameRefused.has(options.runtimeDir)) return processFrameGenOnce({ ...options, engine: "cascade" });
   try {
     return await processFrameGenOnce(options);
   } catch (error) {
-    if (engine === "auto" && error instanceof FrameGenDisabledError && error.plan.path === "Native DLSSG" && error.plan.generatedPerInterval >= 2) {
-      nativeMultiFrameRefused.add(workerDir);
+    if (engine === "auto" && error instanceof FrameGenDisabledError && isNativeMultiFramePlan(error.plan)) {
+      nativeMultiFrameRefused.add(options.runtimeDir);
       options.onProgress?.(0, `native ${error.plan.nativeMultiplier}x refused by the runtime (no frames synthesised); falling back to a cascade of 2x stages`);
       return processFrameGenOnce({ ...options, engine: "cascade" });
     }
@@ -168,18 +150,29 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
   }
 }
 
-/** A frame after its stage's guide worker ran: what the native evaluation needs. */
-async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenResult> {
-  const started = performance.now();
-  const progress = options.onProgress ?? (() => {});
-  throwIfAborted(options.signal);
+interface FrameGenTools {
+  ffmpeg: string;
+  ffprobe: string;
+}
+
+function frameGenTools(): FrameGenTools {
   const ffmpeg = findTool("ffmpeg");
   const ffprobe = findTool("ffprobe");
   if (!ffmpeg || !ffprobe)
     throw new Error("ffmpeg and ffprobe are required for frame generation (install with `winget install Gyan.FFmpeg` or set FFMPEG_PATH / FFPROBE_PATH).");
+  return { ffmpeg, ffprobe };
+}
 
-  const workerDir = join(options.runtimeDir, "dlssg");
-  const caps = await probeDlssgCached(workerDir);
+/** A frame after its stage's guide worker ran: what the native evaluation needs. */
+async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenResult> {
+  const started = performance.now();
+  const progress = options.onProgress ?? (() => {});
+  // Before the host probe, which starts a GPU process of up to PROBE_TIMEOUT_MS, and again after it: the probe does not watch the signal.
+  throwIfAborted(options.signal);
+  const { ffmpeg, ffprobe } = frameGenTools();
+
+  const caps = await probeDlssg(options.runtimeDir);
+  throwIfAborted(options.signal);
   if (!caps.available) throw new Error(`DLSS Frame Generation is not available: ${caps.detail}`);
   const nativeMultiplierMax = caps.multiFrameCountMax + 1;
 
@@ -192,7 +185,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   const rescaled = width !== info.width || height !== info.height;
   const frameBytes = width * height * 4;
   if (info.frames === null || info.frames <= 0)
-    throw new Error("Could not determine the source frame count, which the frame-generation worker needs to size its frame history. Re-mux the file (e.g. `ffmpeg -i in -c copy out.mp4`) so ffprobe can read it.");
+    throw new Error("Could not determine the source frame count, which frame generation needs for its progress estimate. Re-mux the file (e.g. `ffmpeg -i in -c copy out.mp4`) so ffprobe can read it.");
   const frames = info.frames;
   // The nominal CFR clock, not the measured average: planning needs exact ratios (30 -> 60 must be 2x).
   const sourceRate = parseRational(info.nominalFpsText ?? info.fpsText);
@@ -208,15 +201,6 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   const sourceSeconds = frames / info.fps;
   const expectedDecoded = Math.max(1, Math.round(sourceSeconds * ratToNumber(sourceRate)));
   const estimatedOutput = Math.ceil(sourceSeconds * ratToNumber(targetRate));
-  // The worker exits once it has received the frame count it was told at setup,
-  // so that number has to be an UPPER bound on what the decoder will emit, in the
-  // decoder's own clock. The CFR resample lands within a frame of the container
-  // duration (measured: estimate 299, decoder 300 on the telecine fixture); the
-  // margin covers that rounding without inflating the worker's history much. A
-  // container that under-declares its duration can still exceed this, and
-  // DlssgSession then says so instead of surfacing a bare EPIPE.
-  const declaredSeconds = Math.max(sourceSeconds, info.duration ?? 0);
-  const decodedUpperBound = Math.ceil(declaredSeconds * ratToNumber(sourceRate)) + DECODE_TAIL_MARGIN;
   const expectsGeneration = plan.generatedPerInterval > 0;
   const output = options.output ?? defaultFrameGenOutput(options.input);
   // Read before anything can write there: it decides what the failure path may delete.
@@ -238,7 +222,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   // Only re-open the source as a second input when it actually has audio to carry;
   // otherwise ffmpeg needlessly demuxes/decodes the whole source again.
   const wantAudio = info.hasAudio;
-  // Probed on the device the encode will use: dlssg-worker's, the default one.
+  // Probed on the device the encode will use, FRAMEGEN_CUDA_DEVICE (framegen-plan.ts says why).
   const resolvedCodec = resolveEncodeCodec(options.codec ?? "h264_nvenc", ffmpeg, FRAMEGEN_CUDA_DEVICE);
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
 
@@ -276,7 +260,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   // encode threads read them without copies.
   const reader = new FrameReader(decoder.stdout as ReadableStream<Uint8Array>, true);
   const writer = new NearestTimestampWriter((frame) => sink.write(frame), targetRate);
-  const zeros = new Uint16Array(width * height * 2);
+  const zeros = new Uint16Array(motionFieldBytes(width, height) / Uint16Array.BYTES_PER_ELEMENT);
   const stages: Stage[] = [];
   // Once, whichever of the failure path and `finally` gets there first.
   let stagesClosed: Promise<unknown> | null = null;
@@ -291,19 +275,16 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     const generatedCounts: number[] = [];
     if (plan.path === "Native DLSSG") generatedCounts.push(plan.generatedPerInterval);
     else if (plan.path === "Cascade") for (let stage = 0; stage < plan.cascadeStages; stage++) generatedCounts.push(1);
-    // Open every stage's worker process and guide thread concurrently: each
+    // Open every stage's host process and guide thread concurrently: each
     // brings up its own D3D12/NGX or CUDA/NVOFA context, ~1 s of fixed cost
     // that would otherwise be paid stage by stage.
     const openStage = async (index: number, generatedCount: number): Promise<Stage> => {
-      // Stage k sees (n-1)*2^k + 1 frames for n decoded. The worker exits after
-      // exactly this many, so n is the decoded UPPER BOUND, never nb_frames.
-      const frameCount = plan.path === "Cascade" ? Math.max(1, (decodedUpperBound - 1) * (1 << index) + 1) : decodedUpperBound;
       // Only the last stage — 2^(stages-1) evaluations per source frame, the
       // bottleneck — gets a packer thread; the others pack inline so the machine
       // is not oversubscribed.
       const packInline = index !== generatedCounts.length - 1;
       const results = await Promise.allSettled([
-        DlssgSession.open(workerDir, { width, height, frameCount, generatedCount, sharedFrames: true }),
+        DlssgSession.open(options.runtimeDir, { width, height, generatedCount, sharedFrames: true }),
         openGuideWorker({ type: "open", width, height, detectSourceCuts: index === 0, packInline }),
         packInline ? Promise.resolve(null) : openGuideWorker({ type: "open-packer", width, height }),
       ]);
@@ -332,7 +313,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     const check = (): void => {
       // Fail fast before spending the whole encode: nothing synthesised after
       // several real intervals means the runtime has disabled generation.
-      if (expectsGeneration && stages[0]!.intervals >= FG_PROBE_INTERVALS && noneGenerated()) throw frameGenDisabledError(plan, stages[0]!.session.disabledFrames, caps.hagsEnabled);
+      if (expectsGeneration && stages[0]!.intervals >= FG_PROBE_INTERVALS && noneGenerated()) throw new FrameGenDisabledError(noFramesGeneratedMessage(plan, { disabledFrames: stages[0]!.session.disabledFrames, hagsEnabled: caps.hagsEnabled }), plan);
     };
     const params: RunParams = {
       reader,
@@ -364,7 +345,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     }
     if (inputFrames === 0) throw new Error("No frames were decoded from the input. The file may be empty, corrupt, or not a video ffmpeg can read.");
     // Clips shorter than the probe window still must not pass off a duplicate-frame resample as generation.
-    if (expectsGeneration && stages[0]!.intervals >= 1 && noneGenerated()) throw frameGenDisabledError(plan, stages[0]?.session.disabledFrames ?? 0, caps.hagsEnabled);
+    if (expectsGeneration && stages[0]!.intervals >= 1 && noneGenerated()) throw new FrameGenDisabledError(noFramesGeneratedMessage(plan, { disabledFrames: stages[0]?.session.disabledFrames ?? 0, hagsEnabled: caps.hagsEnabled }), plan);
     // Not before the checks above: a FrameGenDisabledError from them makes an
     // "auto" job re-run as a cascade, which must still be cancellable.
     options.onFinishing?.();
