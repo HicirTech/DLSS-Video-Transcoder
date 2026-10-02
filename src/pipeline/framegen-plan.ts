@@ -5,7 +5,7 @@
  * rational math, no GPU, so every rule here is unit-testable.
  *
  * Why a nearest-timestamp writer rather than "multiply the frame rate": the
- * worker legitimately emits no in-between frames across scene cuts and resets,
+ * host legitimately emits no in-between frames across scene cuts and resets,
  * and none at all when the runtime disables generation. Taking the output frame
  * count from the DECODED duration and filling each instant with the nearest
  * available frame keeps the output the same length as the source whatever came
@@ -18,10 +18,11 @@ import { parseRational, type Rational, ratAbs, ratAdd, ratCeil, ratCmp, ratDiv, 
 
 /**
  * The CUDA device frame generation's NVENC and NVOFA workers run on. Frame
- * generation has no adapter selection: NVIDIA's dlssg-worker.exe always takes
- * the default device (README, "Shared options"), so its helpers follow it to
- * CUDA's first device rather than resolving an adapter of their own. The
- * other pipelines resolve theirs by LUID (GpuSession.cudaOrdinal).
+ * generation has no adapter selection (README, "Shared options"): these helpers
+ * use CUDA's first device, while the host process (dlssg-host.ts) takes
+ * openGpu()'s automatic choice, which can be another GPU on a machine with more
+ * than one NVIDIA GPU. The other pipelines resolve theirs by LUID
+ * (GpuSession.cudaOrdinal).
  */
 export const FRAMEGEN_CUDA_DEVICE = 0;
 
@@ -123,8 +124,13 @@ export interface InterpolationPlan {
   cascadeStages: number;
   /** Worst-case distance between an output instant and the fine-grid frame chosen for it. */
   maximumTemporalError: Rational;
-  /** In-between frames requested from the worker per session interval (generated_count). */
+  /** In-between frames requested from the host per session interval (generated_count). */
   generatedPerInterval: number;
+}
+
+/** A native session that generates two or more frames per interval (3x and above); each stage of a cascade generates one, however many frames the whole cascade adds. */
+export function isNativeMultiFramePlan(plan: InterpolationPlan): boolean {
+  return plan.path === "Native DLSSG" && plan.generatedPerInterval >= 2;
 }
 
 export interface PlanOptions {
