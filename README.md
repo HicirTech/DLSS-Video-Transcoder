@@ -210,7 +210,10 @@ All JSON unless noted. Base is same-origin.
 `JobRequest`: `{ kind: "image"|"video", input, output?, engine: "sr"|"nr"|"bypass",
 motion: "none"|"flow", settings, scale, encode?, frameGen?: { targetFps?, multiplier?, engine? },
 dllDir?, adapterUuid? }`. `adapterUuid` is a CUDA device UUID as `GET /api/probe` lists it per
-adapter (`GPU-…`); image and video jobs only, rejected together with `frameGen`. A submitted
+adapter (`GPU-…`); image and video jobs only, rejected together with `frameGen`. `frameGen` is for
+video jobs and needs `targetFps` (a named rate such as `"60"`, or an exact `"num/den"`) or
+`multiplier` (at least 1, rounded to a whole number); `targetFps` wins when both are given, and
+`engine` defaults to `auto`. A submitted
 `output` must be absolute and inside the app-data folder, the runtime folder or the input's own
 directory. Payload shapes are defined in
 [`src/server/api-types.ts`](src/server/api-types.ts).
