@@ -20,7 +20,7 @@ import type { ProbeAdapter, ProbeFeature, ProbeReport, RuntimeFile } from "../se
 import { FeatureCommonInfo, NgxCore, locateNgxCores } from "./core.ts";
 import { prepareForwarder, selfTestForwarder } from "./forwarder-runtime.ts";
 import { NgxParam, NgxParameters, NrParam } from "./params.ts";
-import { NgxFeature, featureName, ngxName, ngxOk } from "./results.ts";
+import { NGX_APPLICATION_ID, NgxFeature, featureName, ngxName, ngxOk } from "./results.ts";
 import { SpyParameter } from "./spy.ts";
 
 /** The NGX module `--entry` can enter through; ProbeOptions derives its type so the two cannot drift. */
@@ -49,8 +49,6 @@ export interface ProbeOptions {
   init?: ProbeInit;
   debugLayer?: boolean;
 }
-
-export const PROBE_APP_ID = 0x4e5254530001n; // "NRTS" + 1, an arbitrary non-zero application id
 
 const featureByKey = (key: FeatureKey): FeatureDescriptor => FEATURES.find((f) => f.key === key)!;
 
@@ -296,19 +294,19 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
       const mode = options.init ?? "ext";
       if (mode === "plain") {
         trace("NVSDK_NGX_D3D12_Init (4 arguments)");
-        result = core.initPlain(device.ptr, PROBE_APP_ID, appDataPath);
+        result = core.initPlain(device.ptr, NGX_APPLICATION_ID, appDataPath);
         say(`Init -> ${ngxName(result)}`);
       } else if (mode === "spy") {
         const spy = new SpyParameter();
         trace("NVSDK_NGX_D3D12_Init_Ext (fifth argument = spy vtable object)");
-        result = core.initExtRaw(device.ptr, PROBE_APP_ID, appDataPath, spy.ptr);
+        result = core.initExtRaw(device.ptr, NGX_APPLICATION_ID, appDataPath, spy.ptr);
         say(`Init_Ext(spy) -> ${ngxName(result)}; spy saw: ${spy.summary()}`);
         report.capabilities["spy.calls"] = spy.summary();
         spy.close(); // release the 32 JSCallback trampolines the spy vtable allocated
       } else {
         const featureInfo = options.nullFeatureInfo ? null : new FeatureCommonInfo([runtimeDir]);
         trace(`NVSDK_NGX_D3D12_Init_Ext (featureInfo=${featureInfo ? "struct with 1 search path" : "NULL"})`);
-        result = core.initExt(device.ptr, PROBE_APP_ID, appDataPath, featureInfo);
+        result = core.initExt(device.ptr, NGX_APPLICATION_ID, appDataPath, featureInfo);
         say(`Init_Ext -> ${ngxName(result)}`);
       }
       if (!ngxOk(result) && options.projectInit) {
@@ -382,7 +380,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
       };
       try {
         trace(`NVSDK_NGX_D3D12_GetFeatureRequirements(${id})`);
-        const r = core.featureRequirements(adapter.ptr, id, PROBE_APP_ID, appDataPath, searchPaths);
+        const r = core.featureRequirements(adapter.ptr, id, NGX_APPLICATION_ID, appDataPath, searchPaths);
         feature.support = r.support;
         feature.supportCode = r.supportedBits;
         feature.minHwArchitecture = r.minHwArchitecture;
