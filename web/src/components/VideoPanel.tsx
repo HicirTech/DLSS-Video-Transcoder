@@ -147,7 +147,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
             >
               {FRAME_GEN_ENGINES.map((mode) => (
                 <MenuItem key={mode} value={mode}>
-                  {mode === "auto" ? "Auto (native when possible, else cascade)" : mode === "native" ? "Native multi-frame DLSSG" : "Cascade of 2× stages"}
+                  {mode === "auto" ? "Auto (native when possible, else cascade)" : mode === "native" ? "Native DLSSG (exact integer ratios)" : "Cascade of 2× stages"}
                 </MenuItem>
               ))}
             </Select>
