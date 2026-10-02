@@ -118,16 +118,21 @@ Key per-command options (defaults in parentheses):
   that diagnostic after a runtime update.
 - **`fg`** — `--fps RATE` (output frame rate: 23.976, 25, 29.97, 30, 50, 59.94, 60, 90, 119.88, 120,
   144, 165, 180, 240, 360, 480, or an exact `num/den`; default: source fps × `--multiplier`),
-  `--multiplier N` (2; used when `--fps` is absent), `--engine MODE` (auto; `auto` = one native
-  DLSSG session when output ÷ source is an exact integer from 2× up to the runtime's
-  MultiFrameCountMax + 1 (6× with the bundled `nvngx_dlssg.dll` 310.7.129 on an RTX 5090, measured)
-  and, from 3× up, **HAGS is on**; otherwise a cascade of 2× stages chained in memory — 1 stage for 2×,
-  2 for 4×, else 3 on an 8× grid — placing the nearest frame on each instant of the exact target clock;
-  when the runtime disables every interval of a native 3×+ session, `auto` re-runs the job as a cascade;
-  `native` / `cascade` force a path), `--codec NAME` (default: GPU NVENC when available, else libx264),
-  `--quality N` (encoder quality, CRF for CPU / CQ for NVENC, 0–51, lower = better, 20). The output
-  always keeps the source duration (frame count = ⌈duration × rate⌉) and the original audio, and is
-  verified after muxing.
+  `--multiplier N` (2; a whole number 1–16; used when `--fps` is absent), `--engine MODE` (auto;
+  `auto` = one native DLSSG session when output ÷ source is an exact integer from 2× up to the
+  runtime's MultiFrameCountMax + 1 (6× with the bundled `nvngx_dlssg.dll` 310.7.129 on an RTX 5090,
+  measured) and, from 3× up, hardware-accelerated GPU scheduling (**HAGS**) is on (Windows: Settings >
+  System > Display > Graphics > Default graphics settings, then reboot); otherwise a cascade of 2×
+  stages chained in memory — 1 stage for 2×, 2 for 4×, else 3 on an 8× grid — placing the nearest
+  frame on each instant of the exact target clock; when the runtime disables every interval of a
+  native 3×+ session, `auto` re-runs the job as a cascade; `native` / `cascade` force a path, and
+  `native` fails, writing no output, when a target above the source rate is not an exact integer
+  multiple in that range or the runtime generates nothing), `--codec NAME` (default: GPU NVENC when
+  available, else libx264), `--quality N` (encoder quality, CRF for CPU / CQ for NVENC, 0–51, lower =
+  better, 20). A target at or below the source rate (`--multiplier 1`, a lower `--fps`) generates no
+  frames; the video is only resampled to it. The output always keeps the source duration (frame count
+  = ⌈duration × rate⌉) and the source's first audio track, if any (re-encoded to AAC, 192 kb/s), and
+  is verified after muxing.
 
 ## Web UI
 
