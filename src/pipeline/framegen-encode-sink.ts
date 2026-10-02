@@ -63,7 +63,7 @@ export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): OpenEncode {
     rawArgs: [
       "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`,
       "-framerate", outputRate, "-i", "pipe:0", ...inputsAndMap, ...audioArgs,
-      // The device is fixed for frame generation: dlssg-worker.exe takes the default one, and the encoder follows it.
+      // The device is fixed for frame generation; FRAMEGEN_CUDA_DEVICE says which and why.
       ...encoderArgs({ codec, quality, container: "mp4", copyAudio: true }, FRAMEGEN_CUDA_DEVICE),
       ...aspectArgs(displayAspect, width, height, null),
       ...muxTail,
