@@ -399,11 +399,29 @@ const inflightWrites = new Map<string, Promise<{ path: string; wrote: boolean; s
 let tmpSeq = 0;
 
 /**
+ * Whether `error`, from replacing the shim at `path`, means Windows would not touch a DLL that a
+ * process has mapped (EBUSY, EPERM or EACCES; with a loaded shim a rename over it failed with EPERM
+ * and a write into it with EBUSY, on Windows 11 with Bun 1.4.2). The shim in place exports the same
+ * four functions (an emission from before the unwind data only lacks it), so the run keeps it
+ * instead of failing and the new one is written once nothing has the old one loaded. Any other
+ * error is real.
+ */
+function keepsLoadedShim(error: unknown, path: string): boolean {
+  const code = (error as { code?: string }).code;
+  return (code === "EBUSY" || code === "EPERM" || code === "EACCES") && existsSync(path);
+}
+
+/** The temp file is gone after a rename and a leftover one is harmless, so a failed removal is ignored. */
+function removeTempFile(tmp: string): void {
+  try { unlinkSync(tmp); } catch { /* ignore */ }
+}
+
+/**
  * Write the shim to `path` unless an identical file is already there. Concurrent
  * writes to the same path in this process are coalesced (two first-run
  * `/api/probe` requests would otherwise both write it), and the write goes
  * through a temp file + rename so a concurrent loader never maps a half-written
- * DLL.
+ * DLL. A shim that is loaded stays as it is and reports `wrote: false` (keepsLoadedShim).
  */
 export function writeForwarder(path: string): Promise<{ path: string; wrote: boolean; size: number }> {
   const existing = inflightWrites.get(path);
@@ -423,14 +441,28 @@ async function doWriteForwarder(path: string): Promise<{ path: string; wrote: bo
     }
   }
   const tmp = `${path}.tmp.${process.pid}.${tmpSeq++}`;
-  await Bun.write(tmp, built.bytes);
   try {
-    await rename(tmp, path); // atomic on the first run (destination absent)
-  } catch {
-    await Bun.write(path, built.bytes); // rename can fail on Windows if the dest exists/locked
-    try { unlinkSync(tmp); } catch { /* ignore */ }
+    await Bun.write(tmp, built.bytes);
+    const wrote = await replaceShim(tmp, path, built.bytes);
+    return { path, wrote, size: built.bytes.length };
+  } finally {
+    removeTempFile(tmp);
   }
-  return { path, wrote: true, size: built.bytes.length };
+}
+
+/** Puts `bytes` at `path` by renaming `tmp` over it; false when keepsLoadedShim left the shim there. */
+async function replaceShim(tmp: string, path: string, bytes: Uint8Array): Promise<boolean> {
+  try {
+    try {
+      await rename(tmp, path); // atomic on the first run (destination absent)
+    } catch {
+      await Bun.write(path, bytes); // rename can fail on Windows if the dest exists/locked
+    }
+    return true;
+  } catch (error) {
+    if (keepsLoadedShim(error, path)) return false;
+    throw error;
+  }
 }
 
 /** Synchronous sibling of writeForwarder, for callers that cannot await (engine factories). */
@@ -443,12 +475,26 @@ export function writeForwarderSync(path: string): { path: string; wrote: boolean
     }
   }
   const tmp = `${path}.tmp.${process.pid}.${tmpSeq++}`;
-  writeFileSync(tmp, built.bytes);
   try {
-    renameSync(tmp, path); // atomic on the first run (destination absent)
-  } catch {
-    writeFileSync(path, built.bytes); // rename can fail on Windows if the dest exists/locked
-    try { unlinkSync(tmp); } catch { /* ignore */ }
+    writeFileSync(tmp, built.bytes);
+    const wrote = replaceShimSync(tmp, path, built.bytes);
+    return { path, wrote, size: built.bytes.length };
+  } finally {
+    removeTempFile(tmp);
   }
-  return { path, wrote: true, size: built.bytes.length };
+}
+
+/** Synchronous sibling of replaceShim. */
+function replaceShimSync(tmp: string, path: string, bytes: Uint8Array): boolean {
+  try {
+    try {
+      renameSync(tmp, path); // atomic on the first run (destination absent)
+    } catch {
+      writeFileSync(path, bytes); // rename can fail on Windows if the dest exists/locked
+    }
+    return true;
+  } catch (error) {
+    if (keepsLoadedShim(error, path)) return false;
+    throw error;
+  }
 }
