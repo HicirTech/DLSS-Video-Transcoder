@@ -5,7 +5,7 @@
 import { FFIType, ptr } from "bun:ffi";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { callableAt } from "../native/com.ts";
+import { callableAt, type OwnedCallable } from "../native/com.ts";
 import { NativeStruct, OutPointer, cstring, readCString, wstring } from "../native/memory.ts";
 import { NativeModule } from "../native/win32.ts";
 import type { ForwarderModule } from "./forwarder-runtime.ts";
@@ -84,6 +84,8 @@ export class NgxCore {
   private readonly module: NativeModule;
   private forwarder: ForwarderModule | null = null;
   private readonly keep: unknown[] = [];
+  /** What a running call reads only through addresses inside its arguments; cleared when the call returns. */
+  private callOwners: unknown[] | null = null;
 
   private constructor(
     readonly location: NgxCoreLocation,
@@ -125,8 +127,9 @@ export class NgxCore {
 
   // The forwarder's slot 0 is shared mutable state: it is re-pointed at the target
   // immediately before each call, so a ForwarderModule must not be driven from two
-  // threads at once.
-  private fn(name: string, args: FFIType[], returns: FFIType = FFIType.i32) {
+  // threads at once. The callable refuses a ptr() address (com.ts OwnedArgument): the
+  // forwarder path allocates between the arguments and the native call.
+  private fn(name: string, args: FFIType[], returns: FFIType = FFIType.i32): OwnedCallable {
     const address = this.address(name);
     if (!this.forwarder) return callableAt(address, { args, returns });
     const forwarder = this.forwarder;
@@ -202,13 +205,13 @@ export class NgxCore {
 
   capabilityParameters(): NgxParameters {
     const out = new OutPointer();
-    ngxCheck(this.fn("NVSDK_NGX_D3D12_GetCapabilityParameters", [FFIType.ptr])(out.ptr) as number, "GetCapabilityParameters");
+    ngxCheck(this.fn("NVSDK_NGX_D3D12_GetCapabilityParameters", [FFIType.ptr])(out.bytes) as number, "GetCapabilityParameters");
     return new NgxParameters(out.value, "capability");
   }
 
   allocateParameters(): NgxParameters {
     const out = new OutPointer();
-    ngxCheck(this.fn("NVSDK_NGX_D3D12_AllocateParameters", [FFIType.ptr])(out.ptr) as number, "AllocateParameters");
+    ngxCheck(this.fn("NVSDK_NGX_D3D12_AllocateParameters", [FFIType.ptr])(out.bytes) as number, "AllocateParameters");
     return new NgxParameters(out.value, "allocated");
   }
 
@@ -229,7 +232,14 @@ export class NgxCore {
     info.pointer(40, ptr(path));
     info.pointer(48, featureInfo ? featureInfo.ptr : 0);
     const out = new NativeStruct(264);
-    const result = this.fn("NVSDK_NGX_D3D12_GetFeatureRequirements", [FFIType.ptr, FFIType.ptr, FFIType.ptr])(adapter, info.ptr, out.ptr) as number;
+    // NGX reads `path` and `featureInfo` through `info`, and a local is no GC root after its last use (memory.ts).
+    this.callOwners = [path, featureInfo];
+    let result: number;
+    try {
+      result = this.fn("NVSDK_NGX_D3D12_GetFeatureRequirements", [FFIType.ptr, FFIType.ptr, FFIType.ptr])(adapter, info.bytes, out.bytes) as number;
+    } finally {
+      this.callOwners = null;
+    }
     if (!ngxOk(result)) {
       return { result, supportedBits: null, support: "query failed", minHwArchitecture: null, minOsVersion: null };
     }
@@ -246,7 +256,7 @@ export class NgxCore {
 
   createFeature(cmdList: number, featureId: number, params: { readonly ptr: number }): { result: number; handle: number } {
     const out = new OutPointer();
-    const result = this.fn("NVSDK_NGX_D3D12_CreateFeature", [FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.ptr])(cmdList, featureId, params.ptr, out.ptr) as number;
+    const result = this.fn("NVSDK_NGX_D3D12_CreateFeature", [FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.ptr])(cmdList, featureId, params.ptr, out.bytes) as number;
     return { result, handle: out.value };
   }
 

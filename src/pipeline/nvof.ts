@@ -8,7 +8,7 @@
  * nvOpticalFlowCuda.h); API version 2.0. NV_OF_STATUS 0 = NV_OF_SUCCESS.
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";
-import { callableAt, type Signature } from "../native/com.ts";
+import { callableAt, type OwnedCallable, type Signature } from "../native/com.ts";
 import { cudaCreateContext, cudaMemcpy2DDtoH, cudaMemcpy2DHtoD, cudaReleaseContext, cudaSynchronize } from "../native/cuda.ts";
 import { OutU64 } from "../native/memory.ts";
 import type { OpticalFlowLimits } from "../server/api-types.ts";
@@ -40,7 +40,7 @@ function functions(): bigint[] {
     NvOFAPICreateInstanceCuda: { args: [FFIType.u32, FFIType.ptr], returns: FFIType.i32 },
   });
   const buf = new BigUint64Array(12);
-  const st = lib.symbols.NvOFAPICreateInstanceCuda(NV_OF_API_VERSION, ptr(buf)) as number;
+  const st = lib.symbols.NvOFAPICreateInstanceCuda(NV_OF_API_VERSION, buf) as number;
   if (st !== OK) throw new Error(`NvOFAPICreateInstanceCuda(0x${NV_OF_API_VERSION.toString(16)}) failed: NV_OF_STATUS ${st}`);
   fnList = Array.from(buf);
   if (fnList.some((p) => p === 0n)) throw new Error("NVOFA function list has null entries");
@@ -157,16 +157,16 @@ export class NvofSession {
     private readonly input: NvofBuffer,
     private readonly reference: NvofBuffer,
     private readonly output: NvofBuffer,
-    private readonly execute: (...a: unknown[]) => unknown,
-    private readonly destroyBuf: (...a: unknown[]) => unknown,
-    private readonly destroy: (...a: unknown[]) => unknown,
+    private readonly execute: OwnedCallable,
+    private readonly destroyBuf: OwnedCallable,
+    private readonly destroy: OwnedCallable,
   ) {}
 
   static open(width: number, height: number, ordinal: number, perf = PERF_MEDIUM): NvofSession {
     const ctx = cudaCreateContext(ordinal);
     const create = fn(FN.create, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 });
     const hOut = new OutU64();
-    ckof(create(ctx, hOut.ptr), "nvCreateOpticalFlowCuda");
+    ckof(create(ctx, hOut.bytes), "nvCreateOpticalFlowCuda");
     const hOf = hOut.value;
 
     // Everything past this point can throw, and until the session object exists
@@ -189,7 +189,7 @@ export class NvofSession {
       idv.setUint32(8, 1, true); // outGridSize = 1: one flow vector per input pixel
       idv.setUint32(16, MODE_OPTICALFLOW, true); // mode
       idv.setUint32(20, perf, true); // perfLevel
-      ckof(fn(FN.init, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(hOf, ptr(initParams)), "nvOFInit");
+      ckof(fn(FN.init, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(hOf, initParams), "nvOFInit");
 
       const mkBuf = (w: number, h: number, usage: number, format: number): NvofBuffer => {
         // NV_OF_BUFFER_DESCRIPTOR: width@0, height@4, bufferUsage@8, bufferFormat@12.
@@ -200,13 +200,13 @@ export class NvofSession {
         d.setUint32(8, usage, true);
         d.setUint32(12, format, true);
         const bOut = new OutU64();
-        ckof(createBuf(hOf, ptr(desc), CUDA_BUF_DEVPTR, bOut.ptr), "nvOFCreateGPUBufferCuda");
+        ckof(createBuf(hOf, desc, CUDA_BUF_DEVPTR, bOut.bytes), "nvOFCreateGPUBufferCuda");
         const handle = bOut.value;
         created.push(handle); // owned from here, before anything below can throw
         const device = getDev(handle) as bigint;
         // The driver picks the pitch; every copy below must use it, not w * bpp.
         const stride = new Uint8Array(28);
-        ckof(getStride(handle, ptr(stride)), "nvOFGPUBufferGetStrideInfo");
+        ckof(getStride(handle, stride), "nvOFGPUBufferGetStrideInfo");
         const pitch = new DataView(stride.buffer).getUint32(0, true);
         return { handle, device, pitch };
       };
@@ -252,7 +252,7 @@ export class NvofSession {
     // NV_OF_EXECUTE_OUTPUT_PARAMS: outputBuffer@0.
     const outParams = new Uint8Array(24);
     new DataView(outParams.buffer).setBigUint64(0, this.output.handle, true);
-    ckof(this.execute(this.hOf, ptr(inParams), ptr(outParams)), "nvOFExecute");
+    ckof(this.execute(this.hOf, inParams, outParams), "nvOFExecute");
     cudaSynchronize();
 
     const host = new Uint8Array(w * h * 4);

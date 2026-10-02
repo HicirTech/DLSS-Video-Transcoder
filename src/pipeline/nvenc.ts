@@ -12,7 +12,7 @@
  * GUID passed by value is a hidden pointer on Win64, so GUID params bind as "ptr".
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";
-import { callableAt, type Signature } from "../native/com.ts";
+import { callableAt, type OwnedCallable, type Signature } from "../native/com.ts";
 import { cudaCreateContext, cudaFree, cudaMalloc, cudaMemcpyHtoD } from "../native/cuda.ts";
 import { copyFromNative, guid, OutU64, readCString } from "../native/memory.ts";
 
@@ -120,7 +120,7 @@ function functions(): bigint[] {
   // NV_ENCODE_API_FUNCTION_LIST: version@0, reserved@4, 43 pointers @8.., reserved2[275]. Size 2552.
   const list = new Uint8Array(2552);
   new DataView(list.buffer).setUint32(0, V.FUNCTION_LIST, true);
-  const st = lib.symbols.NvEncodeAPICreateInstance(ptr(list)) as number;
+  const st = lib.symbols.NvEncodeAPICreateInstance(list) as number;
   if (st !== OK) throw new Error(`NvEncodeAPICreateInstance failed: NVENC ${statusName(st)}`);
   const dv = new DataView(list.buffer);
   const out: bigint[] = [];
@@ -129,7 +129,7 @@ function functions(): bigint[] {
   return out;
 }
 
-function fn(index: number, sig: Signature): (...args: unknown[]) => unknown {
+function fn(index: number, sig: Signature): OwnedCallable {
   const addr = Number(functions()[index]!);
   if (addr === 0) throw new Error(`NVENC function slot ${index} is null`);
   return callableAt(addr, sig);
@@ -147,7 +147,7 @@ function statusName(st: number): string {
 export function nvencMaxSupportedVersion(): { major: number; minor: number; raw: number } | null {
   try {
     const out = new Uint32Array(1);
-    const st = lib.symbols.NvEncodeAPIGetMaxSupportedVersion(ptr(out)) as number;
+    const st = lib.symbols.NvEncodeAPIGetMaxSupportedVersion(out) as number;
     if (st !== OK) return null;
     const raw = out[0]!;
     return { major: raw >> 4, minor: raw & 0xf, raw };
@@ -187,7 +187,7 @@ export function probeNvencCaps(ordinal: number): NvencCaps {
     odv.setBigUint64(8, ctx, true);
     odv.setUint32(24, NVENCAPI_VERSION >>> 0, true);
     const encOut = new OutU64();
-    const st = fn(FN.openEncodeSessionEx, { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 })(ptr(open), encOut.ptr) as number;
+    const st = fn(FN.openEncodeSessionEx, { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 })(open, encOut.bytes) as number;
     if (st !== OK) return { available: false, detail: `nvEncOpenEncodeSessionEx failed: NVENC ${statusName(st)}`, driverMajor: ver?.major, driverMinor: ver?.minor };
     encoder = encOut.value;
 
@@ -198,7 +198,7 @@ export function probeNvencCaps(ordinal: number): NvencCaps {
       pdv.setUint32(0, V.CAPS_PARAM, true);
       pdv.setUint32(4, cap, true);
       const val = new Int32Array(1);
-      const r = getCaps(encoder, ptr(CODEC_H264), ptr(param), ptr(val)) as number;
+      const r = getCaps(encoder, CODEC_H264, param, val) as number;
       return r === OK ? val[0]! : undefined;
     };
 
@@ -269,15 +269,15 @@ export class NvencEncoder {
     private readonly registeredList: bigint[], // one registered resource per input pool slot
     private readonly bitstream: bigint,
     private readonly api: {
-      encodePicture: (...a: unknown[]) => unknown;
-      lockBitstream: (...a: unknown[]) => unknown;
-      unlockBitstream: (...a: unknown[]) => unknown;
-      mapInput: (...a: unknown[]) => unknown;
-      unmapInput: (...a: unknown[]) => unknown;
-      unregister: (...a: unknown[]) => unknown;
-      destroyBitstream: (...a: unknown[]) => unknown;
-      destroyEncoder: (...a: unknown[]) => unknown;
-      lastError: (...a: unknown[]) => unknown;
+      encodePicture: OwnedCallable;
+      lockBitstream: OwnedCallable;
+      unlockBitstream: OwnedCallable;
+      mapInput: OwnedCallable;
+      unmapInput: OwnedCallable;
+      unregister: OwnedCallable;
+      destroyBitstream: OwnedCallable;
+      destroyEncoder: OwnedCallable;
+      lastError: OwnedCallable;
     },
     /** Kept alive because nvEncInitializeEncoder read encodeConfig from it. */
     private readonly _presetConfig: Uint8Array,
@@ -305,7 +305,7 @@ export class NvencEncoder {
     odv.setBigUint64(8, ctx, true);
     odv.setUint32(24, NVENCAPI_VERSION >>> 0, true);
     const encOut = new OutU64();
-    ckenc(fn(FN.openEncodeSessionEx, { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 })(ptr(open), encOut.ptr), "nvEncOpenEncodeSessionEx", 0n);
+    ckenc(fn(FN.openEncodeSessionEx, { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 })(open, encOut.bytes), "nvEncOpenEncodeSessionEx", 0n);
     const enc = encOut.value;
 
     const lastError = fn(FN.getLastErrorString, { args: [FFIType.u64], returns: FFIType.ptr });
@@ -323,7 +323,7 @@ export class NvencEncoder {
       pdv.setUint32(0, V.PRESET_CONFIG, true);
       pdv.setUint32(8, V.CONFIG, true); // presetCfg.version
       const getPreset = fn(FN.getEncodePresetConfigEx, { args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.ptr], returns: FFIType.i32 });
-      check(getPreset(enc, ptr(codecGuid), ptr(presetGuid), TUNING_HIGH_QUALITY, ptr(presetConfig)), "nvEncGetEncodePresetConfigEx");
+      check(getPreset(enc, codecGuid, presetGuid, TUNING_HIGH_QUALITY, presetConfig), "nvEncGetEncodePresetConfigEx");
 
       // Force strictly one-in-one-out, which the class contract depends on.
       // Offsets are into the NV_ENC_CONFIG at presetConfig+8.
@@ -355,12 +355,12 @@ export class NvencEncoder {
       idv.setUint32(64, 1, true); // enablePTD = 1: driver decides picture type
       idv.setBigUint64(88, BigInt(ptr(presetConfig) + 8), true); // encodeConfig -> the tweaked NV_ENC_CONFIG
       idv.setUint32(136, TUNING_HIGH_QUALITY, true); // tuningInfo
-      check(fn(FN.initializeEncoder, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(enc, ptr(init)), "nvEncInitializeEncoder");
+      check(fn(FN.initializeEncoder, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(enc, init), "nvEncInitializeEncoder");
 
       // NV_ENC_CREATE_BITSTREAM_BUFFER: the handle lands at +16.
       const cbb = new Uint8Array(776);
       new DataView(cbb.buffer).setUint32(0, V.CREATE_BITSTREAM_BUFFER, true);
-      check(fn(FN.createBitstreamBuffer, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(enc, ptr(cbb)), "nvEncCreateBitstreamBuffer");
+      check(fn(FN.createBitstreamBuffer, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(enc, cbb), "nvEncCreateBitstreamBuffer");
       const bitstream = new DataView(cbb.buffer).getBigUint64(16, true);
 
       // Either one CUDA buffer this encoder owns, or the caller's shared pool;
@@ -379,7 +379,7 @@ export class NvencEncoder {
         rdv.setBigUint64(24, dp, true); // resourceToRegister = CUdeviceptr
         rdv.setUint32(40, BUFFER_FORMAT_ABGR, true);
         rdv.setUint32(44, BUFFER_USAGE_INPUT_IMAGE, true);
-        check(registerFn(enc, ptr(reg)), "nvEncRegisterResource");
+        check(registerFn(enc, reg), "nvEncRegisterResource");
         return rdv.getBigUint64(32, true); // registeredResource, written by the driver
       });
 
@@ -429,7 +429,7 @@ export class NvencEncoder {
     const mdv = new DataView(map.buffer);
     mdv.setUint32(0, V.MAP_INPUT_RESOURCE, true);
     mdv.setBigUint64(16, registered, true);
-    this.check(this.api.mapInput(this.enc, ptr(map)), "nvEncMapInputResource");
+    this.check(this.api.mapInput(this.enc, map), "nvEncMapInputResource");
     const mapped = mdv.getBigUint64(24, true);
 
     try {
@@ -446,7 +446,7 @@ export class NvencEncoder {
       cdv.setBigUint64(48, this.bitstream, true); // outputBitstream
       cdv.setUint32(64, BUFFER_FORMAT_ABGR, true); // bufferFmt
       cdv.setUint32(68, PIC_STRUCT_FRAME, true); // pictureStruct
-      const st = this.api.encodePicture(this.enc, ptr(pic)) as number;
+      const st = this.api.encodePicture(this.enc, pic) as number;
       if (st === 17) throw new Error("NVENC returned NEED_MORE_INPUT unexpectedly (B-frames/lookahead should be disabled)");
       this.check(st, "nvEncEncodePicture");
       this.frameIdx++;
@@ -462,7 +462,7 @@ export class NvencEncoder {
     const ldv = new DataView(lock.buffer);
     ldv.setUint32(0, V.LOCK_BITSTREAM, true);
     ldv.setBigUint64(8, this.bitstream, true); // outputBitstream
-    this.check(this.api.lockBitstream(this.enc, ptr(lock)), "nvEncLockBitstream");
+    this.check(this.api.lockBitstream(this.enc, lock), "nvEncLockBitstream");
     const size = ldv.getUint32(36, true); // bitstreamSizeInBytes
     const dataPtr = ldv.getBigUint64(56, true); // bitstreamBufferPtr
     const bytes = copyFromNative(Number(dataPtr), size);
@@ -481,7 +481,7 @@ export class NvencEncoder {
     cdv.setUint32(0, V.PIC_PARAMS, true);
     cdv.setUint32(16, PIC_FLAG_EOS, true); // encodePicFlags = EOS
     // inputBuffer / outputBitstream stay NULL for an EOS flush.
-    const st = this.api.encodePicture(this.enc, ptr(pic)) as number;
+    const st = this.api.encodePicture(this.enc, pic) as number;
     if (st !== OK && st !== 17) this.check(st, "nvEncEncodePicture(EOS)");
     return new Uint8Array(0);
   }

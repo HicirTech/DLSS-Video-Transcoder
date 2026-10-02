@@ -62,7 +62,7 @@ function cu(): ReturnType<typeof load>["symbols"] {
 
 function device(ordinal: number): number {
   const dev = new OutU32();
-  ck(cu().cuDeviceGet(dev.ptr, ordinal) as number, "cuDeviceGet");
+  ck(cu().cuDeviceGet(dev.bytes, ordinal) as number, "cuDeviceGet");
   return dev.value | 0;
 }
 
@@ -70,7 +70,7 @@ function device(ordinal: number): number {
 export function cudaCreateContext(ordinal: number): bigint {
   const dev = device(ordinal);
   const ctx = new OutU64();
-  ck(cu().cuDevicePrimaryCtxRetain(ctx.ptr, dev) as number, "cuDevicePrimaryCtxRetain");
+  ck(cu().cuDevicePrimaryCtxRetain(ctx.bytes, dev) as number, "cuDevicePrimaryCtxRetain");
   ck(cu().cuCtxPushCurrent_v2(ctx.value) as number, "cuCtxPushCurrent");
   return ctx.value;
 }
@@ -122,7 +122,7 @@ export function cudaDevicesForLuids(luids: readonly { luidLow: number; luidHigh:
   let count: number;
   try {
     const out = new OutU32();
-    ck(cu().cuDeviceGetCount(out.ptr) as number, "cuDeviceGetCount");
+    ck(cu().cuDeviceGetCount(out.bytes) as number, "cuDeviceGetCount");
     count = out.value;
   } catch (error) {
     return { ordinals, uuids, deviceCount: null, error: (error as Error).message };
@@ -135,7 +135,7 @@ export function cudaDevicesForLuids(luids: readonly { luidLow: number; luidHigh:
     luid.fill(0);
     // Not every driver/device pair supports the query; a failure just means this
     // device cannot be matched, not that the whole lookup failed.
-    if ((cu().cuDeviceGetLuid(ptr(luid), ptr(nodeMask), dev) as number) !== 0) continue;
+    if ((cu().cuDeviceGetLuid(luid, nodeMask, dev) as number) !== 0) continue;
     const low = view.getUint32(0, true);
     const high = view.getInt32(4, true);
     let uuid: string | null = null;
@@ -151,7 +151,7 @@ export function cudaDevicesForLuids(luids: readonly { luidLow: number; luidHigh:
 /** A device's UUID as nvidia-smi prints it, or null when the driver will not report one. */
 function deviceUuid(dev: number): string | null {
   const bytes = new Uint8Array(16);
-  if ((cu().cuDeviceGetUuid_v2(ptr(bytes), dev) as number) !== 0) return null;
+  if ((cu().cuDeviceGetUuid_v2(bytes, dev) as number) !== 0) return null;
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   return `GPU-${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
@@ -163,7 +163,7 @@ export function cudaSynchronize(): void {
 /** Allocate `bytes` of device memory; returns the CUdeviceptr. */
 export function cudaMalloc(bytes: number): bigint {
   const out = new OutU64();
-  ck(cu().cuMemAlloc_v2(out.ptr, BigInt(bytes)) as number, "cuMemAlloc");
+  ck(cu().cuMemAlloc_v2(out.bytes, BigInt(bytes)) as number, "cuMemAlloc");
   return out.value;
 }
 
@@ -173,7 +173,7 @@ export function cudaFree(device: bigint): void {
 
 /** Copy `bytes` from a host buffer into a device pointer (tightly packed). */
 export function cudaMemcpyHtoD(dst: bigint, src: Uint8Array, bytes: number): void {
-  ck(cu().cuMemcpyHtoD_v2(dst, ptr(src), BigInt(bytes)) as number, "cuMemcpyHtoD");
+  ck(cu().cuMemcpyHtoD_v2(dst, src, BigInt(bytes)) as number, "cuMemcpyHtoD");
 }
 
 /** Copy `bytes` from a device pointer into a host buffer (tightly packed). */
@@ -181,7 +181,10 @@ export function cudaMemcpyDtoH(dst: Uint8Array, src: bigint, bytes: number): voi
   ck(cu().cuMemcpyDtoH_v2(ptr(dst), src, BigInt(bytes)) as number, "cuMemcpyDtoH");
 }
 
-/** 2D host→device copy honouring the device pitch — NVOFA buffers are pitch-linear, not tightly packed. */
+/**
+ * 2D host→device copy honouring the device pitch — NVOFA buffers are pitch-linear, not tightly packed.
+ * `src` goes into the descriptor as a plain address, so the caller keeps it referenced until this returns.
+ */
 export function cudaMemcpy2DHtoD(opts: {
   src: Uint8Array;
   srcPitch: number;
@@ -204,10 +207,13 @@ export function cudaMemcpy2DHtoD(opts: {
   dv.setBigUint64(104, BigInt(opts.dstPitch), true);
   dv.setBigUint64(112, BigInt(opts.widthBytes), true);
   dv.setBigUint64(120, BigInt(opts.height), true);
-  ck(cu().cuMemcpy2D_v2(ptr(desc)) as number, "cuMemcpy2D");
+  ck(cu().cuMemcpy2D_v2(desc) as number, "cuMemcpy2D");
 }
 
-/** 2D device→host copy respecting the device pitch. */
+/**
+ * 2D device→host copy respecting the device pitch. Like `src` of cudaMemcpy2DHtoD, `dst` is only an
+ * address in the descriptor, so the caller keeps it referenced until this returns.
+ */
 export function cudaMemcpy2DDtoH(opts: {
   dst: Uint8Array;
   dstPitch: number;
@@ -226,5 +232,5 @@ export function cudaMemcpy2DDtoH(opts: {
   dv.setBigUint64(104, BigInt(opts.dstPitch), true);
   dv.setBigUint64(112, BigInt(opts.widthBytes), true);
   dv.setBigUint64(120, BigInt(opts.height), true);
-  ck(cu().cuMemcpy2D_v2(ptr(desc)) as number, "cuMemcpy2D");
+  ck(cu().cuMemcpy2D_v2(desc) as number, "cuMemcpy2D");
 }
