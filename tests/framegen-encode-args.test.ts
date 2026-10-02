@@ -55,7 +55,7 @@ describe("buildFrameGenEncodeArgs", () => {
   test("av1_nvenc has no in-process encoder, so it takes the rawvideo path on frame generation's CUDA device", () => {
     const open = buildFrameGenEncodeArgs({ ...base, codec: "av1_nvenc", hasAudio: false });
     expect(open.nvenc).toBeNull();
-    // ffmpeg's own NVENC must land on the same device as dlssg-worker.exe, so
+    // ffmpeg's own NVENC must land on frame generation's fixed CUDA device, so
     // -gpu follows -c:v; a CPU codec (the test above) carries no -gpu at all.
     const codec = open.rawArgs.indexOf("av1_nvenc");
     expect(open.rawArgs.slice(codec, codec + 3)).toEqual(["av1_nvenc", "-gpu", String(FRAMEGEN_CUDA_DEVICE)]);

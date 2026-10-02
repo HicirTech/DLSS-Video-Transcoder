@@ -5,7 +5,7 @@
  *
  * It is a worker because `NvencEncoder.encode` is a synchronous FFI call
  * costing ~3.2 ms per output frame, which on the coordinator thread stalls the
- * loop feeding the guide threads and the DLSSG worker processes. NVENC's CUDA
+ * loop feeding the guide threads and the DLSSG host processes. NVENC's CUDA
  * context is therefore created here, on the thread that uses it. Frames arrive
  * as SharedArrayBuffer-backed RGBA, so posting them costs nothing; display
  * order holds because every request is appended to a single promise chain.

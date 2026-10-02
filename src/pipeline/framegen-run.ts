@@ -36,7 +36,7 @@ export interface RunParams {
  * Credit-bounded coordinator (reference pipeline.py, overlapped mode). Owners:
  * decode (this thread, async pipe), one guide Worker per stage (guide analysis
  * costs ~12 ms of CPU per frame at 720p, far too much for this thread), one
- * native evaluation per stage (its own dlssg-worker process, so stages overlap
+ * native evaluation per stage (its own DLSS-G host process, so stages overlap
  * on the GPU), and encode (its own Worker).
  *
  * One credit = one frame-sized buffer. Every possible native output is reserved
@@ -86,7 +86,7 @@ export async function runOverlapped(p: RunParams): Promise<RunResult> {
     for (const item of items) await writer.push(item);
     return items.length;
   };
-  // An evaluation blocked on a wedged dlssg-worker never settles, so an abort
+  // An evaluation blocked on a wedged DLSS-G host never settles, so an abort
   // wakes the loop itself. Left registered: the signal belongs to this job and
   // ends with it, and once the loop is done `wake` is null.
   p.signal?.addEventListener("abort", () => wake?.(), { once: true });
@@ -184,7 +184,7 @@ export async function runSequential(p: RunParams): Promise<RunResult> {
   };
   for (;;) {
     throwIfAborted(p.signal);
-    // Raced as well as checked: a wedged dlssg-worker would block a step forever.
+    // Raced as well as checked: a wedged DLSS-G host would block a step forever.
     if (!(await raceAbort(p.signal, step()))) break;
     decoded++;
     p.onProcessed(decoded);

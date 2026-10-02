@@ -1,6 +1,7 @@
 /**
- * One DLSS Frame Generation stage: a dlssg-worker process that synthesises
- * frames, a guide thread that computes the motion and scene-cut hints it needs,
+ * One DLSS Frame Generation stage: a DLSS-G host process (dlssg-host-launch.ts)
+ * that synthesises frames, a guide thread that computes the motion and
+ * scene-cut hints it needs,
  * and — for the stage doing the most evaluations — a packer thread so that
  * upsampling does not sit on the guide's critical path.
  *
@@ -45,7 +46,7 @@ export interface AnalyzedFrame {
   half: Uint16Array | null;
 }
 
-/** One DLSSG stage: a worker-process session driven from the main thread, a guide thread, and (for the bottleneck stage) a packer thread. */
+/** One DLSSG stage: a host-process session driven from the main thread, a guide thread, and (for the bottleneck stage) a packer thread. */
 export class Stage {
   sceneCuts = 0;
   /** Real intervals (no reset) this stage has evaluated. */

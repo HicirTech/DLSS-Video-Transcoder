@@ -476,7 +476,7 @@ export interface MotionResult {
   confidence: number;
 }
 
-/** MotionResult with the field already packed as R16G16_FLOAT, the form the DLSSG worker consumes. */
+/** MotionResult with the field already packed as R16G16_FLOAT, the form the DLSSG host consumes. */
 export interface PackedMotionResult {
   /** Interleaved (x, y) halves in render pixels, length width*height*2; null as in MotionResult.motion. */
   half: Uint16Array | null;
