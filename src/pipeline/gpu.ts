@@ -9,8 +9,9 @@
  * with the adapters that qualify, never run degraded.
  */
 import { cudaDevicesForLuids, type CudaDeviceMap } from "../native/cuda.ts";
-import { D3D12Device, GpuContext } from "../native/d3d12.ts";
+import { D3D12Device } from "../native/d3d12.ts";
 import { type AdapterInfo, DxgiFactory, type DxgiAdapter, isHardwareNvidia, selectAdapter } from "../native/dxgi.ts";
+import { GpuContext } from "../native/gpu-context.ts";
 
 export interface GpuOptions {
   /** A DXGI index as `probe` listed it in this session; the CLI's choice. */
