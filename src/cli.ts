@@ -267,12 +267,13 @@ const COMMANDS: readonly CommandSpec[] = [
     ],
     options: [
       { flag: "--fps RATE", desc: "output frame rate: 23.976, 25, 29.97, 30, 50, 59.94, 60, 90, 119.88, 120, 144, 165, 180, 240, 360, 480, or an exact num/den; overrides --multiplier", def: "source fps x --multiplier" },
-      { flag: "--multiplier N", desc: "output/input frame ratio when --fps is not given (2 = double fps)", def: "2" },
+      { flag: "--multiplier N", desc: "output/input frame ratio when --fps is not given, a whole number from 1 to 16 (2 = double fps)", def: "2" },
       { flag: "--engine MODE", desc: `auto = one native session when output/source is an exact integer from 2 up to ${FRAME_GEN_NATIVE_MAXIMUM} (3x and above only with HAGS on), else a cascade of 2x stages; when the runtime disables every interval of a native 3x+ session, auto re-runs it as a cascade; native or cascade force that path`, def: "auto" },
       { flag: "--codec NAME", desc: "encoder: h264, hevc, av1, or h264_nvenc/hevc_nvenc/av1_nvenc for GPU", def: "GPU NVENC when available, else libx264" },
       { flag: "--quality N", desc: "encoder quality (CRF for CPU, CQ for NVENC), 0..51 (lower = better)", def: "20" },
       RUNTIME_OPT,
     ],
+    notes: ["A target at or below the source frame rate (--multiplier 1, or a lower --fps) generates no frames: the video is only resampled to it."],
   },
   {
     name: "versions",
