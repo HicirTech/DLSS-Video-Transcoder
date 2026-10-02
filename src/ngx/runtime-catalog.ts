@@ -35,6 +35,10 @@ export const FEATURES: readonly FeatureDescriptor[] = [
   { key: "nr", id: 18, name: "DLSS Neural Rendering", dllName: "nvngx_dlssnr.dll", runtimeSubdir: "dlssnr", swapperKind: null },
 ];
 
+export function featureByKey(key: FeatureKey): FeatureDescriptor {
+  return FEATURES.find((feature) => feature.key === key)!;
+}
+
 export interface VersionEntry {
   /** Numeric FixedFileInfo version "a.b.c.d". */
   version: string;
