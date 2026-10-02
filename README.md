@@ -229,7 +229,7 @@ runtime/
   dlssg/nvngx_dlssg.dll   DLSS Frame Generation   (feature 11)  [required]
   dlssnr/nvngx_dlssnr.dll DLSS Neural Rendering   (feature 18)  [required]
   ffmpeg/bin/{ffmpeg,ffprobe}.exe
-  host/, rtx_video/       out-of-process host / RTX Video assets (see status)
+  host/, rtx_video/       unused: nothing reads them (RTX Video is not implemented, see status)
 ```
 
 - The driver's NGX core `_nvngx.dll` is loaded from the installed driver, never from here.
