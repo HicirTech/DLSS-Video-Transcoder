@@ -8,11 +8,7 @@ export class FrameReader {
   private pendingBytes = 0;
   private readonly reader: ReadableStreamDefaultReader<Uint8Array>;
 
-  /**
-   * `shared` allocates each frame in a SharedArrayBuffer so it can be handed to
-   * Worker threads (structured clone shares the memory) while this thread keeps
-   * using it — no copy per consumer.
-   */
+  /** `shared` allocates each frame as allocateFrame does — no copy per Worker consumer. */
   constructor(stream: ReadableStream<Uint8Array>, private readonly shared = false) {
     this.reader = stream.getReader();
   }
@@ -32,7 +28,7 @@ export class FrameReader {
       }
     }
     if (this.pendingBytes < frameBytes) return null;
-    const frame = this.shared ? new Uint8Array(new SharedArrayBuffer(frameBytes)) : new Uint8Array(frameBytes);
+    const frame = allocateFrame(frameBytes, this.shared);
     let filled = 0;
     while (filled < frameBytes) {
       const chunk = this.pending[0]!;
@@ -45,4 +41,12 @@ export class FrameReader {
     this.pendingBytes -= frameBytes;
     return frame;
   }
+}
+
+/**
+ * A zeroed frame buffer; `shared` allocates it in a SharedArrayBuffer so it can be handed to Worker
+ * threads (structured clone shares the memory) while this thread keeps using it.
+ */
+export function allocateFrame(byteLength: number, shared: boolean): Uint8Array {
+  return shared ? new Uint8Array(new SharedArrayBuffer(byteLength)) : new Uint8Array(byteLength);
 }
