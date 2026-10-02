@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { Alert, Box, Button, Chip, FormControl, FormControlLabel, FormHelperText, InputLabel, Link, MenuItem, Select, Stack, Switch, Typography } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import type { EngineKind, FrameGenEngine, FrameGenFps, JobRequest, JobStatus, MotionKind, ToolsReport } from "../../../src/server/api-types";
-import { FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES } from "../../../src/server/api-types";
+import { FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM } from "../../../src/server/api-types";
 import { api } from "../api";
 import { useJobRunner } from "../hooks/useJobRunner";
 import { useSettings } from "../hooks/useSettings";
@@ -93,7 +93,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
       encode: settings.encode,
     };
     if (frameGenOn) request.frameGen = { targetFps, engine: fgEngine };
-    // Frame generation runs on the default device (dlssg-worker.exe), so the stored GPU choice is left off it.
+    // Frame generation picks its GPU in its host process (README, "Shared options"), so the stored GPU choice is left off it.
     else if (settings.adapterUuid) request.adapterUuid = settings.adapterUuid;
     if (usesDlss && dllDir !== "") request.dllDir = dllDir;
     if (output.trim() !== "") request.output = output.trim();
@@ -154,12 +154,12 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
           </FormControl>
         </Stack>
         <FormHelperText sx={{ mt: 1 }}>
-          DLSS Frame Generation to the chosen output rate; the result keeps the source duration and audio. Auto runs one
-          native DLSSG session when output ÷ source is an exact integer the runtime supports and hardware-accelerated GPU
-          scheduling (HAGS) is on; otherwise it chains 2× stages in memory (1 stage for 2×, 2 for 4×, else 3 on an 8× grid)
-          and places the nearest frame on each output instant. The bundled dlssg-worker synthesises one frame per interval
-          (2×), so higher rates run as a cascade; when a native multi-frame session is refused, Auto falls back to the
-          cascade by itself. Uses the codec/quality below; the engine and output-size settings do not apply.
+          DLSS Frame Generation to the chosen output rate; the result keeps the source duration and audio. Path Auto runs
+          one native DLSSG session when output ÷ source is an exact integer the runtime supports ({FRAME_GEN_NATIVE_MAXIMUM})
+          and, from 3× up, hardware-accelerated GPU scheduling (HAGS) is on; otherwise it chains 2× stages in memory (1
+          stage for 2×, 2 for 4×, else 3 on an 8× grid) and places the nearest frame on each output instant. When the
+          runtime generates nothing in a native multi-frame session, Auto falls back to the cascade by itself. Uses the
+          codec/quality below; the engine and output-size settings do not apply.
         </FormHelperText>
       </Section>
 
