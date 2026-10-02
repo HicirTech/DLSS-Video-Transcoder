@@ -113,31 +113,31 @@ export class NgxParameters {
 
   getU32(key: string): number | null {
     const out = new OutU32();
-    const result = this.getter(this.slots.getU32)(this.ptr, name(key), out.ptr) as number;
+    const result = this.getter(this.slots.getU32)(this.ptr, name(key), out.bytes) as number;
     return ngxOk(result) ? out.value : null;
   }
 
   getI32(key: string): number | null {
     const out = new OutU32();
-    const result = this.getter(this.slots.getI32)(this.ptr, name(key), out.ptr) as number;
+    const result = this.getter(this.slots.getI32)(this.ptr, name(key), out.bytes) as number;
     return ngxOk(result) ? out.value | 0 : null;
   }
 
   getF32(key: string): number | null {
     const out = new OutF32();
-    const result = this.getter(this.slots.getF32)(this.ptr, name(key), out.ptr) as number;
+    const result = this.getter(this.slots.getF32)(this.ptr, name(key), out.bytes) as number;
     return ngxOk(result) ? out.value : null;
   }
 
   getU64(key: string): bigint | null {
     const out = new OutU64();
-    const result = this.getter(this.slots.getU64)(this.ptr, name(key), out.ptr) as number;
+    const result = this.getter(this.slots.getU64)(this.ptr, name(key), out.bytes) as number;
     return ngxOk(result) ? out.value : null;
   }
 
   getPointer(key: string): number | null {
     const out = new OutU64();
-    const result = this.getter(this.slots.getPointer)(this.ptr, name(key), out.ptr) as number;
+    const result = this.getter(this.slots.getPointer)(this.ptr, name(key), out.bytes) as number;
     return ngxOk(result) ? Number(out.value) : null;
   }
 
@@ -159,7 +159,7 @@ export class NgxParameters {
       setF(params.ptr, name(key), value);
       const out = new OutF32();
       const getF = vtableMethod(params.ptr, slots.getF32, { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 });
-      const result = getF(params.ptr, name(key), out.ptr) as number;
+      const result = getF(params.ptr, name(key), out.bytes) as number;
       if (ngxOk(result) && Math.abs(out.value - value) < 1e-6) {
         NgxParameters.layout = candidate;
         return candidate;

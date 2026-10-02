@@ -50,7 +50,7 @@ export class DxgiAdapter extends ComObject {
 export class DxgiFactory extends ComObject {
   static create(): DxgiFactory {
     const out = new OutPointer();
-    const hr = dxgi.symbols.CreateDXGIFactory1(IID_IDXGIFactory1, out.ptr);
+    const hr = dxgi.symbols.CreateDXGIFactory1(IID_IDXGIFactory1, out.bytes);
     checkHresult(hr, "CreateDXGIFactory1");
     return new DxgiFactory(out.value, "IDXGIFactory1");
   }
@@ -62,7 +62,7 @@ export class DxgiFactory extends ComObject {
     try {
       for (let index = 0; index < 32; index++) {
         out.reset();
-        const hr = this.call(12, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.i32 }, index, out.ptr) as number;
+        const hr = this.call(12, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.i32 }, index, out.bytes) as number;
         if (hr === DXGI_ERROR_NOT_FOUND) break;
         checkHresult(hr, `IDXGIFactory1.EnumAdapters1(${index})`);
         const adapterPtr = out.value;
@@ -78,7 +78,7 @@ export class DxgiFactory extends ComObject {
             raw,
             10,
             { args: [FFIType.ptr], returns: FFIType.i32 },
-            desc.ptr,
+            desc.bytes,
           ) as number;
           checkHresult(hrDesc, `IDXGIAdapter1.GetDesc1(${index})`);
           const nameChars: number[] = [];

@@ -177,13 +177,13 @@ export class D3D12Resource extends ComObject {
   map(readRange: { begin: number; end: number } | null = null): number {
     const out = new OutPointer();
     const range = readRange ? new NativeStruct(16).u64(0, readRange.begin).u64(8, readRange.end) : null;
-    this.callHr(8, { args: [FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }, "Map", 0, range ? range.ptr : null, out.ptr);
+    this.callHr(8, { args: [FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }, "Map", 0, range ? range.bytes : null, out.bytes);
     return out.value;
   }
 
   unmap(writtenRange: { begin: number; end: number } | null = null): void {
     const range = writtenRange ? new NativeStruct(16).u64(0, writtenRange.begin).u64(8, writtenRange.end) : null;
-    this.call(9, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.void }, 0, range ? range.ptr : null);
+    this.call(9, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.void }, 0, range ? range.bytes : null);
   }
 }
 
@@ -206,7 +206,7 @@ export class D3D12CommandAllocator extends ComObject {
 export class D3D12CommandQueue extends ComObject {
   executeCommandList(list: D3D12GraphicsCommandList): void {
     const cell = new NativeStruct(8).pointer(0, list.ptr);
-    this.call(10, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.void }, 1, cell.ptr);
+    this.call(10, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.void }, 1, cell.bytes);
   }
 
   signal(fence: D3D12Fence, value: bigint): void {
@@ -296,11 +296,11 @@ export class D3D12GraphicsCommandList extends ComObject {
     this.call(
       16,
       { args: [FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.void },
-      d.ptr,
+      d.bytes,
       0,
       0,
       0,
-      s.ptr,
+      s.bytes,
       null,
     );
   }
@@ -319,7 +319,7 @@ export class D3D12GraphicsCommandList extends ComObject {
     barrier.u32(16, 0xffffffff); // D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES
     barrier.u32(20, resource.state);
     barrier.u32(24, newState);
-    this.call(26, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.void }, 1, barrier.ptr);
+    this.call(26, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.void }, 1, barrier.bytes);
     resource.state = newState;
     if (resource.kind === "buffer") this.transitionedBuffers.add(resource);
   }
@@ -328,7 +328,7 @@ export class D3D12GraphicsCommandList extends ComObject {
     const barrier = new NativeStruct(32);
     barrier.u32(0, 2); // D3D12_RESOURCE_BARRIER_TYPE_UAV
     barrier.pointer(8, resource.ptr);
-    this.call(26, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.void }, 1, barrier.ptr);
+    this.call(26, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.void }, 1, barrier.bytes);
   }
 }
 
@@ -347,7 +347,7 @@ export class D3D12Device extends ComObject {
 
   static enableDebugLayer(): boolean {
     const out = new OutPointer();
-    const hr = d3d12.symbols.D3D12GetDebugInterface(IID_ID3D12Debug, out.ptr);
+    const hr = d3d12.symbols.D3D12GetDebugInterface(IID_ID3D12Debug, out.bytes);
     if (isFailure(hr) || out.value === 0) return false;
     const debug = new ComObject(out.value, "ID3D12Debug");
     (debug as unknown as { call: ComObject["call"] }).call.call(debug, 3, { args: [], returns: FFIType.void });
@@ -359,7 +359,7 @@ export class D3D12Device extends ComObject {
     if (options.debugLayer) D3D12Device.enableDebugLayer();
     const featureLevel = options.featureLevel ?? D3D_FEATURE_LEVEL_11_0;
     const out = new OutPointer();
-    const hr = d3d12.symbols.D3D12CreateDevice(adapter ? adapter.ptr : null, featureLevel, IID_ID3D12Device, out.ptr);
+    const hr = d3d12.symbols.D3D12CreateDevice(adapter ? adapter.ptr : null, featureLevel, IID_ID3D12Device, out.bytes);
     checkHresult(hr, "D3D12CreateDevice");
     return new D3D12Device(out.value, featureLevel);
   }
@@ -367,13 +367,13 @@ export class D3D12Device extends ComObject {
   createCommandQueue(type = D3D12_COMMAND_LIST_TYPE_DIRECT): D3D12CommandQueue {
     const desc = new NativeStruct(16).u32(0, type).i32(4, 0).u32(8, 0).u32(12, 0);
     const out = new OutPointer();
-    this.callHr(8, { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }, "CreateCommandQueue", desc.ptr, IID_ID3D12CommandQueue, out.ptr);
+    this.callHr(8, { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }, "CreateCommandQueue", desc.bytes, IID_ID3D12CommandQueue, out.bytes);
     return new D3D12CommandQueue(out.value, "ID3D12CommandQueue");
   }
 
   createCommandAllocator(type = D3D12_COMMAND_LIST_TYPE_DIRECT): D3D12CommandAllocator {
     const out = new OutPointer();
-    this.callHr(9, { args: [FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }, "CreateCommandAllocator", type, IID_ID3D12CommandAllocator, out.ptr);
+    this.callHr(9, { args: [FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }, "CreateCommandAllocator", type, IID_ID3D12CommandAllocator, out.bytes);
     return new D3D12CommandAllocator(out.value, "ID3D12CommandAllocator");
   }
 
@@ -388,14 +388,14 @@ export class D3D12Device extends ComObject {
       allocator.ptr,
       null,
       IID_ID3D12GraphicsCommandList,
-      out.ptr,
+      out.bytes,
     );
     return new D3D12GraphicsCommandList(out.value, "ID3D12GraphicsCommandList");
   }
 
   createFence(initialValue = 0n, flags = 0): D3D12Fence {
     const out = new OutPointer();
-    this.callHr(36, { args: [FFIType.u64, FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }, "CreateFence", initialValue, flags, IID_ID3D12Fence, out.ptr);
+    this.callHr(36, { args: [FFIType.u64, FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }, "CreateFence", initialValue, flags, IID_ID3D12Fence, out.bytes);
     return new D3D12Fence(out.value, "ID3D12Fence");
   }
 
@@ -419,7 +419,7 @@ export class D3D12Device extends ComObject {
       null,
       GENERIC_ALL,
       null,
-      out.ptr,
+      out.bytes,
     );
     return out.value;
   }
@@ -435,13 +435,13 @@ export class D3D12Device extends ComObject {
       27,
       { args: [FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
       `CreateCommittedResource(${label})`,
-      heap.ptr,
+      heap.bytes,
       heapFlags,
-      desc.ptr,
+      desc.bytes,
       initialState,
       null,
       IID_ID3D12Resource,
-      out.ptr,
+      out.bytes,
     );
     return out.value;
   }

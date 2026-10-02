@@ -13,6 +13,22 @@ export interface Signature {
 
 type NativeCallable = (...args: unknown[]) => unknown;
 
+/**
+ * An argument of a COM method or of an OwnedCallable. Memory goes in as the
+ * Uint8Array that owns it, so the argument list keeps it alive until the call
+ * returns (memory.ts). A Pointer from ptr() or `.ptr` is refused at compile
+ * time: it is a plain number, and the wrappers allocate before the native code
+ * runs, so the buffer behind it can be collected and reused by then.
+ */
+type OwnedArgument<T> = [Extract<T, Pointer>] extends [never] ? T : "pass the Uint8Array that owns this memory, not a ptr() address";
+type OwnedArguments<Args extends unknown[]> = { [K in keyof Args]: OwnedArgument<Args[K]> };
+
+/**
+ * A native function that refuses Pointer arguments (OwnedArgument). Not covered: callableAt's raw
+ * callables, dlopen symbols (the calls in cuda.ts), and an address already cast to number.
+ */
+export type OwnedCallable = <Args extends unknown[]>(...args: OwnedArguments<Args>) => unknown;
+
 const trampolines = new Map<string, NativeCallable>();
 
 /** Build (and cache) a callable for a raw function address. */
@@ -27,7 +43,7 @@ export function callableAt(address: number, signature: Signature): NativeCallabl
 }
 
 /** Resolve vtable slot `index` of a COM object and return a callable that already expects `this` first. */
-export function vtableMethod(object: number, index: number, signature: Signature): NativeCallable {
+export function vtableMethod(object: number, index: number, signature: Signature): OwnedCallable {
   if (object === 0) throw new Error("vtableMethod: null COM object");
   const vtable = asPtr(read.ptr(object as Pointer, 0));
   const address = asPtr(read.ptr(vtable as Pointer, index * 8));
@@ -77,12 +93,13 @@ export class ComObject {
     if (ptr === 0) throw new Error(`${label}: null interface pointer`);
   }
 
-  protected call(index: number, signature: Signature, ...args: unknown[]): unknown {
-    return vtableMethod(this.ptr, index, signature)(this.ptr, ...args);
+  protected call<Args extends unknown[]>(index: number, signature: Signature, ...args: OwnedArguments<Args>): unknown {
+    // Spelled out because inferring the callee's Args from the already-mapped `args` would apply OwnedArguments twice.
+    return vtableMethod(this.ptr, index, signature)<[number, ...Args]>(this.ptr, ...args);
   }
 
-  protected callHr(index: number, signature: Signature, what: string, ...args: unknown[]): void {
-    const hr = this.call(index, { ...signature, returns: FFIType.i32 }, ...args) as number;
+  protected callHr<Args extends unknown[]>(index: number, signature: Signature, what: string, ...args: OwnedArguments<Args>): void {
+    const hr = this.call<Args>(index, { ...signature, returns: FFIType.i32 }, ...args) as number;
     checkHresult(hr, `${this.label}.${what}`);
   }
 

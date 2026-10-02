@@ -1,10 +1,8 @@
 /**
- * Small helpers for talking to native code through bun:ffi: fixed-layout
- * structs, C / wide strings, GUIDs and pointer bookkeeping.
- *
- * Every buffer handed to native code must stay referenced from JavaScript for
- * as long as the native side may look at it. Callers keep the returned
- * Uint8Array / NativeStruct alive themselves.
+ * Helpers for talking to native code through bun:ffi: fixed-layout structs, C / wide strings, GUIDs and
+ * pointer bookkeeping. Memory goes to a native call as the Uint8Array that owns it (`.bytes`), which the
+ * argument list keeps alive until the call returns; a ptr() or `.ptr` number keeps nothing alive after its
+ * owner's last use, so it is only for addresses stored where the owner outlives every reader.
  */
 import { ptr, read, toArrayBuffer, type Pointer } from "bun:ffi";
 
@@ -199,8 +197,8 @@ export function guid(text: string): Uint8Array {
 export class OutPointer {
   private readonly cell = new NativeStruct(8);
 
-  get ptr(): Pointer {
-    return this.cell.ptr;
+  get bytes(): Uint8Array {
+    return this.cell.bytes;
   }
 
   get value(): number {
@@ -215,8 +213,8 @@ export class OutPointer {
 
 export class OutU32 {
   private readonly cell = new NativeStruct(8);
-  get ptr(): Pointer {
-    return this.cell.ptr;
+  get bytes(): Uint8Array {
+    return this.cell.bytes;
   }
   get value(): number {
     return this.cell.getU32(0);
@@ -228,6 +226,9 @@ export class OutU64 {
   get ptr(): Pointer {
     return this.cell.ptr;
   }
+  get bytes(): Uint8Array {
+    return this.cell.bytes;
+  }
   get value(): bigint {
     return this.cell.getU64(0);
   }
@@ -235,8 +236,8 @@ export class OutU64 {
 
 export class OutF32 {
   private readonly cell = new NativeStruct(8);
-  get ptr(): Pointer {
-    return this.cell.ptr;
+  get bytes(): Uint8Array {
+    return this.cell.bytes;
   }
   get value(): number {
     return this.cell.getF32(0);
