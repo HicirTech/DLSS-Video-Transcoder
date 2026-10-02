@@ -26,9 +26,8 @@ import { FeatureCommonInfo, NgxCore } from "./core.ts";
 import { prepareForwarderSync } from "./forwarder-runtime.ts";
 import { encodeMotionR16G16 } from "../pipeline/flow.ts";
 import { NgxParam, NgxParameters } from "./params.ts";
-import { DLSS_PRESET_PARAM, DlssCreateFlag, DlssRenderPreset, ngxCheck } from "./results.ts";
+import { DLSS_PRESET_PARAM, DlssCreateFlag, DlssRenderPreset, NGX_APPLICATION_ID, ngxCheck } from "./results.ts";
 
-const SR_APP_ID = 0x4e5254530001n;
 const UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
 export interface SrOptions {
@@ -76,7 +75,7 @@ export class DlssSrSession {
     const { forwarder } = prepareForwarderSync(join(opts.runtimeDir, "caller"));
     core.useForwarder(forwarder);
     ngxCheck(
-      core.initExt(session.device.ptr, SR_APP_ID, appData, new FeatureCommonInfo([opts.dllDir ?? join(opts.runtimeDir, "dlss")])),
+      core.initExt(session.device.ptr, NGX_APPLICATION_ID, appData, new FeatureCommonInfo([opts.dllDir ?? join(opts.runtimeDir, "dlss")])),
       "DLSS SR Init_Ext",
     );
 

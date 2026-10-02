@@ -1,6 +1,6 @@
 /**
  * NGX result codes, feature ids and support bit flags, from the public
- * nvsdk_ngx_defs.h in NVIDIA's DLSS SDK.
+ * nvsdk_ngx_defs.h in NVIDIA's DLSS SDK, and the values every NGX init here passes.
  */
 import { hex32 } from "../native/memory.ts";
 
@@ -109,6 +109,8 @@ export function describeSupport(bits: number): string {
 }
 
 export const NGX_VERSION_API = 0x15;
+/** The application id every NGX init in this project passes: "NRTS" + 1, an arbitrary non-zero id. */
+export const NGX_APPLICATION_ID = 0x4e5254530001n;
 export const NGX_ENGINE_TYPE_CUSTOM = 0;
 
 export const PerfQuality = {

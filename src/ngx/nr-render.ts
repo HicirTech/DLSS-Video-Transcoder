@@ -28,9 +28,8 @@ import { FeatureCommonInfo, NgxCore } from "./core.ts";
 import { prepareForwarderSync } from "./forwarder-runtime.ts";
 import { NgxParamObject } from "./param-object.ts";
 import { NrParam } from "./params.ts";
-import { PerfQuality, ngxCheck } from "./results.ts";
+import { NGX_APPLICATION_ID, PerfQuality, ngxCheck } from "./results.ts";
 
-const NR_APP_ID = 0x4e5254530001n;
 const UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 const NGX_MODELS = "C:\\ProgramData\\NVIDIA\\NGX\\models";
 
@@ -68,7 +67,7 @@ export class DlssNrSession {
     const { forwarder } = prepareForwarderSync(join(opts.runtimeDir, "caller"));
     core.useForwarder(forwarder);
     ngxCheck(
-      core.initExt(session.device.ptr, NR_APP_ID, appData, new FeatureCommonInfo([dllDir, NGX_MODELS])),
+      core.initExt(session.device.ptr, NGX_APPLICATION_ID, appData, new FeatureCommonInfo([dllDir, NGX_MODELS])),
       "DLSS NR Init_Ext",
     );
 
