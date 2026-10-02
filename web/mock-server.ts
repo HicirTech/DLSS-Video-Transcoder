@@ -15,13 +15,12 @@ import {
   MOCK_TOOLS,
   MockJobEngine,
   createSeedJobs,
-  isJobRequest,
   mockCatalog,
   mockPreviewSvg,
   mockSettingsDefaults,
   mockUpload,
-  validateJobRequest,
 } from "./src/mock";
+import { isJobRequest, validateJobRequest } from "./src/mock-validate";
 
 const PORT = Number(process.env.PORT ?? "3080");
 const JOBS_TOPIC = "jobs";
