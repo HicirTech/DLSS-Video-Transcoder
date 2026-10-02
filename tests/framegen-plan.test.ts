@@ -3,11 +3,13 @@ import {
   FPS_CHOICES,
   FPS_RATES,
   FRAMEGEN_ENGINES,
+  type FrameGenEngine,
   NearestTimestampWriter,
   type TimedFrame,
   chooseInterpolationPlan,
   exactNativeMultiplier,
   formatRate,
+  isNativeMultiFramePlan,
   outputFrameCount,
   resolveTargetRate,
 } from "../src/pipeline/framegen-plan.ts";
@@ -169,6 +171,41 @@ describe("chooseInterpolationPlan", () => {
     expect(() => chooseInterpolationPlan(s30, rational(60), "turbo" as never, 5)).toThrow(/Unknown frame-generation engine/);
     expect(() => chooseInterpolationPlan(s30, rational(60), "native", 5, { cfr: false })).toThrow(/constant-frame-rate/);
     expect(() => chooseInterpolationPlan(rational(0), rational(60), "auto", 5)).toThrow(/positive/);
+  });
+});
+
+describe("isNativeMultiFramePlan", () => {
+  /** The plan a 30 fps source gets on a host that reports MultiFrameCountMax 5 (native up to 6x). */
+  const planTo = (targetFps: number, engine: FrameGenEngine = "auto", hagsEnabled = true) =>
+    chooseInterpolationPlan(rational(30), rational(targetFps), engine, 6, { cfr: true, hagsEnabled });
+
+  test("a native session that generates two or more frames per interval is one", () => {
+    expect(isNativeMultiFramePlan(planTo(90))).toBe(true); // native 3x
+    expect(isNativeMultiFramePlan(planTo(120))).toBe(true); // native 4x
+    expect(isNativeMultiFramePlan(planTo(180))).toBe(true); // native 6x
+    expect(isNativeMultiFramePlan(planTo(120, "native", false))).toBe(true); // a forced native session runs without HAGS too
+  });
+
+  test("native 2x generates one frame per interval and is not", () => {
+    expect(isNativeMultiFramePlan(planTo(60))).toBe(false);
+    expect(isNativeMultiFramePlan(planTo(60, "native"))).toBe(false);
+    expect(isNativeMultiFramePlan(planTo(60, "auto", false))).toBe(false); // 2x needs no HAGS
+  });
+
+  test("a cascade is not, although its stages together add several frames per source interval", () => {
+    const cascades = [planTo(120, "auto", false), planTo(120, "cascade"), planTo(75)]; // 4x without HAGS, 4x forced, 2.5x
+    for (const plan of cascades) {
+      expect(plan.path).toBe("Cascade");
+      expect(plan.generatedPerInterval).toBeGreaterThanOrEqual(2);
+      expect(isNativeMultiFramePlan(plan)).toBe(false);
+    }
+  });
+
+  test("a plain copy is not", () => {
+    for (const plan of [planTo(30), planTo(24)]) {
+      expect(plan.path).toBe("Source-frame resampling");
+      expect(isNativeMultiFramePlan(plan)).toBe(false);
+    }
   });
 });
 
