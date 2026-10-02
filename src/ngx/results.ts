@@ -51,7 +51,9 @@ export class NgxError extends Error {
 function hint(result: number): string {
   switch (result >>> 0) {
     case 0xbad00002:
-      return " - the runtime refused the caller; feature 18 requires calls to come from a module named nvngx.dll";
+      // Any feature's call can return this (the DLSS-G host has seen it from EvaluateFeature after
+      // thousands of good intervals), so the text names no feature and no single cause.
+      return " - a platform error inside the NGX runtime; the runtime also returns it to callers outside a module named nvngx.dll, which is why every NGX call goes through the nvngx.dll shim";
     case 0xbad0000b:
       return " - the feature could not start; check driver version, GPU architecture and that the capability parameter block was used";
     case 0xbad00012:
