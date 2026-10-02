@@ -69,7 +69,7 @@ spec is the source of truth for that help.
 
 | Command | What it does |
 | --- | --- |
-| `probe` | Inspect GPU / driver / NGX core / `runtime/` and report which DLSS features are ready. Exits 0 only when neural rendering is ready, so a script can gate on it. |
+| `probe` | Inspect GPU / driver / NGX core / `runtime/` and report whether neural rendering is ready; exits 0 only then, so a script can gate on it. Super Resolution and frame generation get no verdict: the report lists their DLL and what the driver says, and frame generation is checked when an `fg` job starts. |
 | `sr <in.png> [out.png]` | **DLSS Super Resolution (feature 1)** — real upscaling of a PNG. The only true upscaler. |
 | `nr <in.png> [out.png]` | **DLSS Neural Rendering (feature 18)** — enhance a PNG at the same size (no upscale). |
 | `fg <in.mp4> [out.mp4]` | **DLSS Frame Generation (feature 11)** — interpolate a video to a higher frame rate. |
