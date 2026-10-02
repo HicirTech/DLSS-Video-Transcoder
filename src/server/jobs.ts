@@ -3,6 +3,7 @@
  * worker so the HTTP server never blocks on native calls.
  */
 import type { JobRequest, JobStatus, WsEvent } from "./api-types.ts";
+import { HOST_PROCESS_NAME } from "../pipeline/dlssg-host-launch.ts";
 import type { CancelMessage, RunMessage, WorkerMessage } from "../pipeline/worker.ts";
 import { ABORT_TIMEOUT_MS } from "../pipeline/worker-abort.ts";
 
@@ -159,9 +160,11 @@ export class JobManager {
       entry.cancelTimer = null;
       const output = entry.status.output ?? "the default output path next to the input";
       // Only video jobs have children; an image job writes its file only once it is finishing.
+      const { frameGen } = entry.request;
+      const children = frameGen ? `ffmpeg.exe and ${HOST_PROCESS_NAME}` : "ffmpeg.exe";
       const leftovers =
         entry.request.kind === "video"
-          ? `its ffmpeg or dlssg-worker processes may still be running and holding a partial output at ${output}, and `
+          ? `its ${children} may still be running and holding a partial output at ${output}, and `
           : entry.finishing
             ? `a partial output may remain at ${output}, and `
             : "";
