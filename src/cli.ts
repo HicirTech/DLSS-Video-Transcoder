@@ -196,7 +196,7 @@ const ADAPTER_OPT: OptionSpec = { flag: "--adapter N", desc: "GPU adapter index 
 const COMMANDS: readonly CommandSpec[] = [
   {
     name: "probe",
-    summary: "Inspect the GPU, driver, NGX core and runtime folder; report which DLSS features are ready.",
+    summary: "Inspect the GPU, driver, NGX core and runtime folder; report whether neural rendering is ready.",
     usage: "bun run src/cli.ts probe [options]",
     options: [
       { flag: "--json", desc: "print the full report as JSON instead of the human summary" },
@@ -210,6 +210,7 @@ const COMMANDS: readonly CommandSpec[] = [
       { flag: "--no-requirements", desc: "skip the per-feature GetFeatureRequirements queries" },
       { flag: "--debug-layer", desc: "enable the D3D12 debug layer (needs the Graphics Tools installed)" },
     ],
+    notes: ["Exits 0 only when neural rendering is ready. Super Resolution and frame generation get no verdict: the report lists their DLL and what the driver says, and frame generation is checked when an fg job starts."],
   },
   {
     name: "forwarder",
