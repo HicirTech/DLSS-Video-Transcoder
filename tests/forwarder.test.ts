@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { dlopen, FFIType, ptr } from "bun:ffi";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildForwarderDll, FORWARDER_EXPORTS, stackAllocationUnwindCodes, writeForwarderSync } from "../src/ngx/forwarder.ts";
+import { buildForwarderDll, FORWARDER_EXPORTS, stackAllocationUnwindCodes, writeForwarder, writeForwarderSync } from "../src/ngx/forwarder.ts";
 import { loadForwarder, selfTestForwarder, type ForwarderModule } from "../src/ngx/forwarder-runtime.ts";
 import { parsePe, type PeInfo } from "../src/native/pe.ts";
 
@@ -175,6 +175,41 @@ test("writeForwarderSync replaces a shim whose bytes differ and leaves an identi
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+const SHIM_WRITERS = [
+  { name: "writeForwarderSync", write: (path: string) => writeForwarderSync(path) },
+  { name: "writeForwarder", write: (path: string) => writeForwarder(path) },
+];
+
+for (const { name, write } of SHIM_WRITERS) {
+  test(`${name} leaves a loaded shim and no temp file, and replaces it once it is unloaded`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "forwarder-loaded-"));
+    const path = join(dir, "nvngx.dll");
+    const built = buildForwarderDll();
+    // The loader ignores bytes past the last section: one extra byte still loads, so the file is mapped
+    // while differing from what the writers emit.
+    const loadable = new Uint8Array(built.bytes.length + 1);
+    loadable.set(built.bytes);
+    let loaded: ForwarderModule | undefined;
+    try {
+      writeFileSync(path, loadable);
+      loaded = loadForwarder(path);
+
+      expect((await write(path)).wrote).toBe(false);
+      expect(Buffer.compare(readFileSync(path), loadable)).toBe(0);
+      expect(readdirSync(dir)).toEqual(["nvngx.dll"]);
+
+      loaded.module.free();
+      loaded = undefined;
+      expect((await write(path)).wrote).toBe(true);
+      expect(Buffer.compare(readFileSync(path), built.bytes)).toBe(0);
+      expect(readdirSync(dir)).toEqual(["nvngx.dll"]);
+    } finally {
+      loaded?.module.free();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 test("shim loads and forwards calls with arguments intact", () => {
   const dir = `${import.meta.dir}\\..\\runtime\\caller`;
