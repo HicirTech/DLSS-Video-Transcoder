@@ -41,8 +41,9 @@ bun test                 # unit suite (pure logic, no GPU)
 bun run cli <command>    # see CLI reference below
 ```
 
-Server env vars: `PORT` (default **4080**), `NR_HOST` (default **127.0.0.1**, loopback only),
-`NR_RUNTIME_DIR`, `NR_APPDATA`, `NODE_ENV=production`.
+Server env vars: `PORT` (default **4080**), `NR_HOST` (default **127.0.0.1**, loopback only: the API
+has no authentication), `NR_RUNTIME_DIR` (default `<repo>/runtime`), `NR_APPDATA` (default
+`<repo>/logs`; uploads are stored in `logs/uploads/`), `NODE_ENV=production` (turns dev mode off).
 
 ---
 
@@ -82,10 +83,11 @@ exact integer in range. A target at or below the source rate generates nothing: 
 resampled. The output keeps the source duration and its first audio track (re-encoded to AAC, 192 kb/s).
 
 **Shared options.** `--adapter N` (GPU index from `probe`) applies to `probe`, `sr` and `nr`;
-`--runtime DIR` to every command except `forwarder`. Every command rejects unknown flags; per-command
-`--help` lists all options with defaults. Frame generation has no GPU choice, in the CLI or the web UI:
-it takes the NVIDIA GPU with CUDA and the most VRAM, and its NVENC and NVOFA helpers use CUDA device 0,
-which on a machine with more than one NVIDIA GPU can be another device.
+`--runtime DIR` to `probe`, `sr`, `nr`, `fg` and `versions`. Every command except `help` rejects
+unknown flags; per-command `--help` lists all options with defaults. Frame generation has no GPU
+choice, in the CLI or the web UI: it takes the NVIDIA GPU with CUDA and the most VRAM, and its NVENC
+and NVOFA helpers use CUDA device 0, which on a machine with more than one NVIDIA GPU can be another
+device.
 
 ---
 
@@ -130,6 +132,11 @@ All JSON, same-origin base:
 | `GET /api/file?path=<abs>` | raw bytes (previews; absolute path only) |
 | `POST /api/upload` | multipart upload → `{ path, name, size }` |
 | `WS /ws` | server→client `WsEvent` stream (`hello` / `job` / `log`) |
+
+A job's `state` is `queued`, `running`, `done`, `failed` or `cancelled`. Cancelling a queued job ends it
+at once. A running job is asked to stop: it stays `running` with `cancelRequest: "pending"` until it has
+stopped, then ends `cancelled` (or `failed`, if a failure came first); a job already finishing its output
+completes instead (`done`) and reports `cancelRequest: "too-late"`.
 
 Full request/response shapes in [`src/server/api-types.ts`](src/server/api-types.ts).
 
