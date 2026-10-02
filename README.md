@@ -84,8 +84,9 @@ Shared options, and which commands take them:
   times (this machine shows three "RTX 5090" entries) and only one entry has CUDA. DXGI indices can
   change between runs, so take the index from a `probe` in the same session; an adapter without a CUDA
   device is refused with the ones that have one, LUIDs and CUDA UUIDs included. Frame generation has no adapter
-  selection: it runs in NVIDIA's `dlssg-worker.exe`, which always takes the default device, and its
-  NVENC/NVOFA helpers follow it to CUDA device 0.
+  selection: its host process (`src/pipeline/dlssg-host.ts`, run by bun.exe) takes the auto choice above,
+  and its NVENC/NVOFA helpers use CUDA device 0, which on a machine with more than one NVIDIA GPU can be
+  another device.
 - `--runtime DIR` (default `<repo>/runtime`) — `probe`, `sr`, `nr`, `fg`, `versions`. `forwarder`
   writes where `--out` points instead.
 
@@ -118,12 +119,12 @@ Key per-command options (defaults in parentheses):
 - **`fg`** — `--fps RATE` (output frame rate: 23.976, 25, 29.97, 30, 50, 59.94, 60, 90, 119.88, 120,
   144, 165, 180, 240, 360, 480, or an exact `num/den`; default: source fps × `--multiplier`),
   `--multiplier N` (2; used when `--fps` is absent), `--engine MODE` (auto; `auto` = one native
-  multi-frame DLSSG session when output ÷ source is an exact integer the runtime supports **and HAGS is
-  on** (2× native needs no HAGS), otherwise a cascade of 2× stages chained in memory — 1 stage for 2×,
+  DLSSG session when output ÷ source is an exact integer from 2× up to the runtime's
+  MultiFrameCountMax + 1 (6× with the bundled `nvngx_dlssg.dll` 310.7.129 on an RTX 5090, measured)
+  and, from 3× up, **HAGS is on**; otherwise a cascade of 2× stages chained in memory — 1 stage for 2×,
   2 for 4×, else 3 on an 8× grid — placing the nearest frame on each instant of the exact target clock;
-  `native` / `cascade` force a path; the bundled dlssg-worker synthesises only 1 frame per interval, so
-  3× and above run as a cascade and `auto` falls back to it automatically when a native multi-frame
-  session is refused, HAGS or not), `--codec NAME` (default: GPU NVENC when available, else libx264),
+  when the runtime disables every interval of a native 3×+ session, `auto` re-runs the job as a cascade;
+  `native` / `cascade` force a path), `--codec NAME` (default: GPU NVENC when available, else libx264),
   `--quality N` (encoder quality, CRF for CPU / CQ for NVENC, 0–51, lower = better, 20). The output
   always keeps the source duration (frame count = ⌈duration × rate⌉) and the original audio, and is
   verified after muxing.
@@ -139,12 +140,13 @@ Resolution upscaling to the chosen output size), `nr` (DLSS Neural Rendering enh
 `bypass` (a plain GPU passthrough copy, for A/B comparison); **DLSS Frame Generation** for video
 (pick any output rate from the 23.976–480 list and the path: auto / native / cascade); **DLSS DLL
 version selection** per feature; **browser file upload** for the input; a live job queue with
-WebSocket progress; a before/after compare view; a hardware/runtime **probe** panel; and encode
-settings for video (codec incl. NVENC, quality 0–51 with 18 as default, container mp4/mkv/mov, audio).
+WebSocket progress; a before/after compare view; a hardware/runtime
+**probe** panel; and encode settings for video (codec incl. NVENC, quality 0–51 with 18 as default,
+container mp4/mkv/mov, audio).
 Optical-flow motion can be enabled for video. The **Settings** tab picks the GPU image and video jobs
 run on, from the adapters the last probe found eligible; the choice is stored by the CUDA device
 UUID (nvidia-smi's `GPU-…`), which survives reboots where a DXGI index or LUID does not. Frame
-generation ignores it and always uses the default device.
+generation ignores it: its host process picks the GPU, as `--adapter` under "Shared options" describes.
 
 **Image tab** — choose an engine (SR upscale / Neural Rendering / bypass), a DLSS version, the output
 size and the look controls:
@@ -166,8 +168,8 @@ driver, NGX core, runtime DLLs, caller-shim self-test):
   (in-process NVENC and the hardware optical-flow engine live there); an adapter without one — the
   duplicate "RTX 5090" entries DXGI lists here, a non-NVIDIA GPU — is refused with the adapters that
   qualify, and `probe` reports "not ready" for it. The ffmpeg NVENC fallback (rawvideo path) is
-  pinned to the same CUDA device with `-gpu`. Frame generation always uses CUDA device 0 (see
-  `--adapter`).
+  pinned to the same CUDA device with `-gpu`. Frame generation's NVENC/NVOFA helpers always use CUDA
+  device 0, and its host process picks its own GPU (see `--adapter`).
 - The `nr` engine exposes the reference project's controls — **style**, **intensity**, **local tone**
   (0–2), **local structure** (0–2), **auto mask**, plus **model preset** (0–3) and **skin structure**
   (-1–2). Style, intensity, local tone, local structure and auto mask have a visible effect; the
@@ -215,7 +217,6 @@ runtime/
   caller/nvngx.dll        generated x64 shim (auto-built)
   dlss/nvngx_dlss.dll     DLSS Super Resolution   (feature 1)   [required]
   dlssg/nvngx_dlssg.dll   DLSS Frame Generation   (feature 11)  [required]
-  dlssg/dlssg-worker.exe  frame-gen worker process
   dlssnr/nvngx_dlssnr.dll DLSS Neural Rendering   (feature 18)  [required]
   ffmpeg/bin/{ffmpeg,ffprobe}.exe
   host/, rtx_video/       out-of-process host / RTX Video assets (see status)
@@ -224,7 +225,9 @@ runtime/
 - The driver's NGX core `_nvngx.dll` is loaded from the installed driver, never from here.
 - The shim exists because NGX rejects calls whose return address is not inside a module named
   `nvngx.dll`; every NGX call is routed through it.
-- Feature 11 runs out-of-process in NVIDIA's `dlssg-worker.exe`; features 1 and 18 run in-process.
+- Feature 11 runs out-of-process, in the DLSS Frame Generation host process
+  (`src/pipeline/dlssg-host.ts`, run by bun.exe), which drives `nvngx_dlssg.dll` itself; features 1
+  and 18 run in-process.
 
 ## Tests
 
@@ -237,13 +240,13 @@ not part of the suite.
 
 ## Feature status
 
-Verified against the source on 2026-09-10.
+Verified against the source on 2026-09-10; the Frame Generation row on 2026-09-29.
 
 | Capability | CLI | Web UI | Notes |
 | --- | --- | --- | --- |
 | DLSS SR upscaling (feature 1) | ✅ `sr` | ✅ (`sr` engine) | real render/output split in image & video |
 | DLSS Neural Rendering (feature 18) | ✅ `nr` (PNG) | ✅ (`nr` engine, image & video) | wired into the pipeline |
-| DLSS Frame Generation (feature 11) | ✅ `fg` | ✅ (video tab) | native 2× per session; 3×/4× run as a cascade of 2× stages |
+| DLSS Frame Generation (feature 11) | ✅ `fg` | ✅ (video tab) | native up to the runtime's MultiFrameCountMax + 1 (6× with the bundled `nvngx_dlssg.dll` 310.7.129 on an RTX 5090, measured; `auto` needs HAGS on from 3× up), otherwise a cascade of 2× stages |
 | DLSS version enumeration | ✅ `versions` | ✅ (`/api/catalog`) | shown in the version picker |
 | DLSS version selection | ✅ SR (`sr --dlss-version`) | ✅ (sr/nr) | alternate DLLs may fail to init on newer drivers |
 | Browser file upload | n/a | ✅ | POST /api/upload; stored under logs/uploads/ |
