@@ -3,6 +3,7 @@ import type { JobRequest, JobStatus, ProbeReport, ToolsReport, WsEvent } from ".
 import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS } from "../../src/server/api-types";
 import type { ApiClient, JobEventSource, SettingsDefaults } from "./api";
 import { ApiError } from "./errors";
+import { validateJobRequest } from "./mock-validate";
 
 /*
  * Mock data and a small in-memory job engine. This module has no DOM dependency so the
@@ -386,30 +387,6 @@ export function createSeedJobs(now: number = Date.now()): JobStatus[] {
       ],
     },
   ];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-/** Structural check for a POST /api/jobs body (used by the mock server). */
-export function isJobRequest(value: unknown): value is JobRequest {
-  if (!isRecord(value)) return false;
-  return (
-    (value.kind === "image" || value.kind === "video") &&
-    typeof value.input === "string" &&
-    (value.output === undefined || typeof value.output === "string") &&
-    (value.engine === "bypass" || value.engine === "nr" || value.engine === "sr") &&
-    (value.motion === "none" || value.motion === "flow") &&
-    isRecord(value.settings) &&
-    isRecord(value.scale)
-  );
-}
-
-/** Rejects requests the real server would refuse before queueing. */
-export function validateJobRequest(request: JobRequest): void {
-  if (request.input.trim() === "") throw new ApiError(400, "input path is required");
-  if (request.kind === "video" && !request.encode) throw new ApiError(400, "video jobs need encode settings");
 }
 
 function outputPathFor(request: JobRequest): string {
