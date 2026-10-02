@@ -250,7 +250,7 @@ not part of the suite.
 
 ## Feature status
 
-Verified against the source on 2026-09-10; the Frame Generation row on 2026-09-29.
+Verified against the source on 2026-09-10; the Frame Generation and NVENC rows on 2026-10-03.
 
 | Capability | CLI | Web UI | Notes |
 | --- | --- | --- | --- |
@@ -261,7 +261,7 @@ Verified against the source on 2026-09-10; the Frame Generation row on 2026-09-2
 | DLSS version selection | ✅ SR (`sr --dlss-version`) | ✅ (sr/nr) | alternate DLLs may fail to init on newer drivers |
 | Browser file upload | n/a | ✅ | POST /api/upload; stored under logs/uploads/ |
 | NR look controls | ✅ (`nr`) | ✅ | style / intensity (effective to 1) / tone / structure / auto mask apply; model preset and skin structure are shown disabled and UI correction is CLI-only, because the installed runtime ignores them (measured) |
-| NVENC (GPU) video encode | ✅ if requested | ✅ if selected | frame-gen GPU-encodes by default |
+| NVENC (GPU) video encode | ✅ if requested | ✅ if selected | `fg` GPU-encodes by default when NVENC is available; in the web UI the codec chosen under Encoding applies (H.264 software by default) |
 | GPU optical flow (NVOFA) | ✅ (video/fg motion) | ✅ | hardware flow engine, ~5.7× faster than CPU, auto CPU fallback; `probe` reports whether it comes up and its size limits |
 | RTX Video Super Resolution / TrueHDR | ❌ | ❌ | DLLs present but no code path uses them |
 
