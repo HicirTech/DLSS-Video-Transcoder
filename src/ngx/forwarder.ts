@@ -11,7 +11,8 @@
  *
  * The emitted code is position independent (RIP-relative slot access, exports as
  * RVAs, no imports, no absolute addresses), so an empty relocation table is
- * enough to satisfy ASLR.
+ * enough to satisfy ASLR. The call stubs carry x64 unwind data (.pdata), so a
+ * stack walk or exception dispatch that passes through one reaches its caller.
  */
 
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
@@ -36,9 +37,78 @@ function align(value: number, to: number): number {
   return Math.ceil(value / to) * to;
 }
 
+// Unwind data, per "x64 exception handling" (learn.microsoft.com/cpp/build/exception-handling-x64):
+// RUNTIME_FUNCTION is BeginAddress, EndAddress, UnwindInfoAddress (three ULONG RVAs, DWORD aligned,
+// sorted by address); UNWIND_INFO is Version:3|Flags:5, SizeOfProlog, CountOfCodes,
+// FrameRegister:4|FrameOffset:4, then the codes padded to an even count, DWORD aligned.
+const RUNTIME_FUNCTION_BYTES = 12;
+const UNWIND_INFO_VERSION = 1;
+const UWOP_ALLOC_SMALL = 2;
+/** Largest UWOP_ALLOC_SMALL allocation: OpInfo * 8 + 8 with a 4-bit OpInfo. */
+const ALLOC_SMALL_MAX = 128;
+// IMAGE_DIRECTORY_ENTRY_EXCEPTION: data directory 3, at PE32+ optional header offset 136 (PE format).
+const EXCEPTION_DIRECTORY_INDEX = 3;
+
+/** A non-leaf function the unwinder has to describe: `sub rsp, frameBytes` as its whole prolog. */
+interface CallThunkFrame {
+  beginRva: number;
+  endRva: number;
+  prologBytes: number;
+  frameBytes: number;
+}
+
+/**
+ * The UNWIND_CODE slots (USHORT: CodeOffset | UnwindOp << 8 | OpInfo << 12) that undo a
+ * `sub rsp, frameBytes` ending `prologBytes` into the function. Only UWOP_ALLOC_SMALL (8..128 bytes)
+ * is encoded: the stubs' frames are 72 bytes (emitCallThunk), and a larger frame would also need
+ * UWOP_ALLOC_LARGE, an imm32 `sub rsp` and, from one page up, a __chkstk probe ("x64 prolog and epilog").
+ */
+export function stackAllocationUnwindCodes(prologBytes: number, frameBytes: number): number[] {
+  if (frameBytes < 8 || frameBytes % 8 !== 0 || frameBytes > ALLOC_SMALL_MAX) {
+    throw new Error(`forwarder: stack frame of ${frameBytes} bytes; the stubs allocate a multiple of 8 from 8 to ${ALLOC_SMALL_MAX}`);
+  }
+  return [prologBytes | (UWOP_ALLOC_SMALL << 8) | ((frameBytes / 8 - 1) << 12)];
+}
+
+/** One UNWIND_INFO: version 1, no handler, no frame register, and the stack allocation's codes. */
+function unwindInfo(frame: CallThunkFrame): number[] {
+  const codes = stackAllocationUnwindCodes(frame.prologBytes, frame.frameBytes);
+  const bytes = [UNWIND_INFO_VERSION, frame.prologBytes, codes.length, 0];
+  for (let slot = 0; slot < align(codes.length, 2); slot++) {
+    const code = codes[slot] ?? 0;
+    bytes.push(code & 0xff, code >>> 8);
+  }
+  return bytes;
+}
+
+/** The .pdata section: the RUNTIME_FUNCTION table first (what the exception directory names), then each UNWIND_INFO. */
+function buildPdata(frames: CallThunkFrame[], pdataRva: number): { bytes: Uint8Array; tableBytes: number } {
+  const sorted = [...frames].sort((a, b) => a.beginRva - b.beginRva);
+  const tableBytes = sorted.length * RUNTIME_FUNCTION_BYTES;
+  const infos = sorted.map(unwindInfo);
+  const infoOffsets: number[] = [];
+  let size = tableBytes;
+  for (const info of infos) {
+    infoOffsets.push(size);
+    size = align(size + info.length, 4);
+  }
+  const bytes = new Uint8Array(size);
+  const view = new DataView(bytes.buffer);
+  sorted.forEach((frame, index) => {
+    const entry = index * RUNTIME_FUNCTION_BYTES;
+    view.setUint32(entry, frame.beginRva, true);
+    view.setUint32(entry + 4, frame.endRva, true);
+    view.setUint32(entry + 8, pdataRva + infoOffsets[index]!, true);
+    bytes.set(infos[index]!, infoOffsets[index]!);
+  });
+  return { bytes, tableBytes };
+}
+
 /** Emits x64 machine code and resolves RIP-relative references to the .data slots. */
 class TextBuilder {
   private readonly bytes: number[] = [];
+  /** The non-leaf functions emitted so far; DllMain and fwd_set_slots touch no stack and call nothing, so they need no entry. */
+  readonly callThunks: CallThunkFrame[] = [];
 
   constructor(
     readonly textRva: number,
@@ -95,7 +165,8 @@ class TextBuilder {
     // Keep the frame 16-byte aligned at the inner call (rsp ≡ 8 mod 16 on entry).
     let frame = 0x20 + stackArgs * 8 + 8;
     if (frame % 16 !== 8) frame += 8;
-    this.push(0x48, 0x83, 0xec, frame & 0xff); // sub rsp, frame
+    this.adjustRsp(0xec, frame); // sub rsp, frame: the whole prolog
+    const prologBytes = this.rva - at;
     for (let i = 0; i < stackArgs; i++) {
       // caller frame: arg(5+i) at [rsp + frame + 0x28 + i*8]; inner slot: [rsp + 0x20 + i*8]
       this.push(0x48, 0x8b, 0x84, 0x24); // mov rax, [rsp + disp32]
@@ -108,9 +179,20 @@ class TextBuilder {
       const ripAfter = this.textRva + this.bytes.length + 4;
       this.disp32(this.slotRva[slot]! - ripAfter);
     }
-    this.push(0x48, 0x83, 0xc4, frame & 0xff); // add rsp, frame
+    // The epilog is `add rsp, frame; ret`, one of the forms the unwinder recognises ("x64 prolog and epilog").
+    this.adjustRsp(0xc4, frame); // add rsp, frame
     this.push(0xc3); // ret
+    this.callThunks.push({ beginRva: at, endRva: this.rva, prologBytes, frameBytes: frame });
     return at;
+  }
+
+  /**
+   * `sub rsp, bytes` (ModRM 0xec) or `add rsp, bytes` (0xc4) with an imm8. A frame is 8 mod 16, so the
+   * 128-byte limit of stackAllocationUnwindCodes keeps it at 120 or less, inside the imm8's 0x7f; a
+   * larger frame makes buildForwarderDll throw there before it returns any bytes.
+   */
+  private adjustRsp(modrm: 0xec | 0xc4, bytes: number): void {
+    this.push(0x48, 0x83, modrm, bytes);
   }
 
   padTo(multiple: number): void {
@@ -136,7 +218,8 @@ export function buildForwarderDll(options: { imageBase?: bigint } = {}): Forward
   const imageBase = options.imageBase ?? DEFAULT_IMAGE_BASE;
   const textRva = 0x1000;
   const dataRva = 0x2000;
-  const relocRva = 0x3000;
+  const pdataRva = 0x3000;
+  const relocRva = 0x4000;
   const slotRva = [dataRva, dataRva + 8, dataRva + 16];
 
   // --- .text: entry point, stubs, then the export directory ---
@@ -204,19 +287,25 @@ export function buildForwarderDll(options: { imageBase?: bigint } = {}): Forward
   // --- .data: three 8-byte slots, zero-initialised ---
   const dataBytes = new Uint8Array(24);
 
+  // --- .pdata: unwind data for the call stubs ---
+  const pdata = buildPdata(text.callThunks, pdataRva);
+
   // --- .reloc: a single empty block, so DYNAMIC_BASE has a table to point at ---
   const relocBytes = new Uint8Array(8);
   new DataView(relocBytes.buffer).setUint32(0, textRva, true); // page RVA
   new DataView(relocBytes.buffer).setUint32(4, 8, true); // block size = header only (no fixups)
 
   // --- assemble the file ---
-  const headerSize = align(64 + 4 + 20 + 240 + 3 * 40, FILE_ALIGNMENT);
+  const sectionCount = 4;
+  const headerSize = align(64 + 4 + 20 + 240 + sectionCount * 40, FILE_ALIGNMENT);
   const textRaw = align(textBytes.length, FILE_ALIGNMENT);
   const dataRaw = align(dataBytes.length, FILE_ALIGNMENT);
+  const pdataRaw = align(pdata.bytes.length, FILE_ALIGNMENT);
   const relocRaw = align(relocBytes.length, FILE_ALIGNMENT);
   const textPtr = headerSize;
   const dataPtr = textPtr + textRaw;
-  const relocPtr = dataPtr + dataRaw;
+  const pdataPtr = dataPtr + dataRaw;
+  const relocPtr = pdataPtr + pdataRaw;
   const fileSize = relocPtr + relocRaw;
   const sizeOfImage = align(relocRva + relocBytes.length, SECTION_ALIGNMENT);
 
@@ -236,7 +325,7 @@ export function buildForwarderDll(options: { imageBase?: bigint } = {}): Forward
   u32(pe, IMAGE_NT_SIGNATURE);
   const coff = pe + 4;
   u16(coff + 0, 0x8664); // Machine = AMD64
-  u16(coff + 2, 3); // NumberOfSections
+  u16(coff + 2, sectionCount); // NumberOfSections
   u16(coff + 16, 240); // SizeOfOptionalHeader
   u16(coff + 18, 0x2022); // EXECUTABLE | LARGE_ADDRESS_AWARE | DLL
 
@@ -245,7 +334,7 @@ export function buildForwarderDll(options: { imageBase?: bigint } = {}): Forward
   u16(opt + 0, 0x20b);
   u8(opt + 2, 14); // linker version major
   u32(opt + 4, textRaw); // SizeOfCode
-  u32(opt + 8, dataRaw + relocRaw); // SizeOfInitializedData
+  u32(opt + 8, dataRaw + pdataRaw + relocRaw); // SizeOfInitializedData
   u32(opt + 16, dllMainRva); // AddressOfEntryPoint
   u32(opt + 20, textRva); // BaseOfCode
   u64(opt + 24, imageBase);
@@ -265,6 +354,8 @@ export function buildForwarderDll(options: { imageBase?: bigint } = {}): Forward
   const dirs = opt + 112;
   u32(dirs + 0 * 8, exportDirRva); // Export table
   u32(dirs + 0 * 8 + 4, exportSize);
+  u32(dirs + EXCEPTION_DIRECTORY_INDEX * 8, pdataRva); // Exception table: the RUNTIME_FUNCTION array
+  u32(dirs + EXCEPTION_DIRECTORY_INDEX * 8 + 4, pdata.tableBytes);
   u32(dirs + 5 * 8, relocRva); // Base relocation table
   u32(dirs + 5 * 8 + 4, relocBytes.length);
 
@@ -289,10 +380,12 @@ export function buildForwarderDll(options: { imageBase?: bigint } = {}): Forward
   };
   writeSection(0, ".text", textBytes.length, textRva, textRaw, textPtr, 0x60000020); // CODE|EXECUTE|READ
   writeSection(1, ".data", dataBytes.length, dataRva, dataRaw, dataPtr, 0xc0000040); // INIT|READ|WRITE
-  writeSection(2, ".reloc", relocBytes.length, relocRva, relocRaw, relocPtr, 0x42000040); // INIT|READ|DISCARDABLE
+  writeSection(2, ".pdata", pdata.bytes.length, pdataRva, pdataRaw, pdataPtr, 0x40000040); // INIT|READ
+  writeSection(3, ".reloc", relocBytes.length, relocRva, relocRaw, relocPtr, 0x42000040); // INIT|READ|DISCARDABLE
 
   file.set(textBytes, textPtr);
   file.set(dataBytes, dataPtr);
+  file.set(pdata.bytes, pdataPtr);
   file.set(relocBytes, relocPtr);
 
   return {
