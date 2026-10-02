@@ -10,8 +10,8 @@ import {
   D3D12_RESOURCE_STATE_COPY_SOURCE,
   D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
   DXGI_FORMAT_R8G8B8A8_UNORM,
-  GpuContext,
 } from "../src/native/d3d12.ts";
+import { GpuContext } from "../src/native/gpu-context.ts";
 
 const factory = DxgiFactory.create();
 const adapters = factory.enumerate();
