@@ -3,6 +3,7 @@
  * worker that answers the way src/pipeline/worker.ts does.
  */
 import { describe, expect, test } from "bun:test";
+import { HOST_PROCESS_NAME } from "../src/pipeline/dlssg-host-launch.ts";
 import { JobManager, type JobManagerOptions } from "../src/server/jobs.ts";
 import type { JobRequest } from "../src/server/api-types.ts";
 import { DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS } from "../src/server/api-types.ts";
@@ -118,6 +119,15 @@ describe("JobManager.cancel", () => {
     expect(jobs.get(id)!.message).toContain("did not end within 0.02 s");
     expect(jobs.get(id)!.message).toContain("until the server is restarted");
     expect(worker.terminated).toBe(true);
+  });
+
+  test("a frame-generation job's timeout message names ffmpeg and the host process", async () => {
+    const worker = new FakeWorker();
+    const jobs = manager(worker, { cancelGraceMs: 20 });
+    const { id } = jobs.submit({ ...request(), kind: "video", input: "W:/GPUVideoProcessor/2.mp4", frameGen: { targetFps: "120" } });
+    jobs.cancel(id);
+    await Bun.sleep(40);
+    expect(jobs.get(id)!.message).toContain(`its ffmpeg.exe and ${HOST_PROCESS_NAME} may still be running`);
   });
 
   test("a queued job is cancelled outright, without a worker", () => {
