@@ -14,6 +14,10 @@ const kernel32 = dlopen("kernel32.dll", {
   CreateEventW: { args: [FFIType.ptr, FFIType.i32, FFIType.i32, FFIType.ptr], returns: FFIType.ptr },
   WaitForSingleObject: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.u32 },
   CloseHandle: { args: [FFIType.ptr], returns: FFIType.i32 },
+  CreateFileMappingW: { args: [FFIType.u64, FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.ptr], returns: FFIType.ptr },
+  OpenFileMappingW: { args: [FFIType.u32, FFIType.i32, FFIType.ptr], returns: FFIType.ptr },
+  MapViewOfFile: { args: [FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.u64], returns: FFIType.ptr },
+  UnmapViewOfFile: { args: [FFIType.ptr], returns: FFIType.i32 },
   GetCurrentProcessId: { args: [], returns: FFIType.u32 },
   GetTickCount64: { args: [], returns: FFIType.u64 },
   MultiByteToWideChar: {
@@ -100,6 +104,6 @@ export function tickCount64(): bigint {
   return BigInt(kernel32.symbols.GetTickCount64());
 }
 
-/** Exposed so the forwarder self-test can route a six-argument call through generated code. */
+/** The bound kernel32 calls, for modules that wrap one of them themselves (shared-memory.ts). */
 export const kernel32Symbols = kernel32.symbols;
 export const kernel32Module = NativeModule.loaded("kernel32.dll");
