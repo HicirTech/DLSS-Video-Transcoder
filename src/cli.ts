@@ -4,23 +4,22 @@
  * COMMANDS below is the single source of truth: it renders the help *and* tells the
  * positional-argument parser which flags consume a following value token.
  */
-import { join } from "node:path";
 import { decodePng, encodePng, isPng } from "./codec/png.ts";
 import { buildForwarderDll } from "./ngx/forwarder.ts";
+import { shimPath } from "./ngx/forwarder-runtime.ts";
 import { PROBE_ENTRIES, PROBE_INITS, runProbe } from "./ngx/probe.ts";
 import { DlssNrSession } from "./ngx/nr-render.ts";
 import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
 import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, type ProbeAdapter, type ProbeOpticalFlow, SETTING_RANGES } from "./server/api-types.ts";
 import { DEFAULT_SR_PRESET, DlssRenderPreset, DLSS_RATIO, perfQualityName, qualityForFactor } from "./ngx/results.ts";
+import { APP_DATA_DIR, callerDir, DEFAULT_RUNTIME_DIR } from "./paths.ts";
 import { processFrameGen } from "./pipeline/framegen.ts";
 import { FFMPEG_NVENC_ENCODERS, isNvenc } from "./pipeline/encode-select.ts";
 import { describeGpu, openGpu } from "./pipeline/gpu.ts";
 import { enhanceStill } from "./pipeline/image.ts";
 import { defaultOutputPath } from "./pipeline/output-path.ts";
 import { evenSize } from "./pipeline/resize.ts";
-
-const ROOT = join(import.meta.dir, "..");
 
 function flag(args: string[], name: string): boolean {
   return args.includes(name);
@@ -99,6 +98,11 @@ function adapterOption(args: string[]): number | undefined {
   if (raw === undefined) return undefined;
   if (!/^\d+$/.test(raw)) usageError(`--adapter expects a non-negative index from \`probe\`, got "${raw}"`);
   return Number(raw);
+}
+
+/** `--runtime`, else the repo's runtime folder: the one place the CLI decides where the DLSS DLLs live. */
+function runtimeDirOption(args: string[]): string {
+  return option(args, "--runtime") ?? DEFAULT_RUNTIME_DIR;
 }
 
 /** Flag names that consume a following value token, derived from a command spec ("--factor N" does, "--json" does not). */
@@ -444,8 +448,8 @@ async function main(): Promise<void> {
       positionalArgs(args, COMMANDS.find((c) => c.name === command)!);
       const report = await runProbe({
         adapterIndex: adapterOption(args),
-        runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
-        appDataPath: join(ROOT, "logs"),
+        runtimeDir: runtimeDirOption(args),
+        appDataPath: APP_DATA_DIR,
         projectInit: flag(args, "--project-init"),
         // No fallback: probe.ts owns both defaults, so repeating them here would be a second copy.
         entry: choiceOption(args, "--entry", PROBE_ENTRIES),
@@ -464,7 +468,7 @@ async function main(): Promise<void> {
     case "forwarder": {
       // forwarder takes no positionals; validate before anything is written.
       positionalArgs(args, COMMANDS.find((c) => c.name === command)!);
-      const out = option(args, "--out") ?? join(ROOT, "runtime", "caller", "nvngx.dll");
+      const out = option(args, "--out") ?? shimPath(callerDir(DEFAULT_RUNTIME_DIR));
       const built = buildForwarderDll();
       await Bun.write(out, built.bytes);
       console.log(`wrote ${built.bytes.length} bytes to ${out}`);
@@ -504,7 +508,7 @@ async function main(): Promise<void> {
       const outputHeight = evenSize(image.height * snappedRatio);
       const output = positional[1] ?? defaultOutputPath(input, "dlss", ".png");
 
-      const runtimeDir = option(args, "--runtime") ?? join(ROOT, "runtime");
+      const runtimeDir = runtimeDirOption(args);
       let dllDir: string | undefined;
       const wantVersion = option(args, "--dlss-version");
       if (wantVersion) {
@@ -575,7 +579,7 @@ async function main(): Promise<void> {
         width: image.width,
         height: image.height,
         settings,
-        runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
+        runtimeDir: runtimeDirOption(args),
       });
       const enhanced = await enhanceStill(image, (colour) => ({ rgba: nr.evaluate(colour, true), width: image.width, height: image.height }));
       await Bun.write(output, encodePng(enhanced, { level: 6 }));
@@ -603,7 +607,7 @@ async function main(): Promise<void> {
         // The same range the API validates against and the UI clamps to.
         quality: numberOption(args, "--quality", { ...SETTING_RANGES.quality, fallback: 20 }),
         codec: choiceOption(args, "--codec", ENCODE_CODECS),
-        runtimeDir: option(args, "--runtime") ?? join(ROOT, "runtime"),
+        runtimeDir: runtimeDirOption(args),
         onProgress: (f, m, frames) => {
           if (frames === undefined) console.log(`  ${(f * 100).toFixed(0)}%  ${m}`);
         },
@@ -619,7 +623,7 @@ async function main(): Promise<void> {
     case "versions": {
       // versions takes no positionals; validate before the catalog is built.
       positionalArgs(args, COMMANDS.find((c) => c.name === command)!);
-      const catalog = buildRuntimeCatalog(option(args, "--runtime") ?? join(ROOT, "runtime"));
+      const catalog = buildRuntimeCatalog(runtimeDirOption(args));
       for (const feature of catalog.features) {
         console.log(`feature ${feature.id}  ${feature.name}  (${feature.dllName})  ${feature.versions.length} version(s)`);
         for (const v of feature.versions) {
