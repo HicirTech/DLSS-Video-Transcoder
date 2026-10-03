@@ -4,13 +4,14 @@
  * run one at a time, and that the server keeps answering while the probe's thread is blocked.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ProbeReport } from "../src/server/api-types.ts";
 import { ProbeRunner, probeInChildProcess } from "../src/server/probe-runner.ts";
 
 const FAKE_CHILD = join(import.meta.dir, "fake-probe-child.ts");
+const HARNESS = join(import.meta.dir, "probe-child-harness.ts");
 const fake = (...args: string[]): string[] => [process.execPath, FAKE_CHILD, ...args];
 
 const dirs: string[] = [];
@@ -72,6 +73,16 @@ describe("probeInChildProcess", () => {
     await expect(probeInChildProcess({ command: fake("hang", marker), timeoutMs: 1500 })).rejects.toThrow("The probe did not finish within 1.5 s, so its process was stopped.");
     const pid = Number(readFileSync(marker, "utf8"));
     await eventually(() => !isRunning(pid), `process ${pid} to end`);
+  });
+
+  test("the real probe process reports a probe that threw, before it has made a native call", async () => {
+    const blocker = markerFile();
+    writeFileSync(blocker, "a file where a folder is needed");
+    const failure = await probeInChildProcess({ command: [process.execPath, HARNESS, join(blocker, "logs")] }).then(
+      () => null,
+      (error: Error) => error,
+    );
+    expect(failure?.message).toMatch(/^The probe failed before it could report: ENOTDIR.*marker\.txt.* Run `bun run probe` in a terminal/);
   });
 
   test("a command that cannot start is an error, not a hang", async () => {
