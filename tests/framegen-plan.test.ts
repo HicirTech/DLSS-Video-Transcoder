@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  FPS_CHOICES,
-  FPS_RATES,
-  FRAMEGEN_ENGINES,
-  type FrameGenEngine,
   NearestTimestampWriter,
   type TimedFrame,
   chooseInterpolationPlan,
@@ -14,22 +10,30 @@ import {
   resolveTargetRate,
 } from "../src/pipeline/framegen-plan.ts";
 import { type Rational, ratCmp, ratDiv, rational } from "../src/pipeline/rational.ts";
-import { FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES } from "../src/server/api-types.ts";
+import { FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, type FrameGenEngine } from "../src/server/api-types.ts";
 
 const eq = (a: Rational, b: Rational) => ratCmp(a, b) === 0;
 
-describe("shared API contract", () => {
-  test("the UI's named choices are exactly the pipeline's, in the same order", () => {
-    expect([...FPS_CHOICES]).toEqual([...FRAME_GEN_FPS_CHOICES]);
-    expect([...FRAMEGEN_ENGINES]).toEqual([...FRAME_GEN_ENGINES]);
-  });
-});
-
 describe("target rates", () => {
   test("named rates are exact rationals", () => {
-    expect(eq(FPS_RATES["59.94"]!, rational(60000, 1001))).toBe(true);
-    expect(eq(FPS_RATES["23.976"]!, rational(24000, 1001))).toBe(true);
-    expect(eq(FPS_RATES["119.88"]!, rational(120000, 1001))).toBe(true);
+    expect(eq(resolveTargetRate("59.94"), rational(60000, 1001))).toBe(true);
+    expect(eq(resolveTargetRate("23.976"), rational(24000, 1001))).toBe(true);
+    expect(eq(resolveTargetRate("119.88"), rational(120000, 1001))).toBe(true);
+  });
+
+  test("every named choice is the rate its name says, and the list ascends", () => {
+    let previous: Rational | null = null;
+    for (const name of FRAME_GEN_FPS_CHOICES) {
+      const rate = resolveTargetRate(name);
+      expect(Number(rate.num) / Number(rate.den), name).toBeCloseTo(Number(name), 2);
+      expect(formatRate(rate), name).toBe(name);
+      if (previous) expect(ratCmp(previous, rate), name).toBeLessThan(0);
+      previous = rate;
+    }
+  });
+
+  test("a name that only exists on Object.prototype is not a named rate", () => {
+    for (const name of ["toString", "constructor", "__proto__"]) expect(() => resolveTargetRate(name), name).toThrow(/Unsupported output FPS/);
   });
 
   test("resolveTargetRate: named beats decimal parsing, num/den and decimals accepted", () => {
@@ -168,7 +172,8 @@ describe("chooseInterpolationPlan", () => {
   });
 
   test("validation", () => {
-    expect(() => chooseInterpolationPlan(s30, rational(60), "turbo" as never, 5)).toThrow(/Unknown frame-generation engine/);
+    for (const engine of FRAME_GEN_ENGINES) expect(() => chooseInterpolationPlan(s30, rational(60), engine, 5), engine).not.toThrow();
+    expect(() => chooseInterpolationPlan(s30, rational(60), "turbo" as never, 5)).toThrow(/Unknown frame-generation engine "turbo"\. Choose one of: auto, native, cascade\./);
     expect(() => chooseInterpolationPlan(s30, rational(60), "native", 5, { cfr: false })).toThrow(/constant-frame-rate/);
     expect(() => chooseInterpolationPlan(rational(0), rational(60), "auto", 5)).toThrow(/positive/);
   });

@@ -21,7 +21,7 @@
  */
 import { existsSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
-import type { EncodeSettings } from "../server/api-types.ts";
+import type { EncodeSettings, FrameGenEngine } from "../server/api-types.ts";
 import { throwIfAborted } from "./cancel.ts";
 import { DlssgSession, probeDlssg } from "./dlssg.ts";
 import { motionFieldBytes } from "./dlssg-protocol.ts";
@@ -35,7 +35,6 @@ import { Stage, openGuideWorker } from "./framegen-stage.ts";
 import { verifyOutputVideo } from "./framegen-verify.ts";
 import {
   FRAMEGEN_CUDA_DEVICE,
-  type FrameGenEngine,
   type InterpolationPlan,
   NearestTimestampWriter,
   chooseInterpolationPlan,
@@ -54,7 +53,7 @@ export interface FrameGenOptions {
   output?: string;
   /**
    * Output frame rate: a named rate ("60", "59.94", "120", "144", ... see
-   * FPS_CHOICES), an exact "num/den", or a decimal. Takes precedence over
+   * FRAME_GEN_FPS_CHOICES), an exact "num/den", or a decimal. Takes precedence over
    * `multiplier` when both are given.
    */
   targetFps?: string;

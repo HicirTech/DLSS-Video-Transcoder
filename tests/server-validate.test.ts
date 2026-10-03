@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join, resolve, sep } from "node:path";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, SETTING_RANGES } from "../src/server/api-types.ts";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, ENGINE_KINDS, JOB_KINDS, MOTION_KINDS, SETTING_RANGES } from "../src/server/api-types.ts";
 import { isWithin, validateJobRequest } from "../src/server/validate.ts";
 
 const ROOT = resolve(sep === "\\" ? "C:\\app\\logs" : "/app/logs");
@@ -52,11 +52,17 @@ describe("validateJobRequest", () => {
     for (const bad of [null, 42, "x", [], undefined]) expect(validateJobRequest(bad)).toMatch(/must be a JSON object/);
   });
 
+  test("accepts every kind, engine and motion the contract lists", () => {
+    for (const kind of JOB_KINDS) expect(validateJobRequest(request({ kind })), kind).toBeNull();
+    for (const engine of ENGINE_KINDS) expect(validateJobRequest(request({ engine })), engine).toBeNull();
+    for (const motion of MOTION_KINDS) expect(validateJobRequest(request({ motion })), motion).toBeNull();
+  });
+
   test("names the offending top-level field", () => {
-    expect(validateJobRequest(request({ kind: "audio" }))).toMatch(/kind must be/);
+    expect(validateJobRequest(request({ kind: "audio" }))).toMatch(/kind must be one of image, video \(got "audio"\)/);
     expect(validateJobRequest(request({ input: "" }))).toMatch(/input must be/);
-    expect(validateJobRequest(request({ engine: "turbo" }))).toMatch(/engine must be/);
-    expect(validateJobRequest(request({ motion: "sideways" }))).toMatch(/motion must be/);
+    expect(validateJobRequest(request({ engine: "turbo" }))).toMatch(/engine must be one of sr, nr, bypass \(got "turbo"\)/);
+    expect(validateJobRequest(request({ motion: "sideways" }))).toMatch(/motion must be one of none, flow \(got "sideways"\)/);
     expect(validateJobRequest(request({ dllDir: 7 }))).toMatch(/dllDir must be a string/);
     expect(validateJobRequest(request({ settings: [] }))).toMatch(/settings must be an object/);
     expect(validateJobRequest(request({ scale: "big" }))).toMatch(/scale must be an object/);

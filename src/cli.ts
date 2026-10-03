@@ -11,10 +11,9 @@ import { PROBE_ENTRIES, PROBE_INITS, runProbe } from "./ngx/probe.ts";
 import { DlssNrSession } from "./ngx/nr-render.ts";
 import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
-import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, FRAME_GEN_NATIVE_MAXIMUM, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLES, type ProbeAdapter, type ProbeOpticalFlow, SETTING_RANGES } from "./server/api-types.ts";
+import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLES, type ProbeAdapter, type ProbeOpticalFlow, SETTING_RANGES } from "./server/api-types.ts";
 import { DlssRenderPreset, DLSS_RATIO, perfQualityName, qualityForFactor } from "./ngx/results.ts";
 import { processFrameGen } from "./pipeline/framegen.ts";
-import { FRAMEGEN_ENGINES } from "./pipeline/framegen-plan.ts";
 import { describeGpu, openGpu } from "./pipeline/gpu.ts";
 import { enhanceStill } from "./pipeline/image.ts";
 import { evenSize } from "./pipeline/resize.ts";
@@ -267,7 +266,7 @@ const COMMANDS: readonly CommandSpec[] = [
       { name: "output.mp4", desc: "destination; defaults to <input>.dlssg.mp4 next to the input" },
     ],
     options: [
-      { flag: "--fps RATE", desc: "output frame rate: 23.976, 25, 29.97, 30, 50, 59.94, 60, 90, 119.88, 120, 144, 165, 180, 240, 360, 480, or an exact num/den; overrides --multiplier", def: "source fps x --multiplier" },
+      { flag: "--fps RATE", desc: `output frame rate: ${FRAME_GEN_FPS_CHOICES.join(", ")}, or an exact num/den; overrides --multiplier`, def: "source fps x --multiplier" },
       { flag: "--multiplier N", desc: "output/input frame ratio when --fps is not given, a whole number from 1 to 16 (2 = double fps)", def: "2" },
       { flag: "--engine MODE", desc: `auto = one native session when output/source is an exact integer from 2 up to ${FRAME_GEN_NATIVE_MAXIMUM} (3x and above only with HAGS on), else a cascade of 2x stages; when the runtime disables every interval of a native 3x+ session, auto re-runs it as a cascade; native or cascade force that path`, def: "auto" },
       { flag: "--codec NAME", desc: "encoder: h264, hevc, av1, or h264_nvenc/hevc_nvenc/av1_nvenc for GPU", def: "GPU NVENC when available, else libx264" },
@@ -598,7 +597,7 @@ async function main(): Promise<void> {
         targetFps: option(args, "--fps"),
         // 16x is the top of the FPS table's reach from a 30 fps source (480).
         multiplier: numberOption(args, "--multiplier", { min: 1, max: 16, integer: true, fallback: 2 }),
-        engine: choiceOption(args, "--engine", FRAMEGEN_ENGINES),
+        engine: choiceOption(args, "--engine", FRAME_GEN_ENGINES),
         // The same range the API validates against and the UI clamps to.
         quality: numberOption(args, "--quality", { ...SETTING_RANGES.quality, fallback: 20 }),
         codec: choiceOption(args, "--codec", ENCODE_CODECS),

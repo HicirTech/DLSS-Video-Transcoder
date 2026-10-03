@@ -8,7 +8,7 @@
 import { existsSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings, EngineKind, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
-import { DEFAULT_ENCODE_SETTINGS } from "../server/api-types.ts";
+import { DEFAULT_ENCODE_SETTINGS, ENCODE_CODECS } from "../server/api-types.ts";
 import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine, type Engine } from "./engine.ts";
 import { nvencGpuArgs, resolveEncodeCodec } from "./encode-select.ts";
@@ -258,7 +258,7 @@ export function encoderArgs(encode: EncodeSettings, cudaOrdinal: number): string
     case "av1_nvenc":
       return ["-c:v", "av1_nvenc", ...gpu, "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0", "-pix_fmt", "yuv420p"];
     default:
-      throw new Error(`Unknown codec "${String(encode.codec)}". Choose one of: h264, hevc, av1, h264_nvenc, hevc_nvenc, av1_nvenc.`);
+      throw new Error(`Unknown codec "${String(encode.codec)}". Choose one of: ${ENCODE_CODECS.join(", ")}.`);
   }
 }
 
