@@ -10,6 +10,7 @@
  * Frames are processed strictly in arrival order (a serial promise chain) so the
  * elementary stream stays in display order, matching NVENC's no-B-frame config.
  */
+import { ffmpegFailedMessage } from "../ffmpeg-failure.ts";
 import { NvencEncoder, type NvencSdkCodec } from "../nvenc.ts";
 import { type AbortRequest, answerAbort } from "../worker-abort.ts";
 
@@ -74,7 +75,7 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
       const err = (await new Response(sink.stderr as ReadableStream<Uint8Array>).text()).trim();
       const code = await sink.exited;
       closeEncoder();
-      if (code !== 0) { fail(`ffmpeg mux failed (${code}): ${err}`); return; }
+      if (code !== 0) { fail(ffmpegFailedMessage("mux", code, err)); return; }
       self.postMessage({ type: "done" });
     }).catch((error) => fail((error as Error).message ?? String(error)));
   }

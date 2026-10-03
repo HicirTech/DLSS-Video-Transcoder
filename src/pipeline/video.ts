@@ -12,6 +12,7 @@ import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine, type Engine } from "./engine.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
 import { aspectArgs, audioArgs, decodeArgv, encoderArgs, faststartArgs, muxCopyArgs } from "./ffmpeg-args.ts";
+import { ffmpegFailedMessage, NoFramesDecodedError } from "./ffmpeg-failure.ts";
 import { defaultOutputPath } from "./output-path.ts";
 import { framesWrittenOf, removePartialOutput } from "./partial-output.ts";
 import { type Rational, ratToNumber, rational, tryParseRate } from "./rational.ts";
@@ -26,7 +27,7 @@ import { DXGI_FORMAT_R8G8B8A8_UNORM, linearLayout } from "../native/d3d12.ts";
 import { describeGpu, openGpu } from "./gpu.ts";
 import { resolveTargetSize } from "./image.ts";
 import { evenSize } from "./resize.ts";
-import { findTool } from "./tools.ts";
+import { requireFfmpegTools } from "./tools.ts";
 
 export interface VideoJobOptions {
   input: string;
@@ -257,11 +258,7 @@ function rateParts(text: string): { num: number; den: number } {
 export async function processVideo(options: VideoJobOptions): Promise<VideoJobResult> {
   const started = performance.now();
   const progress = options.onProgress ?? (() => {});
-  const ffmpeg = findTool("ffmpeg");
-  const ffprobe = findTool("ffprobe");
-  if (!ffmpeg || !ffprobe) {
-    throw new Error("ffmpeg and ffprobe are required for video jobs (install with `winget install Gyan.FFmpeg` or set FFMPEG_PATH / FFPROBE_PATH)");
-  }
+  const { ffmpeg, ffprobe } = requireFfmpegTools("video jobs");
   const requestedEncode = options.encode ?? DEFAULT_ENCODE_SETTINGS;
   const info = probeVideo(ffprobe, options.input, ffmpeg);
   // Every codec here encodes 4:2:0 (yuv420p / NVENC NV12), which requires even
@@ -322,7 +319,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
           enc: { fpsNum: num, fpsDen: den, codec: nrNative.codec, cq: encode.quality, ordinal: cudaOrdinal },
           totalFrames: info.frames, guide, onProgress: progress, signal: options.signal, onFinishing: options.onFinishing,
         });
-        if (r.frames === 0) throw new Error("No frames were decoded from the input. The file may be empty, corrupt, or not a video ffmpeg can read.");
+        if (r.frames === 0) throw new NoFramesDecodedError();
         progress(1, `encoded ${r.frames} frames to ${output}${r.sceneCuts ? ` (${r.sceneCuts} scene cuts reset history)` : ""}`);
         return { output, width: target.width, height: target.height, fps: info.fps, frames: r.frames, sceneCuts: r.sceneCuts, engine: options.engine, ms: Math.round(performance.now() - started) };
       } catch (error) {
@@ -459,8 +456,8 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
       const [decodeExit, encodeExit] = await Promise.all([decoder.exited, encoder.exited]);
       const decodeErr = (await new Response(decoder.stderr).text()).trim();
       const encodeErr = (await new Response(encoder.stderr).text()).trim();
-      if (decodeExit !== 0) throw new Error(`ffmpeg decode failed (${decodeExit}): ${decodeErr}`);
-      if (encodeExit !== 0) throw new Error(`ffmpeg encode failed (${encodeExit}): ${encodeErr}`);
+      if (decodeExit !== 0) throw new Error(ffmpegFailedMessage("decode", decodeExit, decodeErr));
+      if (encodeExit !== 0) throw new Error(ffmpegFailedMessage("encode", encodeExit, encodeErr));
     }
   } catch (error) {
     // The threaded orchestrator reports its count on the error; the rawvideo loop counted here.
@@ -471,7 +468,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
     engine.close();
     session.close();
   }
-  if (frames === 0) throw new Error("No frames were decoded from the input. The file may be empty, corrupt, or not a video ffmpeg can read.");
+  if (frames === 0) throw new NoFramesDecodedError();
   progress(1, `encoded ${frames} frames to ${output}${sceneCuts ? ` (${sceneCuts} scene cuts reset history)` : ""}`);
   return { output, width: outWidth, height: outHeight, fps: info.fps, frames, sceneCuts, engine: options.engine, ms: Math.round(performance.now() - started) };
 }

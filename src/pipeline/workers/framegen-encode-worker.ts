@@ -10,6 +10,7 @@
  * as SharedArrayBuffer-backed RGBA, so posting them costs nothing; display
  * order holds because every request is appended to a single promise chain.
  */
+import { ffmpegFailedMessage } from "../ffmpeg-failure.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "../framegen-plan.ts";
 import { NvencEncoder, probeNvencCaps, type NvencSdkCodec } from "../nvenc.ts";
 import { type AbortRequest, answerAbort } from "../worker-abort.ts";
@@ -106,7 +107,7 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
         enc?.close();
         enc = null;
         if (code !== 0) {
-          fail(`ffmpeg encode failed (${code}): ${stderrText.trim()}`);
+          fail(ffmpegFailedMessage("encode", code, stderrText));
           return;
         }
         stopped = true;

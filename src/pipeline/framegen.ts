@@ -26,6 +26,7 @@ import { DlssgSession, probeDlssg } from "./dlssg.ts";
 import { motionFieldBytes } from "./dlssg-protocol.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
 import { decodeArgv } from "./ffmpeg-args.ts";
+import { ffmpegFailedMessage, NoFramesDecodedError } from "./ffmpeg-failure.ts";
 import { EncodeSink, buildFrameGenEncodeArgs } from "./framegen-encode-sink.ts";
 import { noFramesGeneratedMessage } from "./framegen-host-messages.ts";
 import { FrameReader } from "./frame-reader.ts";
@@ -45,7 +46,7 @@ import {
 } from "./framegen-plan.ts";
 import { parseRational, ratDiv, ratMul, ratToNumber, rational } from "./rational.ts";
 import { evenSize } from "./resize.ts";
-import { findTool } from "./tools.ts";
+import { requireFfmpegTools } from "./tools.ts";
 import { probeVideo } from "./video.ts";
 import { ABORT_TIMEOUT_MS } from "./worker-abort.ts";
 
@@ -144,26 +145,13 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
   }
 }
 
-interface FrameGenTools {
-  ffmpeg: string;
-  ffprobe: string;
-}
-
-function frameGenTools(): FrameGenTools {
-  const ffmpeg = findTool("ffmpeg");
-  const ffprobe = findTool("ffprobe");
-  if (!ffmpeg || !ffprobe)
-    throw new Error("ffmpeg and ffprobe are required for frame generation (install with `winget install Gyan.FFmpeg` or set FFMPEG_PATH / FFPROBE_PATH).");
-  return { ffmpeg, ffprobe };
-}
-
 /** A frame after its stage's guide worker ran: what the native evaluation needs. */
 async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenResult> {
   const started = performance.now();
   const progress = options.onProgress ?? (() => {});
   // Before the host probe, which starts a GPU process of up to PROBE_TIMEOUT_MS, and again after it: the probe does not watch the signal.
   throwIfAborted(options.signal);
-  const { ffmpeg, ffprobe } = frameGenTools();
+  const { ffmpeg, ffprobe } = requireFfmpegTools("frame generation");
 
   const caps = await probeDlssg(options.runtimeDir);
   throwIfAborted(options.signal);
@@ -332,7 +320,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
       const parts = Object.entries(run.busy).sort(([a], [b]) => a.localeCompare(b)).map(([name, ms]) => `${name} ${(ms / 1000).toFixed(1)}`);
       progress(0.97, `pipeline busy (s) over ${wall.toFixed(1)} s wall: ${parts.join(", ")}`);
     }
-    if (inputFrames === 0) throw new Error("No frames were decoded from the input. The file may be empty, corrupt, or not a video ffmpeg can read.");
+    if (inputFrames === 0) throw new NoFramesDecodedError();
     // Clips shorter than the probe window still must not pass off a duplicate-frame resample as generation.
     if (expectsGeneration && stages[0]!.intervals >= 1 && noneGenerated()) throw new FrameGenDisabledError(noFramesGeneratedMessage(plan, { disabledFrames: stages[0]?.session.disabledFrames ?? 0, hagsEnabled: caps.hagsEnabled }), plan);
     // Not before the checks above: a FrameGenDisabledError from them makes an
@@ -355,7 +343,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
 
   const decodeExit = await decoder.exited;
   await decodeErrDrained;
-  if (decodeExit !== 0) throw new Error(`ffmpeg decode failed (${decodeExit}): ${decodeErrText.trim()}`);
+  if (decodeExit !== 0) throw new Error(ffmpegFailedMessage("decode", decodeExit, decodeErrText));
 
   progress(0.98, "verifying output");
   // writer.outputCount: fixed by endAt() from the decoded count, so it is the

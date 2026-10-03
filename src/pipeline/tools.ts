@@ -37,6 +37,16 @@ export function findTool(name: string): string | null {
   return null;
 }
 
+/** ffmpeg and ffprobe, or an error that names the job type that needs them and how to supply them. */
+export function requireFfmpegTools(purpose: string): { ffmpeg: string; ffprobe: string } {
+  const ffmpeg = findTool("ffmpeg");
+  const ffprobe = findTool("ffprobe");
+  if (!ffmpeg || !ffprobe) {
+    throw new Error(`ffmpeg and ffprobe are required for ${purpose} (install with \`winget install Gyan.FFmpeg\` or set FFMPEG_PATH / FFPROBE_PATH).`);
+  }
+  return { ffmpeg, ffprobe };
+}
+
 function versionOf(path: string | null): string | null {
   if (!path) return null;
   try {
