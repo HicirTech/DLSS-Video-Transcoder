@@ -86,7 +86,7 @@ export function probeVideo(ffprobe: string, input: string, ffmpeg?: string): Vid
   const decoded = decodedFrameSize(ffmpeg, input);
   if (!decoded || (decoded.width === info.width && decoded.height === info.height)) return info;
   // The decoder disagreed with the angle. It is the one feeding the pipeline,
-  // so it wins; predicting its threshold is what caused the shear.
+  // so its output size wins over one predicted from the rotation.
   return { ...info, width: decoded.width, height: decoded.height };
 }
 
