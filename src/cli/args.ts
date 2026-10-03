@@ -32,10 +32,8 @@ interface NumberOptionSpec {
 }
 
 /**
- * Reads a numeric option, rejecting anything that is not a number in range
- * instead of letting NaN reach the runtime. `--factor abc` used to snap
- * silently to 2x, and out-of-range neural-rendering values were passed straight
- * to the DLL.
+ * Reads a numeric option. Anything that is not a number in range is a usage
+ * error, so NaN and out-of-range values never reach the runtime.
  */
 export function numberOption(args: string[], name: string, spec: NumberOptionSpec): number {
   const raw = option(args, name);
@@ -121,14 +119,12 @@ function isFlagToken(token: string): boolean {
  * `sr in.png --factor 3` would be read as the output path.
  *
  * An undeclared flag is rejected rather than ignored, single dash included:
- * silently skipping it left its value token to be captured as a path, so
- * `fg movie.mp4 --adapter 0` wrote to a file named `0` and
- * `sr in.png -factor 3` wrote one named `-factor`, at the default 2x.
+ * skipping it would leave its value token to be read as the output path
+ * (`fg movie.mp4 --adapter 0` would write a file named `0`).
  *
- * A flag whose value is missing, blank or another flag is a usage error rather
- * than a silent default: `fg in.mp4 --fps`, or `--fps "$Unset"` where the shell
- * drops the argument or passes it empty, used to run the whole job at the
- * default rate and exit 0.
+ * A flag whose value is missing, blank or another flag is a usage error, never
+ * a default: `fg in.mp4 --fps`, or `--fps "$Unset"` where the shell drops the
+ * argument or passes it empty, must not run the job at the default rate.
  */
 export function positionalArgs(args: string[], spec: CommandSpec): string[] {
   const valued = valueFlagNames(spec);
