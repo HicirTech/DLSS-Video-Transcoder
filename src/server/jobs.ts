@@ -2,12 +2,11 @@
  * In-memory job queue. One job runs at a time (one GPU), each in its own
  * worker so the HTTP server never blocks on native calls.
  */
-import type { JobRequest, JobStatus, WsEvent } from "./api-types.ts";
+import { CANCELLED_MESSAGE, isTerminalState, JOB_LOG_LIMIT, type JobRequest, type JobStatus, type WsEvent } from "./api-types.ts";
 import { HOST_PROCESS_NAME } from "../pipeline/dlssg-host-launch.ts";
 import type { CancelMessage, RunMessage, WorkerMessage } from "../pipeline/worker.ts";
 import { ABORT_TIMEOUT_MS } from "../pipeline/worker-abort.ts";
 
-const LOG_LIMIT = 400;
 const MAX_JOBS = 200;
 /**
  * How long a running job gets to stop on its own after a cancel before its
@@ -30,7 +29,6 @@ const CANCEL_GRACE_MS = ABORT_TIMEOUT_MS + 3000;
  */
 const FINISHING_GRACE_MS = 60_000;
 
-const CANCELLED_MESSAGE = "cancelled by user";
 const CANCELLING_MESSAGE = "cancelling";
 const TOO_LATE_MESSAGE = "finishing: the cancel arrived after the last frame, so the job completes and keeps its output";
 
@@ -105,10 +103,7 @@ export class JobManager {
   /** Keep history (and memory) bounded: drop the oldest finished jobs beyond MAX_JOBS. */
   private evict(): void {
     while (this.order.length > MAX_JOBS) {
-      const idx = this.order.findIndex((id) => {
-        const s = this.entries.get(id)!.status.state;
-        return s === "done" || s === "failed" || s === "cancelled";
-      });
+      const idx = this.order.findIndex((id) => isTerminalState(this.entries.get(id)!.status.state));
       if (idx < 0) break; // nothing evictable (only queued/running remain)
       const [removed] = this.order.splice(idx, 1);
       this.entries.delete(removed!);
@@ -222,7 +217,7 @@ export class JobManager {
       }
       case "log":
         status.log.push(message.line);
-        if (status.log.length > LOG_LIMIT) status.log.splice(0, status.log.length - LOG_LIMIT);
+        if (status.log.length > JOB_LOG_LIMIT) status.log.splice(0, status.log.length - JOB_LOG_LIMIT);
         this.options.broadcast({ type: "log", jobId: status.id, line: message.line });
         break;
       case "done":

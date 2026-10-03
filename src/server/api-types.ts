@@ -4,13 +4,13 @@
  * HTTP endpoints (all JSON unless noted):
  *   GET  /api/probe                 -> ProbeReport      (runs the hardware / runtime probe, can take a few seconds)
  *   GET  /api/runtime               -> ProbeReport["runtime"]
- *   GET  /api/settings/defaults     -> { settings: NrSettings, scale: ScaleSettings, encode: EncodeSettings }
+ *   GET  /api/settings/defaults     -> SettingsDefaults
  *   GET  /api/jobs                  -> JobStatus[]
  *   POST /api/jobs   body JobRequest -> JobStatus
  *   GET  /api/jobs/:id              -> JobStatus
  *   POST /api/jobs/:id/cancel       -> JobStatus
  *   GET  /api/file?path=<abs path>  -> raw file bytes (previews of inputs/outputs; local paths only)
- *   POST /api/upload  multipart/form-data 'file' -> { path, name, size } (saved server-side; the path is usable as a job input)
+ *   POST /api/upload  multipart/form-data 'file' -> UploadResult (saved server-side; the path is usable as a job input)
  *   GET  /api/tools                 -> ToolsReport      (ffmpeg / ffprobe availability)
  *   GET  /api/catalog               -> RuntimeManifest  (installed DLSS runtime DLL versions; see JobRequest.dllDir)
  * WebSocket:
@@ -206,7 +206,25 @@ export interface JobRequest {
   adapterUuid?: string;
 }
 
-export type JobState = "queued" | "running" | "done" | "failed" | "cancelled";
+/** States in which a job still occupies the queue or the GPU, so a cancel can still reach it. */
+export const ACTIVE_JOB_STATES = ["queued", "running"] as const;
+/** States a job never leaves. */
+export const TERMINAL_JOB_STATES = ["done", "failed", "cancelled"] as const;
+export type JobState = (typeof ACTIVE_JOB_STATES)[number] | (typeof TERMINAL_JOB_STATES)[number];
+
+export function isActiveState(state: JobState): boolean {
+  return (ACTIVE_JOB_STATES as readonly JobState[]).includes(state);
+}
+
+export function isTerminalState(state: JobState): boolean {
+  return (TERMINAL_JOB_STATES as readonly JobState[]).includes(state);
+}
+
+/** JobStatus.message of a job that ended "cancelled". */
+export const CANCELLED_MESSAGE = "cancelled by user";
+
+/** Most recent log lines kept per job: the server trims to it and so does the web feed. */
+export const JOB_LOG_LIMIT = 400;
 
 /**
  * Whether a cancel was sent to a running job and what it did; kept after the
@@ -235,8 +253,22 @@ export interface JobStatus {
   startedAt: string | null;
   finishedAt: string | null;
   error: string | null;
-  /** Most recent log lines (bounded). */
+  /** Most recent log lines, at most JOB_LOG_LIMIT. */
   log: string[];
+}
+
+/** Response of GET /api/settings/defaults. */
+export interface SettingsDefaults {
+  settings: NrSettings;
+  scale: ScaleSettings;
+  encode: EncodeSettings;
+}
+
+/** Response of POST /api/upload: where the server stored the file, and what the client sent. */
+export interface UploadResult {
+  path: string;
+  name: string;
+  size: number;
 }
 
 export interface ProbeAdapter {

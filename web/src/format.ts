@@ -1,4 +1,4 @@
-import type { JobStatus } from "../../src/server/api-types";
+import { isActiveState, type JobStatus } from "../../src/server/api-types";
 
 /** Last path segment, accepting both Windows and POSIX separators. */
 export function baseName(path: string): string {
@@ -55,7 +55,7 @@ export function jobElapsedMs(job: JobStatus, now: number): number | null {
 }
 
 export function isJobActive(job: JobStatus): boolean {
-  return job.state === "queued" || job.state === "running";
+  return isActiveState(job.state);
 }
 
 export function sortJobsNewestFirst(jobs: JobStatus[]): JobStatus[] {

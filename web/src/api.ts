@@ -1,24 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
-import type {
-  EncodeSettings,
-  JobRequest,
-  JobStatus,
-  NrSettings,
-  ProbeReport,
-  ScaleSettings,
-  ToolsReport,
-  WsEvent,
+import {
+  JOB_LOG_LIMIT,
+  type JobRequest,
+  type JobStatus,
+  type ProbeReport,
+  type SettingsDefaults,
+  type ToolsReport,
+  type UploadResult,
+  type WsEvent,
 } from "../../src/server/api-types";
 import type { RuntimeManifest } from "../../src/ngx/runtime-catalog";
 import { ApiError, errorMessage } from "./errors";
 import { createMockBackend } from "./mock";
-
-/** Response shape of GET /api/settings/defaults. */
-export interface SettingsDefaults {
-  settings: NrSettings;
-  scale: ScaleSettings;
-  encode: EncodeSettings;
-}
 
 /** One method per endpoint in src/server/api-types.ts. */
 export interface ApiClient {
@@ -33,7 +26,7 @@ export interface ApiClient {
   createJob(request: JobRequest): Promise<JobStatus>;
   cancelJob(id: string): Promise<JobStatus>;
   /** Uploads a browser file to the server; resolves to the saved absolute path to use as a job input. */
-  uploadFile(file: File): Promise<{ path: string; name: string; size: number }>;
+  uploadFile(file: File): Promise<UploadResult>;
   /** URL that serves the raw bytes of a local file (input / output previews). */
   fileUrl(path: string): string;
 }
@@ -139,7 +132,7 @@ function createHttpClient(): ApiClient {
     uploadFile: (file) => {
       const form = new FormData();
       form.append("file", file);
-      return request<{ path: string; name: string; size: number }>("/api/upload", { method: "POST", body: form });
+      return request<UploadResult>("/api/upload", { method: "POST", body: form });
     },
     fileUrl: (path) => `/api/file?path=${encodeURIComponent(path)}`,
   };
@@ -204,9 +197,6 @@ const mockBackend = isMockMode() ? createMockBackend() : null;
 export const api: ApiClient = mockBackend ? mockBackend.client : createHttpClient();
 const jobEvents: JobEventSource = mockBackend ? mockBackend.events : createWebSocketSource();
 
-/** Lines kept per job when the server streams `log` events. */
-export const MAX_LOG_LINES = 400;
-
 /** Merges one WsEvent into a job list, returning a new array when something changed. */
 export function applyWsEvent(jobs: JobStatus[], event: WsEvent): JobStatus[] {
   switch (event.type) {
@@ -224,7 +214,7 @@ export function applyWsEvent(jobs: JobStatus[], event: WsEvent): JobStatus[] {
       if (index < 0) return jobs;
       const job = jobs[index];
       const log = [...job.log, event.line];
-      if (log.length > MAX_LOG_LINES) log.splice(0, log.length - MAX_LOG_LINES);
+      if (log.length > JOB_LOG_LIMIT) log.splice(0, log.length - JOB_LOG_LIMIT);
       const next = jobs.slice();
       next[index] = { ...job, log };
       return next;

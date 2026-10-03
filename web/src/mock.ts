@@ -1,7 +1,7 @@
 import type { RuntimeManifest } from "../../src/ngx/runtime-catalog";
-import type { JobRequest, JobStatus, ProbeReport, ToolsReport, WsEvent } from "../../src/server/api-types";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS } from "../../src/server/api-types";
-import type { ApiClient, JobEventSource, SettingsDefaults } from "./api";
+import type { JobRequest, JobStatus, ProbeReport, SettingsDefaults, ToolsReport, UploadResult, WsEvent } from "../../src/server/api-types";
+import { CANCELLED_MESSAGE, DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS } from "../../src/server/api-types";
+import type { ApiClient, JobEventSource } from "./api";
 import { ApiError } from "./errors";
 import { validateJobRequest } from "./mock-validate";
 
@@ -251,7 +251,7 @@ export function mockCatalog(): RuntimeManifest {
 }
 
 /** What POST /api/upload answers. The real server renames the file; the mock only has to be shaped like it. */
-export function mockUpload(file: File): { path: string; name: string; size: number } {
+export function mockUpload(file: File): UploadResult {
   return { path: `C:\\mock\\uploads\\${file.name}`, name: file.name, size: file.size };
 }
 
@@ -383,7 +383,7 @@ export function createSeedJobs(now: number = Date.now()): JobStatus[] {
       log: [
         "[queue] image job accepted (engine=nr, motion=none, scale=size)",
         "[nr] warm-up evaluation 2/4",
-        "[job] cancelled by user",
+        `[job] ${CANCELLED_MESSAGE}`,
       ],
     },
   ];
@@ -488,7 +488,7 @@ export class MockJobEngine {
     job.state = "cancelled";
     job.finishedAt = timestamp();
     job.message = "Cancelled by user";
-    this.appendLog(job, "[job] cancelled by user");
+    this.appendLog(job, `[job] ${CANCELLED_MESSAGE}`);
     this.emitJob(job);
   }
 

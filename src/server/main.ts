@@ -13,6 +13,8 @@ import {
   DEFAULT_ENCODE_SETTINGS,
   DEFAULT_NR_SETTINGS,
   DEFAULT_SCALE_SETTINGS,
+  type SettingsDefaults,
+  type UploadResult,
   type WsEvent,
 } from "./api-types.ts";
 import { JobManager } from "./jobs.ts";
@@ -24,6 +26,7 @@ const APP_DATA = process.env.NR_APPDATA ?? join(ROOT, "logs");
 const UPLOADS_DIR = join(APP_DATA, "uploads");
 mkdirSync(UPLOADS_DIR, { recursive: true });
 const PORT = Number(process.env.PORT ?? 4080);
+const SETTINGS_DEFAULTS: SettingsDefaults = { settings: DEFAULT_NR_SETTINGS, scale: DEFAULT_SCALE_SETTINGS, encode: DEFAULT_ENCODE_SETTINGS };
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8" } });
@@ -56,7 +59,7 @@ const server = Bun.serve({
     "/api/runtime": async () => json((await runProbe({ runtimeDir: RUNTIME_DIR, appDataPath: APP_DATA, requirements: false })).runtime),
     "/api/tools": () => json(toolsReport()),
     "/api/catalog": () => json(buildRuntimeCatalog(RUNTIME_DIR)),
-    "/api/settings/defaults": () => json({ settings: DEFAULT_NR_SETTINGS, scale: DEFAULT_SCALE_SETTINGS, encode: DEFAULT_ENCODE_SETTINGS }),
+    "/api/settings/defaults": () => json(SETTINGS_DEFAULTS),
     "/api/jobs": {
       GET: () => json(jobs.list()),
       POST: async (req) => {
@@ -124,7 +127,8 @@ const server = Bun.serve({
         const name = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}${ext}`;
         const dest = join(UPLOADS_DIR, name);
         await Bun.write(dest, file);
-        return json({ path: dest, name: file.name, size: file.size }, 201);
+        const uploaded: UploadResult = { path: dest, name: file.name, size: file.size };
+        return json(uploaded, 201);
       },
     },
     "/ws": (req, srv) => (srv.upgrade(req) ? undefined : new Response("upgrade required", { status: 400 })),
