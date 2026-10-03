@@ -1,17 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { deflateSync as nodeDeflate } from "node:zlib";
-import {
-  PNG_SIGNATURE,
-  PngError,
-  crc32,
-  decodePng,
-  encodePng,
-  isPng,
-  type RgbaImage,
-} from "../src/codec/png.ts";
+import { PNG_SIGNATURE, isPng } from "../src/codec/png/chunks.ts";
+import { crc32 } from "../src/codec/png/crc32.ts";
+import { decodePng } from "../src/codec/png/decode.ts";
+import { encodePng } from "../src/codec/png/encode.ts";
+import { PngError, type RgbaImage } from "../src/codec/png/types.ts";
 
 // ===========================================================================
-// Test-side helpers. Deliberately independent of src/codec/png.ts: own CRC table, DataView-based
+// Test-side helpers. Deliberately independent of src/codec/png/: own CRC table, DataView-based
 // big-endian writes, the encoder-side filter definitions from the specification, and an Adam7 pass
 // builder, so that the two implementations check each other.
 // ===========================================================================
