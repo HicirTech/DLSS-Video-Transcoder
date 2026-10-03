@@ -4,13 +4,6 @@
  * that places generated and real frames onto the exact target clock. Pure
  * rational math, no GPU, so every rule here is unit-testable.
  *
- * Why a nearest-timestamp writer rather than "multiply the frame rate": the
- * host legitimately emits no in-between frames across scene cuts and resets,
- * and none at all when the runtime disables generation. Taking the output frame
- * count from the DECODED duration and filling each instant with the nearest
- * available frame keeps the output the same length as the source whatever came
- * back, so audio never drifts and the video can never play too fast.
- *
  * Ported from the reference project's frame_interpolation/scheduler.py,
  * models.py (FPS table) and the NearestTimestampWriter in processor.py.
  */
@@ -248,6 +241,14 @@ export interface TimedFrame {
  * ties alternating early/late so no persistent bias accumulates. Exactly
  * outputCount frames are emitted; finish() extends the final real frame over
  * the tail rather than asking a synthesiser to extrapolate past known motion.
+ *
+ * Why the target clock rather than "source rate x multiplier": the host
+ * legitimately emits no in-between frames across scene cuts and resets, and
+ * none at all when the runtime disables generation. The output length is fixed
+ * from the DECODED duration (endAt), never from a container frame count or from
+ * how many frames the host returned, and each instant takes the nearest
+ * available frame, so the output is as long as the source whatever was
+ * synthesised: audio never drifts and the video can never play too fast.
  */
 export class NearestTimestampWriter {
   nextIndex = 0;
