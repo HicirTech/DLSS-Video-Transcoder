@@ -13,6 +13,7 @@ import {
   SCALE_MODES,
   SETTING_RANGES,
 } from "../../../src/server/api-types";
+import { isRecord } from "../json";
 
 /** Everything the UI persists between sessions. */
 export interface StoredSettings {
@@ -36,10 +37,6 @@ export function defaultSettings(): StoredSettings {
     encode: { ...DEFAULT_ENCODE_SETTINGS },
     adapterUuid: null,
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 /** Copies fields of `candidate` whose JSON type matches the default's; everything else keeps the default. */
