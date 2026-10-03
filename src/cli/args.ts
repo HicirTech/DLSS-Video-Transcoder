@@ -1,7 +1,7 @@
 /** Flag and option readers over argv, and the one structural check argv gets against a command's spec. */
 import { DEFAULT_RUNTIME_DIR } from "../paths.ts";
 import type { CommandSpec } from "./commands.ts";
-import { printHelp } from "./help.ts";
+import { usageError } from "./usage-error.ts";
 
 export function flag(args: string[], name: string): boolean {
   return args.includes(name);
@@ -15,12 +15,6 @@ export function flag(args: string[], name: string): boolean {
 export function option(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
-}
-
-/** Exits with a usage error; every bad-argument path goes through here so the wording stays consistent. */
-function usageError(message: string): never {
-  console.error(`error: ${message}`);
-  process.exit(2);
 }
 
 interface NumberOptionSpec {
@@ -136,11 +130,7 @@ export function positionalArgs(args: string[], spec: CommandSpec): string[] {
       out.push(a);
       continue;
     }
-    if (!known.has(a)) {
-      console.error(`error: unknown option '${a}' for ${spec.name}`);
-      printHelp(spec.name);
-      process.exit(2);
-    }
+    if (!known.has(a)) usageError(`unknown option '${a}' for ${spec.name}`, spec.name);
     if (valued.has(a)) {
       const value = args[i + 1];
       if (value === undefined || isFlagToken(value) || value.trim() === "") throwMissingValue(spec, a, value);

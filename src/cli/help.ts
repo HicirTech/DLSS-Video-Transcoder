@@ -1,5 +1,6 @@
 /** Renders the CLI overview and the per-command help pages from the command table. */
 import { ADAPTER_OPT, COMMANDS, RUNTIME_OPT, type CommandSpec } from "./commands.ts";
+import { usageError } from "./usage-error.ts";
 
 function pad(text: string, width: number): string {
   return text.length >= width ? text : text + " ".repeat(width - text.length);
@@ -51,16 +52,18 @@ function printCommandHelp(spec: CommandSpec): void {
   console.log(lines.join("\n"));
 }
 
-export function printHelp(command?: string): boolean {
-  if (command) {
-    const spec = COMMANDS.find((c) => c.name === command);
-    if (!spec) {
-      console.error(`unknown command '${command}'. Run 'bun run src/cli.ts help' for the list.`);
-      return false;
-    }
-    printCommandHelp(spec);
-    return true;
+/** The usage error for a command name the CLI does not have. */
+export function unknownCommand(name: string): never {
+  usageError(`unknown command '${name}'. Run 'bun run src/cli.ts help' for the list.`);
+}
+
+/** Prints the overview, or one command's page. */
+export function printHelp(command?: string): void {
+  if (!command) {
+    printOverview();
+    return;
   }
-  printOverview();
-  return true;
+  const spec = COMMANDS.find((c) => c.name === command);
+  if (!spec) unknownCommand(command);
+  printCommandHelp(spec);
 }
