@@ -22,6 +22,12 @@ export interface CommandSpec {
   readonly notes?: readonly string[];
 }
 
+/** "0..2": a numeric setting's inclusive range, printed from the SETTING_RANGES entry the CLI and the API both check against. */
+function settingRange(field: keyof typeof SETTING_RANGES): string {
+  const { min, max } = SETTING_RANGES[field];
+  return `${min}..${max}`;
+}
+
 export const RUNTIME_OPT: OptionSpec = { flag: "--runtime DIR", desc: "runtime folder holding the NGX DLLs", def: "<repo>/runtime" };
 export const ADAPTER_OPT: OptionSpec = { flag: "--adapter N", desc: "GPU adapter index as `probe` listed it in this session (DXGI indices can change between runs); the adapter must have a CUDA device. auto = the NVIDIA adapter with the most VRAM that has one", def: "auto" };
 
@@ -78,12 +84,12 @@ export const COMMANDS: readonly CommandSpec[] = [
       { name: "output.png", desc: "destination; defaults to <input>.nr.png next to the input" },
     ],
     options: [
-      { flag: "--intensity F", desc: `overall strength, ${SETTING_RANGES.intensity.min}..${SETTING_RANGES.intensity.max}; the installed ${NR_RUNTIME_MEASURED} stops responding above ${NR_INTENSITY_EFFECTIVE_MAX}, so every value from there up gives the same image`, def: String(DEFAULT_NR_SETTINGS.intensity) },
+      { flag: "--intensity F", desc: `overall strength, ${settingRange("intensity")}; the installed ${NR_RUNTIME_MEASURED} stops responding above ${NR_INTENSITY_EFFECTIVE_MAX}, so every value from there up gives the same image`, def: String(DEFAULT_NR_SETTINGS.intensity) },
       { flag: "--style N", desc: `look style: ${NR_STYLES.map((style) => `${style} = ${NR_STYLE_LABELS[style]}`).join(", ")} (strong, visible effect)`, def: String(DEFAULT_NR_SETTINGS.style) },
       { flag: "--preset ID", desc: `NR model preset hint ${NR_PRESETS[0]}..${NR_PRESETS.at(-1)}; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.preset) },
-      { flag: "--local-tone F", desc: "local tone-mapping strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localTone) },
-      { flag: "--local-structure F", desc: "local detail / structure strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localStructure) },
-      { flag: "--skin-structure F", desc: `detail strength on skin regions; -1 = runtime default, typical 0..2; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.skinStructure) },
+      { flag: "--local-tone F", desc: `local tone-mapping strength (float), ${settingRange("localTone")}; 1 = neutral`, def: String(DEFAULT_NR_SETTINGS.localTone) },
+      { flag: "--local-structure F", desc: `local detail / structure strength (float), ${settingRange("localStructure")}; 1 = neutral`, def: String(DEFAULT_NR_SETTINGS.localStructure) },
+      { flag: "--skin-structure F", desc: `detail strength on skin regions (float), ${settingRange("skinStructure")}; ${DEFAULT_NR_SETTINGS.skinStructure} = runtime default; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.skinStructure) },
       { flag: "--auto-mask", desc: "let the runtime derive the processed-region mask instead of the whole frame", def: "off" },
       { flag: "--ui-correction", desc: `protect overlays / text / sharp UI edges from being re-rendered; ${NR_IGNORED_NOTE}`, def: "off" },
       RUNTIME_OPT,
@@ -103,7 +109,7 @@ export const COMMANDS: readonly CommandSpec[] = [
       { flag: "--multiplier N", desc: "output/input frame ratio when --fps is not given, a whole number from 1 to 16 (2 = double fps)", def: "2" },
       { flag: "--engine MODE", desc: `auto = one native session when output/source is an exact integer from 2 up to ${FRAME_GEN_NATIVE_MAXIMUM} (3x and above only with HAGS on), else a cascade of 2x stages; when the runtime disables every interval of a native 3x+ session, auto re-runs it as a cascade; native or cascade force that path`, def: "auto" },
       { flag: "--codec NAME", desc: `encoder: ${ENCODE_CODECS.filter((codec) => !isNvenc(codec)).join(", ")}, or ${FFMPEG_NVENC_ENCODERS.join("/")} for GPU`, def: "GPU NVENC when available, else libx264" },
-      { flag: "--quality N", desc: `encoder quality (CRF for CPU, CQ for NVENC), ${SETTING_RANGES.quality.min}..${SETTING_RANGES.quality.max} (lower = better)`, def: "20" },
+      { flag: "--quality N", desc: `encoder quality (CRF for CPU, CQ for NVENC), ${settingRange("quality")} (lower = better)`, def: "20" },
       RUNTIME_OPT,
     ],
     notes: ["A target at or below the source frame rate (--multiplier 1, or a lower --fps) generates no frames: the video is only resampled to it."],
