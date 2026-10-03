@@ -14,6 +14,7 @@ import {
   SCALE_MODES,
   SETTING_RANGES,
   TERMINAL_JOB_STATES,
+  clampToRange,
   isActiveState,
   isTerminalState,
 } from "../src/server/api-types.ts";
@@ -71,5 +72,21 @@ describe("job states", () => {
   test("a job that is still queued or running is active, and one that has ended is not", () => {
     for (const state of ["queued", "running"] as const) expect(isActiveState(state), state).toBe(true);
     for (const state of ["done", "failed", "cancelled"] as const) expect(isActiveState(state), state).toBe(false);
+  });
+});
+
+describe("clampToRange", () => {
+  test("holds a value inside the range of its setting", () => {
+    expect(clampToRange("quality", -3)).toBe(0);
+    expect(clampToRange("quality", 99)).toBe(51);
+    expect(clampToRange("quality", 18)).toBe(18);
+    expect(clampToRange("skinStructure", -5)).toBe(-1);
+    expect(clampToRange("factor", 100)).toBe(8);
+  });
+
+  test("rounds a whole-number setting first and leaves a fractional one alone", () => {
+    expect(clampToRange("quality", 20.6)).toBe(21);
+    expect(clampToRange("quality", 51.4)).toBe(51);
+    expect(clampToRange("factor", 1.375)).toBe(1.375);
   });
 });

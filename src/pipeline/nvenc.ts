@@ -15,6 +15,7 @@ import { dlopen, FFIType, ptr } from "bun:ffi";
 import { callableAt, type OwnedCallable, type Signature } from "../native/com.ts";
 import { cudaCreateContext, cudaFree, cudaMalloc, cudaMemcpyHtoD } from "../native/cuda.ts";
 import { copyFromNative, guid, OutU64, readCString } from "../native/memory.ts";
+import { clampToRange } from "../server/api-types.ts";
 
 const OK = 0;
 
@@ -59,7 +60,9 @@ const PRESET_GUID = {
   p6: guid("{8E75C279-6299-4AB6-8302-0B215A335CF5}"),
   p7: guid("{84848C12-6F71-4C13-931B-53E283F57974}"),
 } as const;
-export type NvencPreset = keyof typeof PRESET_GUID;
+type NvencPreset = keyof typeof PRESET_GUID;
+/** The preset every NVENC encode here runs with, in process (NvencEncoder) and through ffmpeg's -preset alike. */
+export const NVENC_PRESET = "p5" satisfies NvencPreset;
 
 // -- Enums -------------------------------------------------------------------
 const DEVICE_TYPE_CUDA = 1;
@@ -140,6 +143,24 @@ function statusName(st: number): string {
 }
 
 /**
+ * nvEncOpenEncodeSessionEx on a CUDA context. Returns the raw status, because the probe turns a
+ * failure into a report and the encoder into an exception.
+ */
+function openEncodeSession(context: bigint): { status: number; session: bigint } {
+  // NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS (1552B): version@0, deviceType@4,
+  // device@8 (CUcontext), reserved@16, apiVersion@24.
+  const params = new Uint8Array(1552);
+  const view = new DataView(params.buffer);
+  view.setUint32(0, V.OPEN_SESSION_EX, true);
+  view.setUint32(4, DEVICE_TYPE_CUDA, true);
+  view.setBigUint64(8, context, true);
+  view.setUint32(24, NVENCAPI_VERSION >>> 0, true);
+  const sessionOut = new OutU64();
+  const status = fn(FN.openEncodeSessionEx, { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 })(params, sessionOut.bytes) as number;
+  return { status, session: sessionOut.value };
+}
+
+/**
  * Highest NVENC API version the installed driver supports, or null if the driver
  * refuses the query. The DLL returns it packed as (major << 4) | minor, so 13.1
  * comes back as 209.
@@ -176,20 +197,9 @@ export function probeNvencCaps(ordinal: number): NvencCaps {
   const ver = nvencMaxSupportedVersion();
   let encoder = 0n;
   try {
-    const ctx = cudaCreateContext(ordinal);
-
-    // NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS (1552B): version@0, deviceType@4,
-    // device@8 (CUcontext), reserved@16, apiVersion@24.
-    const open = new Uint8Array(1552);
-    const odv = new DataView(open.buffer);
-    odv.setUint32(0, V.OPEN_SESSION_EX, true);
-    odv.setUint32(4, DEVICE_TYPE_CUDA, true);
-    odv.setBigUint64(8, ctx, true);
-    odv.setUint32(24, NVENCAPI_VERSION >>> 0, true);
-    const encOut = new OutU64();
-    const st = fn(FN.openEncodeSessionEx, { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 })(open, encOut.bytes) as number;
-    if (st !== OK) return { available: false, detail: `nvEncOpenEncodeSessionEx failed: NVENC ${statusName(st)}`, driverMajor: ver?.major, driverMinor: ver?.minor };
-    encoder = encOut.value;
+    const opened = openEncodeSession(cudaCreateContext(ordinal));
+    if (opened.status !== OK) return { available: false, detail: `nvEncOpenEncodeSessionEx failed: NVENC ${statusName(opened.status)}`, driverMajor: ver?.major, driverMinor: ver?.minor };
+    encoder = opened.session;
 
     const getCaps = fn(FN.getEncodeCaps, { args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 });
     const queryCap = (cap: number): number | undefined => {
@@ -234,8 +244,7 @@ export interface NvencEncoderOptions {
   fpsNum: number;
   fpsDen: number;
   codec?: NvencSdkCodec; // default h264
-  preset?: NvencPreset; // default p4 (balanced)
-  /** Constant-quality target (H.264/HEVC 0..51, lower = better). Default 20. */
+  /** Constant-quality target, lower = better; held inside SETTING_RANGES.quality. Default 20. */
   cq?: number;
   /** CUDA device to encode on: the renderer's, resolved by LUID (GpuSession.cudaOrdinal), never a guess. */
   ordinal: number;
@@ -287,26 +296,16 @@ export class NvencEncoder {
     const width = opts.width;
     const height = opts.height;
     const codec: NvencSdkCodec = opts.codec ?? "h264";
-    const preset: NvencPreset = opts.preset ?? "p4";
-    const cq = Math.max(0, Math.min(51, opts.cq ?? 20));
+    const cq = clampToRange("quality", opts.cq ?? 20);
     const codecGuid = CODEC_GUID[codec];
-    const presetGuid = PRESET_GUID[preset];
+    const presetGuid = PRESET_GUID[NVENC_PRESET];
     // An external pool dictates its own pitch; an owned buffer is tightly packed.
     const pitch = opts.inputs?.[0]?.pitch ?? width * 4;
     const ownsDevice = !opts.inputs;
 
-    const ctx = cudaCreateContext(opts.ordinal);
-
-    // NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS, laid out as in probeNvencCaps().
-    const open = new Uint8Array(1552);
-    const odv = new DataView(open.buffer);
-    odv.setUint32(0, V.OPEN_SESSION_EX, true);
-    odv.setUint32(4, DEVICE_TYPE_CUDA, true);
-    odv.setBigUint64(8, ctx, true);
-    odv.setUint32(24, NVENCAPI_VERSION >>> 0, true);
-    const encOut = new OutU64();
-    ckenc(fn(FN.openEncodeSessionEx, { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 })(open, encOut.bytes), "nvEncOpenEncodeSessionEx", 0n);
-    const enc = encOut.value;
+    const opened = openEncodeSession(cudaCreateContext(opts.ordinal));
+    ckenc(opened.status, "nvEncOpenEncodeSessionEx", 0n);
+    const enc = opened.session;
 
     const lastError = fn(FN.getLastErrorString, { args: [FFIType.u64], returns: FFIType.ptr });
     const check = (st: unknown, what: string): void => ckenc(st, what, enc, lastError);

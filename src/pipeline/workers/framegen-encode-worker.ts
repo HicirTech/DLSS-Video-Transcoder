@@ -60,7 +60,7 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
       let note = "";
       if (m.nvenc && probeNvencCaps(FRAMEGEN_CUDA_DEVICE).available) {
         try {
-          enc = NvencEncoder.open({ ...m.nvenc, ordinal: FRAMEGEN_CUDA_DEVICE, preset: "p5" });
+          enc = NvencEncoder.open({ ...m.nvenc, ordinal: FRAMEGEN_CUDA_DEVICE });
           note = `encode: NVENC ${m.nvenc.codec} (GPU, mux-only pipe, encode thread)`;
         } catch (error) {
           enc = null;
