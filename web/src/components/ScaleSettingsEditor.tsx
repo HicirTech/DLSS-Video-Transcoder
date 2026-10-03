@@ -16,8 +16,6 @@ interface ScaleSettingsEditorProps {
 }
 
 export function ScaleSettingsEditor({ value, onChange }: ScaleSettingsEditorProps) {
-  // useId, not a constant: every tab stays mounted, so two panels can render
-  // this component at once and a fixed id would appear twice in one document.
   const modeLabelId = useId();
   const update = (patch: Partial<ScaleSettings>): void => onChange({ ...value, ...patch });
 
