@@ -9,7 +9,7 @@
 import { RUNTIME_DIR } from "../paths.ts";
 import { registerSrEngine, type Engine, type EngineOptions } from "../pipeline/engine.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
-import { DlssRenderPreset, qualityForFactor } from "./results.ts";
+import { qualityForFactor } from "./results.ts";
 import { DlssSrSession } from "./sr.ts";
 
 class SrEngine implements Engine {
@@ -34,7 +34,6 @@ class SrEngine implements Engine {
       outputWidth: this.outputWidth,
       outputHeight: this.outputHeight,
       quality: qualityForFactor(factor),
-      preset: DlssRenderPreset.L,
       runtimeDir: options.runtimeDir ?? RUNTIME_DIR,
       dllDir: options.dllDir,
       appDataPath: options.appDataPath,
