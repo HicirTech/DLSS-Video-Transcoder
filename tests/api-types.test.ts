@@ -1,7 +1,6 @@
 /** The settings contract the CLI help, the web editors and the API validation all read from api-types.ts. */
 import { describe, expect, test } from "bun:test";
 import {
-  ACTIVE_JOB_STATES,
   DEFAULT_ENCODE_SETTINGS,
   DEFAULT_NR_SETTINGS,
   DEFAULT_SCALE_SETTINGS,
@@ -13,7 +12,7 @@ import {
   NR_STYLE_LABELS,
   SCALE_MODES,
   SETTING_RANGES,
-  TERMINAL_JOB_STATES,
+  type JobState,
   clampToRange,
   isActiveState,
   isTerminalState,
@@ -63,15 +62,15 @@ describe("labels", () => {
 });
 
 describe("job states", () => {
-  test("every state is exactly one of active and terminal", () => {
-    const states = [...ACTIVE_JOB_STATES, ...TERMINAL_JOB_STATES];
-    expect(new Set(states).size).toBe(states.length);
-    for (const state of states) expect(isActiveState(state), state).toBe(!isTerminalState(state));
-  });
+  // Typed as a Record so that a new state fails to compile here until it is classified.
+  const active: Record<JobState, boolean> = { queued: true, running: true, done: false, failed: false, cancelled: false };
 
   test("a job that is still queued or running is active, and one that has ended is not", () => {
-    for (const state of ["queued", "running"] as const) expect(isActiveState(state), state).toBe(true);
-    for (const state of ["done", "failed", "cancelled"] as const) expect(isActiveState(state), state).toBe(false);
+    for (const [state, expected] of Object.entries(active) as Array<[JobState, boolean]>) expect(isActiveState(state), state).toBe(expected);
+  });
+
+  test("every state is exactly one of active and terminal", () => {
+    for (const state of Object.keys(active) as JobState[]) expect(isTerminalState(state), state).toBe(!isActiveState(state));
   });
 });
 

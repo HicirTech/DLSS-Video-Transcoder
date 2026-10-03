@@ -4,7 +4,7 @@
  * the failure messages that both video encode orchestrators share.
  */
 import { describe, expect, test } from "bun:test";
-import { type DecodedFrame, type FrameCounts, connectFrameFlow } from "../src/pipeline/frame-flow.ts";
+import { type FrameCounts, connectFrameFlow } from "../src/pipeline/frame-flow.ts";
 import { RunFailedError, framesWrittenOf } from "../src/pipeline/partial-output.ts";
 import { WorkerPairRun } from "../src/pipeline/worker-pair-run.ts";
 import { FakeWorker } from "./fake-worker.ts";
@@ -13,7 +13,7 @@ const CREDIT_WINDOW = 4;
 
 type Outcome = { value?: FrameCounts; error?: Error };
 
-function start(processFrame: (frame: DecodedFrame, frameNumber: number) => boolean = () => false) {
+function start(processFrame: (frame: { index: number; buf: ArrayBuffer }, frameNumber: number) => boolean = () => false) {
   const decode = new FakeWorker();
   const encode = new FakeWorker();
   const controller = new AbortController();

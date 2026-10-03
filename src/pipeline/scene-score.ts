@@ -50,7 +50,7 @@ export const DUPLICATE_SCENE_SCORE = 0.0005;
  * or measurement is recorded for 40. A job with motion "flow" resets at RESET_SCENE_SCORE (61.2 in these
  * units); a job without it, and the GPU-resident NR path, reset at this, so the two are not interchangeable.
  */
-export const SCENE_CUT_LUMA_DIFF = 40;
+const SCENE_CUT_LUMA_DIFF = 40;
 
 /**
  * Reports a scene cut when a frame's sparse-grid luma differs from the previous frame's by more

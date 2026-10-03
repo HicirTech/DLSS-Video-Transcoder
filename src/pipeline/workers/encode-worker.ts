@@ -25,11 +25,11 @@ export interface EncodeOpen {
 /** One engine-output RGBA frame (its buffer transferred); `index` comes back in the "encoded" ack. */
 export interface EncodeFrame { type: "frame"; index: number; buf: ArrayBuffer }
 /** Every frame is sent: flush NVENC, close the mux and report "done". */
-export interface EncodeFinish { type: "finish" }
+interface EncodeFinish { type: "finish" }
 /** What the main thread sends the encode worker. */
-export type EncodeIn = EncodeOpen | EncodeFrame | EncodeFinish | AbortRequest;
+type EncodeIn = EncodeOpen | EncodeFrame | EncodeFinish | AbortRequest;
 /** What it answers. */
-export type EncodeOut =
+type EncodeOut =
   | { type: "opened" }
   | { type: "encoded"; index: number }
   | { type: "done" }

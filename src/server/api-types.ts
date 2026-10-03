@@ -22,7 +22,7 @@
 // union below is derived from its array, and the order is the order menus and
 // messages list the values in.
 export const JOB_KINDS = ["image", "video"] as const;
-export type JobKind = (typeof JOB_KINDS)[number];
+type JobKind = (typeof JOB_KINDS)[number];
 export const ENGINE_KINDS = ["sr", "nr", "bypass"] as const;
 export type EngineKind = (typeof ENGINE_KINDS)[number];
 export const MOTION_KINDS = ["none", "flow"] as const;
@@ -213,9 +213,9 @@ export interface JobRequest {
 }
 
 /** States in which a job still occupies the queue or the GPU, so a cancel can still reach it. */
-export const ACTIVE_JOB_STATES = ["queued", "running"] as const;
+const ACTIVE_JOB_STATES = ["queued", "running"] as const;
 /** States a job never leaves. */
-export const TERMINAL_JOB_STATES = ["done", "failed", "cancelled"] as const;
+const TERMINAL_JOB_STATES = ["done", "failed", "cancelled"] as const;
 export type JobState = (typeof ACTIVE_JOB_STATES)[number] | (typeof TERMINAL_JOB_STATES)[number];
 
 export function isActiveState(state: JobState): boolean {
