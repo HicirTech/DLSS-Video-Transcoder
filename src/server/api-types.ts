@@ -252,8 +252,11 @@ export interface JobStatus {
   /** 0..1 */
   progress: number;
   message: string;
+  /** Frames finished so far: encoded frames of a video, source frames processed by frame generation, engine passes over an image (its warm-up frames and the kept one). */
   framesDone: number;
+  /** Frames expected; null when the source does not say. Frame generation's is an estimate, so framesDone can end past it. */
   framesTotal: number | null;
+  /** framesDone per second since the job started, its start-up included; null until the first frame count arrives. */
   fps: number | null;
   createdAt: string;
   startedAt: string | null;

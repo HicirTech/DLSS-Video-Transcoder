@@ -4,6 +4,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { HOST_PROCESS_NAME } from "../src/pipeline/dlssg-host-launch.ts";
+import { frameProgress } from "../src/pipeline/frame-progress.ts";
 import { JobManager, type JobManagerOptions } from "../src/server/jobs.ts";
 import type { JobRequest } from "../src/server/api-types.ts";
 import { DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS } from "../src/server/api-types.ts";
@@ -48,7 +49,7 @@ describe("JobManager.cancel", () => {
     const jobs = manager(worker, { cancelGraceMs: 1000 });
     const { id } = jobs.submit(request());
     jobs.cancel(id);
-    worker.reply({ type: "progress", id, fraction: 0.4, message: "frame 40/100" });
+    worker.reply({ type: "progress", id, ...frameProgress(40, 100) });
     const status = jobs.get(id)!;
     expect(status.message).toBe("cancelling");
     expect(status.progress).toBe(0.4);
