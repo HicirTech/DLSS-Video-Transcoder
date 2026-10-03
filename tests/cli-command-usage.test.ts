@@ -4,6 +4,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { DlssRenderPreset, DEFAULT_SR_PRESET } from "../src/ngx/results.ts";
+import { nrCommand } from "../src/cli/nr-command.ts";
 import { dllDirOption, presetKeyOption, srCommand } from "../src/cli/sr-command.ts";
 import { UsageError } from "../src/cli/usage-error.ts";
 import { DEFAULT_RUNTIME_DIR } from "../src/paths.ts";
@@ -37,5 +38,13 @@ describe("sr", () => {
     const error = await usageErrorOf(() => dllDirOption(["--dlss-version", "no-such-version"], DEFAULT_RUNTIME_DIR));
     expect(error.message).toBe("--dlss-version no-such-version matches no installed DLSS SR version; list them with 'bun run src/cli.ts versions'");
     expect(dllDirOption([], DEFAULT_RUNTIME_DIR)).toBeUndefined();
+  });
+});
+
+describe("nr", () => {
+  test("a missing input asks for the nr help page", async () => {
+    const error = await usageErrorOf(() => nrCommand([]));
+    expect(error.message).toBe("missing <input.png>");
+    expect(error.command).toBe("nr");
   });
 });
