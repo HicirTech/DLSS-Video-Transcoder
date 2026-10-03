@@ -15,6 +15,7 @@ import { defaultOutputPath } from "./output-path.ts";
 import { framesWrittenOf, removePartialOutput } from "./partial-output.ts";
 import { ratMul, type Rational, ratToNumber, rational, tryParseRate } from "./rational.ts";
 import { createMotionEstimator } from "./flow.ts";
+import { SceneCutDetector } from "./scene-score.ts";
 import { FrameReader } from "./frame-reader.ts";
 import { probeNvencCaps, type NvencSdkCodec } from "./nvenc.ts";
 import { runThreadedEncode } from "./threaded-encode.ts";
@@ -298,40 +299,6 @@ function rateParts(text: string): { num: number; den: number } {
   return { num: Number(rate.num), den: Number(rate.den) };
 }
 
-/**
- * Cheap scene-cut detector: mean absolute luma difference over a ~48x27 grid of
- * samples, so cost is independent of resolution. A mean above `threshold`
- * (default 40, in 0-255 luma units) counts as a cut and resets DLSS history.
- */
-class SceneCutDetector {
-  private previous: Float32Array | null = null;
-  private readonly samples: Int32Array;
-
-  constructor(width: number, height: number, private readonly threshold = 40) {
-    const stepX = Math.max(1, Math.floor(width / 48));
-    const stepY = Math.max(1, Math.floor(height / 27));
-    const offsets: number[] = [];
-    for (let y = stepY >> 1; y < height; y += stepY) for (let x = stepX >> 1; x < width; x += stepX) offsets.push((y * width + x) * 4);
-    this.samples = Int32Array.from(offsets);
-  }
-
-  isCut(rgba: Uint8Array): boolean {
-    const luma = new Float32Array(this.samples.length);
-    for (let i = 0; i < this.samples.length; i++) {
-      const o = this.samples[i]!;
-      luma[i] = 0.299 * rgba[o]! + 0.587 * rgba[o + 1]! + 0.114 * rgba[o + 2]!;
-    }
-    let cut = false;
-    if (this.previous) {
-      let sum = 0;
-      for (let i = 0; i < luma.length; i++) sum += Math.abs(luma[i]! - this.previous[i]!);
-      cut = sum / luma.length > this.threshold;
-    }
-    this.previous = luma;
-    return cut;
-  }
-}
-
 export async function processVideo(options: VideoJobOptions): Promise<VideoJobResult> {
   const started = performance.now();
   const progress = options.onProgress ?? (() => {});
@@ -396,11 +363,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
         "-map", "0:v:0", "-c:v", "copy", ...aspectArgs(info.displayAspect, target.width, target.height, nrNative.demux), ...audioArgs, ...faststart, output,
       ];
       const cuts = new SceneCutDetector(target.width, target.height);
-      const guide = (rgba: Uint8Array, index: number): { reset: boolean; sceneCut: boolean } => {
-        const cut = index > 0 && cuts.isCut(rgba);
-        if (index === 0) cuts.isCut(rgba); // discarded result; the call is what primes the history
-        return { reset: index === 0 || cut, sceneCut: cut };
-      };
+      const guide = (rgba: Uint8Array, index: number) => cuts.guide(rgba, index);
       progress(0, `encode: NVENC ${nrNative.codec} (GPU-resident async zero-copy pipeline)`);
       const { DlssNrSession } = await import("../ngx/nr-render.ts");
       const nr = DlssNrSession.open(session, { width: target.width, height: target.height, settings: options.settings, runtimeDir: options.runtimeDir!, dllDir: options.dllDir, appDataPath: options.appDataPath });
@@ -480,9 +443,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
       const g = estimator.process(rgba);
       return { reset: index === 0 || g.reset, motion: g.motion, sceneCut: g.reset && index > 0 };
     }
-    const cut = index > 0 && cuts.isCut(rgba);
-    if (index === 0) cuts.isCut(rgba); // discarded result; the call is what primes the history
-    return { reset: index === 0 || cut, motion: null, sceneCut: cut };
+    return { ...cuts.guide(rgba, index), motion: null };
   };
 
   const frameBytes = renderWidth * renderHeight * 4;
