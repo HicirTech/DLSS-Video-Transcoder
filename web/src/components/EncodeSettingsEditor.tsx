@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { FormControl, FormControlLabel, InputLabel, MenuItem, Select, Stack, Switch } from "@mui/material";
-import type { EncodeSettings } from "../../../src/server/api-types";
+import { DEFAULT_ENCODE_SETTINGS, ENCODE_CODECS, ENCODE_CONTAINERS, SETTING_RANGES, type EncodeSettings } from "../../../src/server/api-types";
 import { NumberField } from "./NumberField";
 
 interface EncodeSettingsEditorProps {
@@ -8,14 +8,16 @@ interface EncodeSettingsEditorProps {
   onChange: (next: EncodeSettings) => void;
 }
 
-const CODECS: Array<{ value: EncodeSettings["codec"]; label: string }> = [
-  { value: "h264", label: "H.264 (software)" },
-  { value: "hevc", label: "HEVC / H.265 (software)" },
-  { value: "av1", label: "AV1 (software)" },
-  { value: "h264_nvenc", label: "H.264 (NVIDIA GPU)" },
-  { value: "hevc_nvenc", label: "HEVC / H.265 (NVIDIA GPU)" },
-  { value: "av1_nvenc", label: "AV1 (NVIDIA GPU)" },
-];
+// Record<...>: a codec or container the API accepts without menu words is a build error, not a blank item.
+const CODEC_LABELS: Record<EncodeSettings["codec"], string> = {
+  h264: "H.264 (software)",
+  hevc: "HEVC / H.265 (software)",
+  av1: "AV1 (software)",
+  h264_nvenc: "H.264 (NVIDIA GPU)",
+  hevc_nvenc: "HEVC / H.265 (NVIDIA GPU)",
+  av1_nvenc: "AV1 (NVIDIA GPU)",
+};
+const CONTAINER_LABELS: Record<EncodeSettings["container"], string> = { mp4: "MP4", mkv: "MKV", mov: "MOV" };
 
 export function EncodeSettingsEditor({ value, onChange }: EncodeSettingsEditorProps) {
   // useId, not a constant: every tab stays mounted, so two panels can render
@@ -34,9 +36,9 @@ export function EncodeSettingsEditor({ value, onChange }: EncodeSettingsEditorPr
           value={value.codec}
           onChange={(event) => update({ codec: event.target.value })}
         >
-          {CODECS.map((codec) => (
-            <MenuItem key={codec.value} value={codec.value}>
-              {codec.label}
+          {ENCODE_CODECS.map((codec) => (
+            <MenuItem key={codec} value={codec}>
+              {CODEC_LABELS[codec]}
             </MenuItem>
           ))}
         </Select>
@@ -44,11 +46,9 @@ export function EncodeSettingsEditor({ value, onChange }: EncodeSettingsEditorPr
       <NumberField
         label="Quality (CRF / CQ)"
         value={value.quality}
-        min={0}
-        max={51}
+        {...SETTING_RANGES.quality}
         step={1}
-        integer
-        helperText="0–51, lower = better quality and larger file. Default 18."
+        helperText={`${SETTING_RANGES.quality.min}–${SETTING_RANGES.quality.max}, lower = better quality and larger file. Default ${DEFAULT_ENCODE_SETTINGS.quality}.`}
         sx={{ width: 240 }}
         onChange={(quality) => update({ quality })}
       />
@@ -60,9 +60,11 @@ export function EncodeSettingsEditor({ value, onChange }: EncodeSettingsEditorPr
           value={value.container}
           onChange={(event) => update({ container: event.target.value })}
         >
-          <MenuItem value="mp4">MP4</MenuItem>
-          <MenuItem value="mkv">MKV</MenuItem>
-          <MenuItem value="mov">MOV</MenuItem>
+          {ENCODE_CONTAINERS.map((container) => (
+            <MenuItem key={container} value={container}>
+              {CONTAINER_LABELS[container]}
+            </MenuItem>
+          ))}
         </Select>
       </FormControl>
       <FormControlLabel

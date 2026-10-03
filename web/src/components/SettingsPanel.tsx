@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { Button, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
 import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
-import { FRAME_GEN_GPU_CHOICE, type ProbeReport } from "../../../src/server/api-types";
+import { DEFAULT_NR_SETTINGS, FRAME_GEN_GPU_CHOICE, type ProbeReport, SETTING_RANGES } from "../../../src/server/api-types";
 import { api } from "../api";
 import { errorMessage } from "../errors";
 import { STORAGE_KEY, useSettings } from "../hooks/useSettings";
@@ -92,16 +92,15 @@ export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
           <NumberField
             label="Warm-up frames"
             value={settings.nr.warmupFrames}
-            min={0}
-            max={64}
+            {...SETTING_RANGES.warmupFrames}
             step={1}
-            integer
             sx={{ width: 200 }}
             onChange={(warmupFrames) => setNr({ ...settings.nr, warmupFrames })}
           />
           <Typography variant="caption" color="text.secondary">
             Extra evaluations of the first frame so the temporal state settles before the output is taken. Images use
-            this; videos settle naturally over their first frames. Range 0–64; default 4.
+            this; videos settle naturally over their first frames. Range {SETTING_RANGES.warmupFrames.min}–{SETTING_RANGES.warmupFrames.max}; default{" "}
+            {DEFAULT_NR_SETTINGS.warmupFrames}.
           </Typography>
         </Stack>
       </Section>

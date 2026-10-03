@@ -11,9 +11,10 @@ import { PROBE_ENTRIES, PROBE_INITS, runProbe } from "./ngx/probe.ts";
 import { DlssNrSession } from "./ngx/nr-render.ts";
 import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
-import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLES, type ProbeAdapter, type ProbeOpticalFlow, SETTING_RANGES } from "./server/api-types.ts";
+import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, type ProbeAdapter, type ProbeOpticalFlow, SETTING_RANGES } from "./server/api-types.ts";
 import { DlssRenderPreset, DLSS_RATIO, perfQualityName, qualityForFactor } from "./ngx/results.ts";
 import { processFrameGen } from "./pipeline/framegen.ts";
+import { FFMPEG_NVENC_ENCODERS, isNvenc } from "./pipeline/encode-select.ts";
 import { describeGpu, openGpu } from "./pipeline/gpu.ts";
 import { enhanceStill } from "./pipeline/image.ts";
 import { evenSize } from "./pipeline/resize.ts";
@@ -246,8 +247,8 @@ const COMMANDS: readonly CommandSpec[] = [
     ],
     options: [
       { flag: "--intensity F", desc: `overall strength, ${SETTING_RANGES.intensity.min}..${SETTING_RANGES.intensity.max}; the installed ${NR_RUNTIME_MEASURED} stops responding above ${NR_INTENSITY_EFFECTIVE_MAX}, so every value from there up gives the same image`, def: String(DEFAULT_NR_SETTINGS.intensity) },
-      { flag: "--style N", desc: "look style: 0 = Default, 1 = Natural, 2 = Cinematic (strong, visible effect)", def: String(DEFAULT_NR_SETTINGS.style) },
-      { flag: "--preset ID", desc: `NR model preset hint 0..3; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.preset) },
+      { flag: "--style N", desc: `look style: ${NR_STYLES.map((style) => `${style} = ${NR_STYLE_LABELS[style]}`).join(", ")} (strong, visible effect)`, def: String(DEFAULT_NR_SETTINGS.style) },
+      { flag: "--preset ID", desc: `NR model preset hint ${NR_PRESETS[0]}..${NR_PRESETS.at(-1)}; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.preset) },
       { flag: "--local-tone F", desc: "local tone-mapping strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localTone) },
       { flag: "--local-structure F", desc: "local detail / structure strength (float); typical 0..2, 1 = neutral", def: String(DEFAULT_NR_SETTINGS.localStructure) },
       { flag: "--skin-structure F", desc: `detail strength on skin regions; -1 = runtime default, typical 0..2; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.skinStructure) },
@@ -269,8 +270,8 @@ const COMMANDS: readonly CommandSpec[] = [
       { flag: "--fps RATE", desc: `output frame rate: ${FRAME_GEN_FPS_CHOICES.join(", ")}, or an exact num/den; overrides --multiplier`, def: "source fps x --multiplier" },
       { flag: "--multiplier N", desc: "output/input frame ratio when --fps is not given, a whole number from 1 to 16 (2 = double fps)", def: "2" },
       { flag: "--engine MODE", desc: `auto = one native session when output/source is an exact integer from 2 up to ${FRAME_GEN_NATIVE_MAXIMUM} (3x and above only with HAGS on), else a cascade of 2x stages; when the runtime disables every interval of a native 3x+ session, auto re-runs it as a cascade; native or cascade force that path`, def: "auto" },
-      { flag: "--codec NAME", desc: "encoder: h264, hevc, av1, or h264_nvenc/hevc_nvenc/av1_nvenc for GPU", def: "GPU NVENC when available, else libx264" },
-      { flag: "--quality N", desc: "encoder quality (CRF for CPU, CQ for NVENC), 0..51 (lower = better)", def: "20" },
+      { flag: "--codec NAME", desc: `encoder: ${ENCODE_CODECS.filter((codec) => !isNvenc(codec)).join(", ")}, or ${FFMPEG_NVENC_ENCODERS.join("/")} for GPU`, def: "GPU NVENC when available, else libx264" },
+      { flag: "--quality N", desc: `encoder quality (CRF for CPU, CQ for NVENC), ${SETTING_RANGES.quality.min}..${SETTING_RANGES.quality.max} (lower = better)`, def: "20" },
       RUNTIME_OPT,
     ],
     notes: ["A target at or below the source frame rate (--multiplier 1, or a lower --fps) generates no frames: the video is only resampled to it."],
