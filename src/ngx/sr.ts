@@ -24,7 +24,7 @@ import { APP_DATA_DIR, callerDir, featureDir } from "../paths.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
 import { FeatureCommonInfo, NgxCore } from "./core.ts";
 import { prepareForwarderSync } from "./forwarder-runtime.ts";
-import { encodeMotionR16G16 } from "../pipeline/flow.ts";
+import { encodeMotionR16G16 } from "../pipeline/half-float.ts";
 import { NgxParam, NgxParameters } from "./params.ts";
 import { DEFAULT_SR_PRESET, DLSS_PRESET_PARAM, DlssCreateFlag, DlssRenderPreset, NGX_APPLICATION_ID, ngxCheck } from "./results.ts";
 

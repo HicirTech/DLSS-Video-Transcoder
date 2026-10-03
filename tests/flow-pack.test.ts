@@ -1,13 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import {
-  allFinite,
-  bitsToHalf,
-  createMotionEstimator,
-  encodeMotionR16G16,
-  packFlowResizedR16G16,
-  resizeFlowBilinear,
-  type FlowBackend,
-} from "../src/pipeline/flow.ts";
+import type { FlowBackend } from "../src/pipeline/block-match.ts";
+import { createMotionEstimator } from "../src/pipeline/flow.ts";
+import { allFinite, packFlowResizedR16G16, resizeFlowBilinear } from "../src/pipeline/flow-resize.ts";
+import { bitsToHalf, encodeMotionR16G16 } from "../src/pipeline/half-float.ts";
 import { floatToHalf, halfToFloat } from "./half-float.ts";
 
 /** The estimator's original three-pass path: resize -> scale (float32 store) -> pack. */

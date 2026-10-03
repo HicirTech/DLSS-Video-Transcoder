@@ -25,7 +25,7 @@ import {
   type DlssgIntervalResult,
 } from "../src/ngx/dlssg-feature.ts";
 import { callerDir as defaultCallerDir, featureDir, RUNTIME_DIR } from "../src/paths.ts";
-import { encodeMotionR16G16 } from "../src/pipeline/flow.ts";
+import { encodeMotionR16G16 } from "../src/pipeline/half-float.ts";
 import { openGpu } from "../src/pipeline/gpu.ts";
 
 const WIDTH = 1280;

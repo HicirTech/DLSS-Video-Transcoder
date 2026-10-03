@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { createMotionEstimator, encodeMotionR16G16, flowGridSize, resizeFlowBilinear, smallGray } from "../src/pipeline/flow.ts";
+import { createMotionEstimator } from "../src/pipeline/flow.ts";
+import { flowGridSize, smallGray } from "../src/pipeline/flow-grid.ts";
+import { resizeFlowBilinear } from "../src/pipeline/flow-resize.ts";
+import { encodeMotionR16G16 } from "../src/pipeline/half-float.ts";
 import { DUPLICATE_SCENE_SCORE, RESET_SCENE_SCORE } from "../src/pipeline/scene-score.ts";
 import { floatToHalf, halfToFloat } from "./half-float.ts";
 
