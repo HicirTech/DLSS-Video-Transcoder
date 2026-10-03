@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { smallGray } from "../src/pipeline/flow.ts";
+import { smallGray } from "../src/pipeline/flow-grid.ts";
 
 /** The general box-average path of smallGray, kept here as the reference the integer fast path must match exactly. */
 function referenceSmallGray(rgba: Uint8Array, width: number, height: number, flowW: number, flowH: number): Float32Array {

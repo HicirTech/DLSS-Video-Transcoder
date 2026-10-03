@@ -1,5 +1,5 @@
 /** Scalar float32 <-> IEEE-754 half conversions the flow packing tests compare the buffer encoders against. */
-import { bitsToHalf } from "../src/pipeline/flow.ts";
+import { bitsToHalf } from "../src/pipeline/half-float.ts";
 
 const f32 = new Float32Array(1);
 const u32 = new Uint32Array(f32.buffer);

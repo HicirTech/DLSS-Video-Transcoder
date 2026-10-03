@@ -13,7 +13,7 @@ import { hex32 } from "../native/memory.ts";
 import { parsePe } from "../native/pe.ts";
 import { parseVersionInfo } from "../native/version-info.ts";
 import { callerDir } from "../paths.ts";
-import { MAX_FLOW_LONG_SIDE, MIN_FLOW_SIDE } from "../pipeline/flow.ts";
+import { MAX_FLOW_LONG_SIDE, MIN_FLOW_SIDE } from "../pipeline/flow-grid.ts";
 import { chooseGpu, gpuCandidates, isEligibleGpu } from "../pipeline/gpu.ts";
 import { probeNvof } from "../pipeline/nvof.ts";
 import { featureByKey, runtimeDllCandidates, type FeatureDescriptor } from "./runtime-catalog.ts";

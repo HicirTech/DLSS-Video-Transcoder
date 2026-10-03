@@ -16,7 +16,9 @@
  * fields go back as transferred ArrayBuffers. The history is only correct
  * because the coordinator sends one request at a time, in stream order.
  */
-import { createMotionEstimator, flowGridSize, packFlowResizedR16G16, type MotionEstimator } from "../flow.ts";
+import { createMotionEstimator, type MotionEstimator } from "../flow.ts";
+import { flowGridSize } from "../flow-grid.ts";
+import { packFlowResizedR16G16 } from "../flow-resize.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "../framegen-plan.ts";
 import { tryCreateNvofBackend } from "../nvof.ts";
 

@@ -12,7 +12,8 @@ import { callableAt, type OwnedCallable, type Signature } from "../native/com.ts
 import { cudaCreateContext, cudaMemcpy2DDtoH, cudaMemcpy2DHtoD, cudaReleaseContext, cudaSynchronize } from "../native/cuda.ts";
 import { OutU64 } from "../native/memory.ts";
 import type { OpticalFlowLimits } from "../server/api-types.ts";
-import { flowGridSize, type FlowBackend } from "./flow.ts";
+import type { FlowBackend } from "./block-match.ts";
+import { flowGridSize } from "./flow-grid.ts";
 
 const NV_OF_API_VERSION = 0x20; // (major 2 << 4) | minor 0
 const OK = 0;
