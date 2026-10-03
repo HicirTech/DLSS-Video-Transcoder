@@ -88,15 +88,21 @@ export function featureName(id: number): string {
   return `Feature${id}`;
 }
 
+/** NVSDK_NGX_FeatureSupportResult bits (nvsdk_ngx_defs.h; 0 is "supported") and the words describeSupport gives each. */
+const FEATURE_SUPPORT_BITS: ReadonlyArray<readonly [bit: number, meaning: string]> = [
+  [0x01, "check not present"], // CheckNotPresent
+  [0x02, "driver too old"], // DriverVersionUnsupported
+  [0x04, "adapter unsupported"], // AdapterUnsupported
+  [0x08, "OS too old"], // OSVersionBelowMinimumSupported
+  [0x10, "not implemented"], // NotImplemented
+];
+const KNOWN_SUPPORT_BITS = FEATURE_SUPPORT_BITS.reduce((all, [bit]) => all | bit, 0);
+
 export function describeSupport(bits: number): string {
   if (bits === 0) return "supported";
-  const parts: string[] = [];
-  if (bits & 1) parts.push("check not present");
-  if (bits & 2) parts.push("driver too old");
-  if (bits & 4) parts.push("adapter unsupported");
-  if (bits & 8) parts.push("OS too old");
-  if (bits & 16) parts.push("not implemented");
-  if (bits & ~31) parts.push(`unknown bits ${hex32(bits & ~31)}`);
+  const parts = FEATURE_SUPPORT_BITS.filter(([bit]) => bits & bit).map(([, meaning]) => meaning);
+  const unknown = bits & ~KNOWN_SUPPORT_BITS;
+  if (unknown) parts.push(`unknown bits ${hex32(unknown)}`);
   return parts.join(", ");
 }
 
