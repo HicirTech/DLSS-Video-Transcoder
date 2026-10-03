@@ -355,9 +355,8 @@ async function runEngineJob(job: VideoJob): Promise<VideoJobResult> {
   const frameBytes = renderWidth * renderHeight * 4;
   // Second choice: decode, DLSS and NVENC each on their own thread, encoding on
   // the GPU here (nvenc.ts) so ffmpeg only muxes the elementary stream
-  // (-c:v copy). The stages are ~4-5 ms each at 1080p and ran at their sum when
-  // serial. CPU/AV1 codecs, oversized frames, or an NVENC that will not come up
-  // here fall through to the single-thread rawvideo path.
+  // (-c:v copy). CPU/AV1 codecs, oversized frames, or an NVENC that will not
+  // come up here fall through to the single-thread rawvideo path.
   const nativeTarget = nvencNativeTarget(encode.codec, outWidth, outHeight);
   const useThreaded = nativeTarget !== null && probeNvencCaps(cudaOrdinal).available;
 
@@ -384,10 +383,10 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
 
   // Fastest path, tried first: DLSS output stays on the GPU and NVENC reads it
   // through a shared buffer, so the two overlap with no CPU frame copy between
-  // them — measured ~212 fps vs ~163 fps for the threaded pipeline at 1080p.
-  // Only NR at 1:1 qualifies (no upscale) with an NVENC codec at even, in-cap
-  // dimensions. motion is ignored: feature 18 consumes no motion vectors, so
-  // motion="flow" would only burn optical-flow time here.
+  // them, which the threaded pipeline cannot avoid. Only NR at 1:1 qualifies
+  // (no upscale) with an NVENC codec at even, in-cap dimensions. motion is
+  // ignored: feature 18 consumes no motion vectors, so motion="flow" would only
+  // burn optical-flow time here.
   const nrNative = options.engine === "nr" && !upscaling && options.runtimeDir ? nvencNativeTarget(encode.codec, target.width, target.height) : null;
   if (nrNative && probeNvencCaps(cudaOrdinal).available) return runGpuResidentNr(job, nrNative);
   return runEngineJob(job);
