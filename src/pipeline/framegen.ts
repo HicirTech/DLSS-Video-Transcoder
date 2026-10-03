@@ -29,6 +29,7 @@ import { decodeArgv } from "./ffmpeg-args.ts";
 import { ffmpegFailedMessage, NoFramesDecodedError } from "./ffmpeg-failure.ts";
 import { EncodeSink, buildFrameGenEncodeArgs } from "./framegen-encode-sink.ts";
 import { noFramesGeneratedMessage } from "./framegen-host-messages.ts";
+import { estimatedFrameProgress, type ProgressReporter } from "./frame-progress.ts";
 import { FrameReader } from "./frame-reader.ts";
 import { type RunParams, runOverlapped, runSequential } from "./framegen-run.ts";
 import { defaultOutputPath } from "./output-path.ts";
@@ -71,7 +72,7 @@ export interface FrameGenOptions {
   quality?: number;
   /** Output codec; defaults to NVENC H.264 when available, else CPU libx264. */
   codec?: EncodeSettings["codec"];
-  onProgress?: (fraction: number, message: string, frames?: number) => void;
+  onProgress?: ProgressReporter;
   /** Cooperative cancellation (see cancel.ts): checked on every turn of the frame loop until the encode is finishing, which then completes. */
   signal?: AbortSignal;
   /** Called once as the run starts finishing; see VideoJobOptions.onFinishing. */
@@ -371,7 +372,10 @@ async function runPipeline(
     writer,
     capacity,
     // expectedDecoded, not nb_frames: the decode is CFR-resampled, so the container count can be short and the bar would pass 100 %.
-    onProcessed: (count) => progress(Math.min(0.96, count / expectedDecoded), `frame ${count}/~${expectedDecoded}`, count),
+    onProcessed: (count) => {
+      const { fraction, message, frames } = estimatedFrameProgress(count, expectedDecoded);
+      progress(fraction, message, frames);
+    },
     check,
     signal: options.signal,
   };

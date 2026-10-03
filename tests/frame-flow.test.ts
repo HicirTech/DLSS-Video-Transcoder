@@ -5,6 +5,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { type FrameCounts, connectFrameFlow } from "../src/pipeline/frame-flow.ts";
+import type { FrameTally } from "../src/pipeline/frame-progress.ts";
 import { RunFailedError, framesWrittenOf } from "../src/pipeline/partial-output.ts";
 import { WorkerPairRun } from "../src/pipeline/worker-pair-run.ts";
 import { FakeWorker } from "./fake-worker.ts";
@@ -17,7 +18,7 @@ function start(processFrame: (frame: { index: number; buf: ArrayBuffer }, frameN
   const decode = new FakeWorker();
   const encode = new FakeWorker();
   const controller = new AbortController();
-  const progress: Array<[number, string, number | undefined]> = [];
+  const progress: Array<[number, string, FrameTally | undefined]> = [];
   const acks: unknown[] = [];
   let encodeReplies = 0;
   const outcome = new Promise<Outcome>((resolve) => {
@@ -83,7 +84,7 @@ describe("connectFrameFlow", () => {
     flow.decode.reply(frame(1));
     flow.encode.reply({ type: "encoded", slot: 0 });
     expect(credits(flow)).toEqual([CREDIT_WINDOW, 1]);
-    expect(flow.progress).toEqual([[0.1, "frame 1/10", 1]]);
+    expect(flow.progress).toEqual([[0.1, "frame 1/10", { done: 1, total: 10 }]]);
     expect(flow.acks).toEqual([{ type: "encoded", slot: 0 }]);
     flow.decode.reply({ type: "end", frames: 2 });
     flow.encode.reply({ type: "encoded", slot: 1 });

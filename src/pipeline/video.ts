@@ -14,7 +14,7 @@ import { resolveEncodeCodec } from "./encode-select.ts";
 import { aspectArgs, audioArgs, decodeArgv, encoderArgs, faststartArgs, muxCopyArgs } from "./ffmpeg-args.ts";
 import { ffmpegFailedMessage, NoFramesDecodedError } from "./ffmpeg-failure.ts";
 import type { FrameCounts } from "./frame-flow.ts";
-import { frameProgress } from "./frame-progress.ts";
+import { frameProgress, type ProgressReporter } from "./frame-progress.ts";
 import { defaultOutputPath } from "./output-path.ts";
 import { framesWrittenOf, removePartialOutput } from "./partial-output.ts";
 import { tryParseRate } from "./rational.ts";
@@ -48,8 +48,7 @@ export interface VideoJobOptions {
   /** Specific DLSS DLL folder to load (version switching); defaults to the runtime feature folder. */
   dllDir?: string;
   appDataPath?: string;
-  /** `frames` is set for per-frame updates so callers can skip logging them. */
-  onProgress?: (fraction: number, message: string, frames?: number) => void;
+  onProgress?: ProgressReporter;
   /** Cooperative cancellation (see cancel.ts): checked at every frame until the encode is finishing, which then completes. */
   signal?: AbortSignal;
   /**
@@ -316,8 +315,8 @@ async function runRawvideo(
       const wrote = encoder.stdin.write(result);
       if (wrote instanceof Promise) await wrote;
       counts.frames++;
-      const { fraction, message } = frameProgress(counts.frames, info.frames);
-      progress(fraction, message, counts.frames);
+      const { fraction, message, frames } = frameProgress(counts.frames, info.frames);
+      progress(fraction, message, frames);
     }
     options.onFinishing?.();
     encoder.stdin.end();

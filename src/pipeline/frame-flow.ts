@@ -6,7 +6,7 @@
  * so the credits, acknowledgements, progress line and finish condition live here, once. The run's
  * lifecycle (settling once, stopping, cleanup) is WorkerPairRun's.
  */
-import { frameProgress } from "./frame-progress.ts";
+import { frameProgress, type ProgressReporter } from "./frame-progress.ts";
 import type { WorkerPairRun } from "./worker-pair-run.ts";
 import type { DecodeCredit, DecodeOut, DecodeStart } from "./workers/decode-worker.ts";
 
@@ -33,7 +33,7 @@ interface FrameFlow<Ack extends { type: "encoded" }> {
   /** The decode worker's initial credit: the most frames in flight between decode and the encoder's acknowledgement. */
   creditWindow: number;
   totalFrames: number | null;
-  onProgress: (fraction: number, message: string, frames?: number) => void;
+  onProgress: ProgressReporter;
   /**
    * Runs one decoded frame through the engine and posts the result to the encode worker; returns
    * whether the frame was a scene cut. `frameNumber` counts the frames already handed over, in
@@ -73,8 +73,8 @@ export function connectFrameFlow<Ack extends { type: "encoded" }>(run: WorkerPai
       flow.onEncoded?.(reply as Ack);
       if (!decodeEnded) grantCredit(1);
       const written = run.framesWritten;
-      const { fraction, message } = frameProgress(written, flow.totalFrames);
-      flow.onProgress(fraction, message, written);
+      const { fraction, message, frames } = frameProgress(written, flow.totalFrames);
+      flow.onProgress(fraction, message, frames);
       finishIfDone();
     } else if (reply.type === "done") {
       run.succeed({ frames: handedOver, sceneCuts });

@@ -8,6 +8,7 @@ import type { RgbaImage } from "../codec/png/types.ts";
 import type { EngineKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine } from "./engine.ts";
+import type { ProgressReporter } from "./frame-progress.ts";
 import { describeGpu, openGpu } from "./gpu.ts";
 import { defaultOutputPath } from "./output-path.ts";
 import { attachAlpha, evenSize, resizePlane, resizeRgba, splitAlpha } from "./resize.ts";
@@ -26,7 +27,8 @@ export interface ImageJobOptions {
   /** Specific DLSS DLL folder to load (version switching); defaults to the runtime feature folder. */
   dllDir?: string;
   appDataPath?: string;
-  onProgress?: (fraction: number, message: string) => void;
+  /** The still's `frames` are the engine passes it runs: the warm-up frames and the one that is kept. */
+  onProgress?: ProgressReporter;
   /** Cooperative cancellation (see cancel.ts): checked before the GPU is opened and before every pass; nothing is written until the passes are done. */
   signal?: AbortSignal;
   /** Called once as the run starts finishing; see VideoJobOptions.onFinishing. */
@@ -116,7 +118,7 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
           await throwIfAbortedAfterYield(options.signal);
           rgba = engine.process({ rgba: working, reset: i === 0, motion: null });
           passes++;
-          progress(0.1 + (0.8 * passes) / total, `pass ${passes}/${total} on ${engine.name}`);
+          progress(0.1 + (0.8 * passes) / total, `pass ${passes}/${total} on ${engine.name}`, { done: passes, total });
         }
         return { rgba, width: engine.outputWidth, height: engine.outputHeight };
       });
