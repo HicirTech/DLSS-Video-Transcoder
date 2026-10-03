@@ -18,6 +18,7 @@ import {
   type UploadResult,
   type WsEvent,
 } from "./api-types.ts";
+import { checkDllDir } from "./dll-dir.ts";
 import { JobManager } from "./jobs.ts";
 import { isWithin } from "./path-scope.ts";
 import { asJobRequest, validateJobRequest } from "./validate.ts";
@@ -79,12 +80,12 @@ const server = Bun.serve({
           if (!isAbsolute(request.output) || !roots.some((r) => isWithin(request.output!, r)))
             return fail("The output path must be absolute and inside the app-data folder or the input's own directory.");
         }
-        // A DLL directory drives a native LoadLibrary, so it must be one the
-        // server itself advertises through GET /api/catalog.
-        if (request.dllDir !== undefined) {
-          const advertised = new Set(buildRuntimeCatalog(RUNTIME_DIR).features.flatMap((f) => f.versions.map((v) => resolve(v.dir))));
-          if (!isAbsolute(request.dllDir) || !advertised.has(resolve(request.dllDir)))
-            return fail("dllDir must be one of the runtime folders listed by GET /api/catalog.");
+        // A DLL directory drives a native LoadLibrary, so it must be one the server itself
+        // advertises through GET /api/catalog, for the feature this job loads. Bypass and
+        // frame generation load none: validateJobRequest has already refused a dllDir on them.
+        if (request.dllDir !== undefined && request.engine !== "bypass") {
+          const dllDirError = checkDllDir(request.dllDir, request.engine, buildRuntimeCatalog(RUNTIME_DIR));
+          if (dllDirError) return fail(dllDirError);
         }
         return json(jobs.submit(request), 201);
       },
