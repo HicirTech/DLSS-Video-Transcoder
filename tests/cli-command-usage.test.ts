@@ -4,6 +4,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { DlssRenderPreset, DEFAULT_SR_PRESET } from "../src/ngx/results.ts";
+import { fgCommand } from "../src/cli/fg-command.ts";
 import { nrCommand } from "../src/cli/nr-command.ts";
 import { dllDirOption, presetKeyOption, srCommand } from "../src/cli/sr-command.ts";
 import { UsageError } from "../src/cli/usage-error.ts";
@@ -46,5 +47,13 @@ describe("nr", () => {
     const error = await usageErrorOf(() => nrCommand([]));
     expect(error.message).toBe("missing <input.png>");
     expect(error.command).toBe("nr");
+  });
+});
+
+describe("fg", () => {
+  test("a missing input asks for the fg help page", async () => {
+    const error = await usageErrorOf(() => fgCommand([]));
+    expect(error.message).toBe("missing <input.mp4>");
+    expect(error.command).toBe("fg");
   });
 });

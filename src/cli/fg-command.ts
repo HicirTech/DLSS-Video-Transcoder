@@ -3,16 +3,12 @@ import { ENCODE_CODECS, FRAME_GEN_ENGINES, SETTING_RANGES } from "../server/api-
 import { processFrameGen } from "../pipeline/framegen.ts";
 import { choiceOption, numberOption, option, positionalArgs, runtimeDirOption } from "./args.ts";
 import { commandSpec, FG_MULTIPLIER_OPTION } from "./commands.ts";
-import { printHelp } from "./help.ts";
+import { usageError } from "./usage-error.ts";
 
 export async function fgCommand(args: string[]): Promise<void> {
   const positional = positionalArgs(args, commandSpec("fg"));
   const input = positional[0];
-  if (!input) {
-    console.error("error: missing <input.mp4>\n");
-    printHelp("fg");
-    process.exit(1);
-  }
+  if (!input) usageError("missing <input.mp4>", "fg");
   const result = await processFrameGen({
     input,
     output: positional[1],
