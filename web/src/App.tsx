@@ -35,7 +35,11 @@ function storeTab(value: number): void {
   }
 }
 
-/** Every tab stays mounted so form state survives switching; inactive ones are hidden. */
+/**
+ * Every tab stays mounted so form state survives switching; inactive ones are hidden. Two panels can
+ * therefore render the same component at once, so an element id comes from useId, never a constant:
+ * a fixed id would appear twice in one document.
+ */
 function TabPanel({ active, children }: { active: boolean; children: ReactNode }) {
   return (
     <Box role="tabpanel" hidden={!active} sx={{ display: active ? "block" : "none" }}>
