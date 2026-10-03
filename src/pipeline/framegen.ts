@@ -11,11 +11,9 @@
  *     2^stages grid. This is what reaches 4x/8x on runtimes that only do 2x,
  *     and any non-integer ratio (30 -> 144).
  *
- * The output frame count comes from the DECODED length — the frames ffmpeg
- * actually handed the pipeline, counted in the same clock as their timestamps —
- * never from a container frame count and never from how many frames the host
- * returned, so the result matches the source length whatever was synthesised.
- * The muxed file is verified (frame count + rate) before the job reports success.
+ * What sets the output length is explained at NearestTimestampWriter
+ * (framegen-plan.ts). The muxed file is verified (frame count + rate) before
+ * the job reports success.
  *
  * Ported from the reference project's frame_interpolation package.
  */
