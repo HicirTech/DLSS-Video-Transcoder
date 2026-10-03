@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { Alert, Box, Button, Chip, FormControl, FormControlLabel, FormHelperText, InputLabel, Link, MenuItem, Select, Stack, Switch, Typography } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import type { EngineKind, FrameGenEngine, FrameGenFps, JobRequest, JobStatus, MotionKind, ToolsReport } from "../../../src/server/api-types";
-import { FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM } from "../../../src/server/api-types";
+import { FFMPEG_SUPPLY_HINT, FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM } from "../../../src/server/api-types";
 import { api } from "../api";
 import { useJobRunner } from "../hooks/useJobRunner";
 import { useSettings } from "../hooks/useSettings";
@@ -30,22 +30,20 @@ function ToolsBanner({ tools, toolsError }: { tools: ToolsReport | null; toolsEr
     );
   }
   if (!tools) return null;
-  if (tools.ffmpeg.path === null) {
+  const missing = [...(tools.ffmpeg.path === null ? ["ffmpeg"] : []), ...(tools.ffprobe.path === null ? ["ffprobe"] : [])];
+  if (missing.length > 0) {
     return (
       <Alert severity="warning">
-        ffmpeg was not found on this machine{tools.ffprobe.path === null ? " (ffprobe is missing as well)" : ""}. Video jobs
-        need it to decode frames and encode the result, so they will fail until ffmpeg is installed and on PATH.
+        {missing.join(" and ")} {missing.length === 1 ? "was" : "were"} not found on this machine. Video jobs need ffmpeg to
+        decode frames and encode the result and ffprobe to read the source, so they will fail until both are found:{" "}
+        {FFMPEG_SUPPLY_HINT}.
       </Alert>
     );
   }
   return (
     <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
       <Chip label={`ffmpeg ${tools.ffmpeg.version ?? ""}`.trim()} color="success" variant="outlined" />
-      <Chip
-        label={tools.ffprobe.path ? `ffprobe ${tools.ffprobe.version ?? ""}`.trim() : "ffprobe missing"}
-        color={tools.ffprobe.path ? "success" : "warning"}
-        variant="outlined"
-      />
+      <Chip label={`ffprobe ${tools.ffprobe.version ?? ""}`.trim()} color="success" variant="outlined" />
       <Chip
         label={tools.nvenc === null ? "NVENC unknown" : tools.nvenc ? "NVENC available" : "NVENC unavailable"}
         color={tools.nvenc ? "success" : "default"}
