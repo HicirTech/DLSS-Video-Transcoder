@@ -329,7 +329,7 @@ export function tryCreateNvofBackend(width: number, height: number, ordinal: num
     const detail = error instanceof Error ? error.message : String(error);
     // The pointer names the probe line that answers "does the engine come up on
     // this GPU"; its size limits never explain this failure, since the grid is
-    // 64..640 px a side and every RTX reports a far wider range.
+    // MIN_FLOW_SIDE..MAX_FLOW_LONG_SIDE (flow.ts) px a side and every RTX reports a far wider range.
     return { backend: null, reason: `NVOFA hardware optical flow could not start on its ${flowW}x${flowH} grid, so this run uses the CPU matcher instead -- slower, same result: ${detail}. Run \`probe\`: its "Hardware optical flow (NVOFA)" line says whether the engine comes up on the selected GPU and why not.` };
   }
 }
