@@ -4,6 +4,7 @@
  */
 import { CANCELLED_MESSAGE, isTerminalState, JOB_LOG_LIMIT, type JobRequest, type JobStatus, type WsEvent } from "./api-types.ts";
 import { HOST_PROCESS_NAME } from "../pipeline/dlssg-host-launch.ts";
+import type { FrameTally } from "../pipeline/frame-progress.ts";
 import type { CancelMessage, RunMessage, WorkerMessage } from "../pipeline/worker.ts";
 import { ABORT_TIMEOUT_MS } from "../pipeline/worker-abort.ts";
 
@@ -205,13 +206,7 @@ export class JobManager {
         status.progress = Math.max(0, Math.min(1, message.fraction));
         // Once cancelled, the message says what became of the cancel; later progress must not hide it.
         if (status.cancelRequest === "none") status.message = message.message;
-        const frames = /frame (\d+)\/(\d+|\?)/.exec(message.message);
-        if (frames) {
-          status.framesDone = Number(frames[1]);
-          status.framesTotal = frames[2] === "?" ? null : Number(frames[2]);
-          const elapsed = (performance.now() - entry.startedAtMs) / 1000;
-          status.fps = elapsed > 0 ? Math.round((status.framesDone / elapsed) * 10) / 10 : null;
-        }
+        if (message.frames) this.recordFrames(entry, message.frames);
         this.publish(status);
         break;
       }
@@ -237,6 +232,15 @@ export class JobManager {
         this.finish(entry, "cancelled", CANCELLED_MESSAGE);
         break;
     }
+  }
+
+  /** The frames done and expected as the pipeline counted them; the rate is over the run so far, its start-up included. */
+  private recordFrames(entry: Entry, frames: FrameTally): void {
+    const { status } = entry;
+    status.framesDone = frames.done;
+    status.framesTotal = frames.total;
+    const elapsedSeconds = (performance.now() - entry.startedAtMs) / 1000;
+    status.fps = elapsedSeconds > 0 ? Math.round((frames.done / elapsedSeconds) * 10) / 10 : null;
   }
 
   private finish(entry: Entry, state: JobStatus["state"], message: string): void {

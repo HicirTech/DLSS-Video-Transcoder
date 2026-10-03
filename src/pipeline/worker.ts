@@ -4,6 +4,7 @@
  */
 import type { JobRequest } from "../server/api-types.ts";
 import { JobCancelledError } from "./cancel.ts";
+import type { FrameTally, ProgressReporter } from "./frame-progress.ts";
 import { processImage } from "./image.ts";
 
 declare const self: Worker;
@@ -27,7 +28,8 @@ export interface CancelMessage {
 }
 
 export type WorkerMessage =
-  | { type: "progress"; id: string; fraction: number; message: string }
+  /** `frames` is what the status shows as framesDone and framesTotal: data, so the server never reads it back out of `message`. */
+  | { type: "progress"; id: string; fraction: number; message: string; frames?: FrameTally }
   | { type: "log"; id: string; line: string }
   /** The job is past the point where a cancel can stop it; it ends done or failed. */
   | { type: "finishing"; id: string }
@@ -46,6 +48,10 @@ async function run(message: RunMessage): Promise<void> {
   const { id, request } = message;
   const log = (line: string) => post({ type: "log", id, line });
   const onFinishing = (): void => post({ type: "finishing", id });
+  const onProgress: ProgressReporter = (fraction, text, frames) => {
+    post({ type: "progress", id, fraction, message: text, frames });
+    if (frames === undefined) log(text);
+  };
   try {
     if (request.engine === "nr") {
       // Side-effect import: registers the engine with createEngine's factory.
@@ -67,8 +73,8 @@ async function run(message: RunMessage): Promise<void> {
         appDataPath: message.appDataPath,
         signal: jobCancellation.signal,
         onFinishing,
-        onProgress: (fraction, text) => {
-          post({ type: "progress", id, fraction, message: text });
+        onProgress: (fraction, text, frames) => {
+          post({ type: "progress", id, fraction, message: text, frames });
           log(text);
         },
       });
@@ -88,10 +94,7 @@ async function run(message: RunMessage): Promise<void> {
         runtimeDir: message.runtimeDir,
         signal: jobCancellation.signal,
         onFinishing,
-        onProgress: (fraction, text, frames) => {
-          post({ type: "progress", id, fraction, message: text });
-          if (frames === undefined) log(text);
-        },
+        onProgress,
       });
       post({ type: "done", id, output: result.output, detail: { ...result } });
       return;
@@ -111,10 +114,7 @@ async function run(message: RunMessage): Promise<void> {
       appDataPath: message.appDataPath,
       signal: jobCancellation.signal,
       onFinishing,
-      onProgress: (fraction, text, frames) => {
-        post({ type: "progress", id, fraction, message: text });
-        if (frames === undefined) log(text);
-      },
+      onProgress,
     });
     post({ type: "done", id, output: result.output, detail: { ...result } });
   } catch (error) {
