@@ -8,6 +8,7 @@ import { dirname, extname, isAbsolute, join, resolve } from "node:path";
 import index from "../../web/index.html";
 import { runProbe } from "../ngx/probe.ts";
 import { buildRuntimeCatalog } from "../ngx/runtime-catalog.ts";
+import { runtimeReport } from "../ngx/runtime-inventory.ts";
 import { APP_DATA_DIR, RUNTIME_DIR } from "../paths.ts";
 import { toolsReport } from "../pipeline/tools.ts";
 import {
@@ -56,7 +57,7 @@ const server = Bun.serve({
   routes: {
     "/": index,
     "/api/probe": async () => json(await runProbe({ runtimeDir: RUNTIME_DIR, appDataPath: APP_DATA_DIR })),
-    "/api/runtime": async () => json((await runProbe({ runtimeDir: RUNTIME_DIR, appDataPath: APP_DATA_DIR, requirements: false })).runtime),
+    "/api/runtime": async () => json(await runtimeReport(RUNTIME_DIR)),
     "/api/tools": () => json(toolsReport()),
     "/api/catalog": () => json(buildRuntimeCatalog(RUNTIME_DIR)),
     "/api/settings/defaults": () => json(SETTINGS_DEFAULTS),
