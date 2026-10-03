@@ -13,7 +13,7 @@ import { hex32 } from "../native/memory.ts";
 import { parsePe } from "../native/pe.ts";
 import { parseVersionInfo } from "../native/version-info.ts";
 import { callerDir } from "../paths.ts";
-import { DEFAULT_FLOW_WIDTH, MIN_FLOW_SIDE } from "../pipeline/flow.ts";
+import { MAX_FLOW_LONG_SIDE, MIN_FLOW_SIDE } from "../pipeline/flow.ts";
 import { chooseGpu, gpuCandidates, isEligibleGpu } from "../pipeline/gpu.ts";
 import { probeNvof } from "../pipeline/nvof.ts";
 import { featureByKey, runtimeDllCandidates, type FeatureDescriptor } from "./runtime-catalog.ts";
@@ -136,7 +136,7 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   const appDataPath = resolve(options.appDataPath);
   mkdirSync(appDataPath, { recursive: true });
   // What the pipeline feeds NVOFA, so the report can say whether the engine's limits can ever matter.
-  const pipelineGrid = { minSide: MIN_FLOW_SIDE, maxLongSide: DEFAULT_FLOW_WIDTH };
+  const pipelineGrid = { minSide: MIN_FLOW_SIDE, maxLongSide: MAX_FLOW_LONG_SIDE };
 
   const report: ProbeReport = {
     ok: false,

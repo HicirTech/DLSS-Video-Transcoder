@@ -18,8 +18,8 @@ import { buildSampleOffsets, DUPLICATE_SCENE_SCORE, luma, meanAbsLumaDiff, RESET
 
 /** Finite-vector fraction below this forces a reset (guides.py:63). */
 export const RESET_CONFIDENCE = 0.98;
-/** Default long-side resolution the flow is computed at (guides.py:21). */
-export const DEFAULT_FLOW_WIDTH = 640;
+/** Longest side, in pixels, of the grid the flow is computed on (guides.py:21 calls it the flow width). */
+export const MAX_FLOW_LONG_SIDE = 640;
 /** Smallest flow-grid side: tiny sources are computed on a grid this large rather than their own size. */
 export const MIN_FLOW_SIDE = 64;
 
@@ -167,13 +167,13 @@ export function allFinite(values: Float32Array): boolean {
 // -- Grayscale box-average downscale ------------------------------------------
 
 /**
- * Flow-grid dimensions for a render size: the LONG side becomes ~DEFAULT_FLOW_WIDTH,
+ * Flow-grid dimensions for a render size: the LONG side becomes ~MAX_FLOW_LONG_SIDE,
  * both dims even and >= MIN_FLOW_SIDE. Scaling by the long side rather than the
  * width keeps a portrait frame from running the flow on a far larger grid than
  * intended.
  */
 export function flowGridSize(width: number, height: number): { flowW: number; flowH: number } {
-  const scale = Math.min(1, DEFAULT_FLOW_WIDTH / Math.max(1, width, height));
+  const scale = Math.min(1, MAX_FLOW_LONG_SIDE / Math.max(1, width, height));
   const flowW = Math.max(MIN_FLOW_SIDE, Math.round((width * scale) / 2) * 2);
   const flowH = Math.max(MIN_FLOW_SIDE, Math.round((height * scale) / 2) * 2);
   return { flowW, flowH };
