@@ -11,6 +11,7 @@ import {
 } from "../../src/server/api-types";
 import type { RuntimeManifest } from "../../src/ngx/runtime-catalog";
 import { ApiError, errorMessage } from "./errors";
+import { isRecord } from "./json";
 import { createMockBackend } from "./mock";
 
 /** One method per endpoint in src/server/api-types.ts. */
@@ -46,10 +47,6 @@ export interface JobEventSource {
 export function isMockMode(): boolean {
   if (typeof location === "undefined") return false;
   return new URLSearchParams(location.search).get("mock") === "1";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function isJobStatus(value: unknown): value is JobStatus {
