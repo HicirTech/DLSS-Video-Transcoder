@@ -114,7 +114,12 @@ export function validateJobRequest(value: unknown): string | null {
   if (wrongEngine) return wrongEngine;
   const wrongMotion = checkEnum(v.motion, MOTION_KINDS, "motion");
   if (wrongMotion) return wrongMotion;
-  if (v.dllDir !== undefined && typeof v.dllDir !== "string") return "dllDir must be a string when present.";
+  if (v.dllDir !== undefined) {
+    if (typeof v.dllDir !== "string") return "dllDir must be a string when present.";
+    // Neither loads a DLL that a version folder could replace: accepting the field would silently ignore it.
+    if (v.frameGen !== undefined) return "dllDir does not apply to frame generation, which runs the bundled DLSS Frame Generation runtime and has no version choice; omit it.";
+    if (v.engine === "bypass") return "dllDir does not apply to the bypass engine, which loads no DLSS DLL; omit it.";
+  }
   if (v.adapterUuid !== undefined) {
     if (typeof v.adapterUuid !== "string" || !DEVICE_UUID_PATTERN.test(v.adapterUuid)) {
       return `adapterUuid must be a CUDA device UUID as GET /api/probe lists it ("GPU-" followed by ${DEVICE_UUID_GROUP_LENGTHS.join("-")} hex digits).`;
