@@ -4,11 +4,13 @@
  */
 import { describe, expect, test } from "bun:test";
 import { DlssRenderPreset, DEFAULT_SR_PRESET } from "../src/ngx/results.ts";
-import { fgCommand } from "../src/cli/fg-command.ts";
+import { fgCommand, targetFpsOption } from "../src/cli/fg-command.ts";
 import { nrCommand } from "../src/cli/nr-command.ts";
 import { dllDirOption, presetKeyOption, srCommand } from "../src/cli/sr-command.ts";
 import { UsageError } from "../src/cli/usage-error.ts";
 import { DEFAULT_RUNTIME_DIR } from "../src/paths.ts";
+import { DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS } from "../src/server/api-types.ts";
+import { validateJobRequest } from "../src/server/validate.ts";
 
 /** The UsageError `run` raises or rejects with; any other outcome fails the test. */
 async function usageErrorOf(run: () => unknown): Promise<UsageError> {
@@ -55,5 +57,25 @@ describe("fg", () => {
     const error = await usageErrorOf(() => fgCommand([]));
     expect(error.message).toBe("missing <input.mp4>");
     expect(error.command).toBe("fg");
+  });
+
+  // The API's check on frameGen.targetFps (validateJobRequest) and this one both ask resolveTargetRate.
+  test("--fps accepts exactly the rates the API accepts, and a refusal names the rates that work", async () => {
+    const apiAccepts = (targetFps: string): boolean =>
+      validateJobRequest({ kind: "video", input: "C:\\in.mp4", engine: "nr", motion: "none", settings: DEFAULT_NR_SETTINGS, scale: DEFAULT_SCALE_SETTINGS, frameGen: { targetFps } }) === null;
+    expect(targetFpsOption([])).toBeUndefined();
+    for (const rate of ["60", "59.94", "144", "60000/1001", "24.5", " 120 "]) {
+      expect(apiAccepts(rate), rate).toBe(true);
+      expect(targetFpsOption(["--fps", rate]), rate).toBe(rate);
+    }
+    for (const rate of ["x", "0", "-5", "1/0", "toString", "60 fps"]) {
+      expect(apiAccepts(rate), rate).toBe(false);
+      const error = await usageErrorOf(() => targetFpsOption(["--fps", rate]));
+      expect(error.message, rate).toStartWith("--fps is not a rate this build can produce: ");
+      expect(error.command, rate).toBeUndefined();
+    }
+    const unreadable = await usageErrorOf(() => targetFpsOption(["--fps", "x"]));
+    expect(unreadable.message).toContain("Choose one of: 23.976, 25");
+    expect(unreadable.message).toContain("or give an exact rate such as 60000/1001");
   });
 });
