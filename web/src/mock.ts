@@ -1,9 +1,9 @@
 import type { RuntimeManifest } from "../../src/ngx/runtime-catalog";
 import type { JobRequest, JobStatus, ProbeReport, SettingsDefaults, ToolsReport, UploadResult, WsEvent } from "../../src/server/api-types";
-import { CANCELLED_MESSAGE, DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS } from "../../src/server/api-types";
+import { CANCELLED_MESSAGE, DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, JOB_LOG_LIMIT } from "../../src/server/api-types";
 import type { ApiClient, JobEventSource } from "./api";
 import { ApiError } from "./errors";
-import { validateJobRequest } from "./mock-validate";
+import { validateJobRequest } from "../../src/server/validate";
 
 /*
  * Mock data and a small in-memory job engine. This module has no DOM dependency so the
@@ -403,7 +403,6 @@ function cloneJob(job: JobStatus): JobStatus {
   return { ...job, log: [...job.log] };
 }
 
-const MAX_MOCK_LOG = 200;
 type Listener = (event: WsEvent) => void;
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -567,7 +566,7 @@ export class MockJobEngine {
 
   private appendLog(job: JobStatus, line: string): void {
     job.log.push(line);
-    if (job.log.length > MAX_MOCK_LOG) job.log.splice(0, job.log.length - MAX_MOCK_LOG);
+    if (job.log.length > JOB_LOG_LIMIT) job.log.splice(0, job.log.length - JOB_LOG_LIMIT);
   }
 
   private emitLog(job: JobStatus, line: string): void {
@@ -651,7 +650,8 @@ export function createMockBackend(): { client: ApiClient; events: JobEventSource
       return job;
     },
     createJob: async (request) => {
-      validateJobRequest(request);
+      const invalid = validateJobRequest(request);
+      if (invalid) throw new ApiError(400, invalid);
       await delay(200);
       return engine.create(request);
     },

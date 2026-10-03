@@ -18,7 +18,8 @@ import {
   type WsEvent,
 } from "./api-types.ts";
 import { JobManager } from "./jobs.ts";
-import { asJobRequest, isWithin, validateJobRequest } from "./validate.ts";
+import { isWithin } from "./path-scope.ts";
+import { asJobRequest, validateJobRequest } from "./validate.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const RUNTIME_DIR = process.env.NR_RUNTIME_DIR ?? join(ROOT, "runtime");

@@ -9,7 +9,7 @@
 import index from "./index.html";
 import type { JobRequest, WsEvent } from "../src/server/api-types";
 import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, isActiveState } from "../src/server/api-types";
-import { ApiError } from "./src/errors";
+import { asJobRequest, validateJobRequest } from "../src/server/validate";
 import {
   MOCK_PROBE,
   MOCK_TOOLS,
@@ -20,7 +20,6 @@ import {
   mockSettingsDefaults,
   mockUpload,
 } from "./src/mock";
-import { isJobRequest, validateJobRequest } from "./src/mock-validate";
 
 const PORT = Number(process.env.PORT ?? "3080");
 const JOBS_TOPIC = "jobs";
@@ -70,14 +69,9 @@ const server = Bun.serve({
         } catch {
           return failure(400, "request body must be JSON");
         }
-        if (!isJobRequest(body)) return failure(400, "request body is not a JobRequest");
-        try {
-          validateJobRequest(body);
-        } catch (err) {
-          if (err instanceof ApiError) return failure(err.status, err.message);
-          throw err;
-        }
-        return json(engine.create(body), 201);
+        const invalid = validateJobRequest(body);
+        if (invalid) return failure(400, invalid);
+        return json(engine.create(asJobRequest(body)), 201);
       },
     },
     "/api/jobs/:id": (req) => {
