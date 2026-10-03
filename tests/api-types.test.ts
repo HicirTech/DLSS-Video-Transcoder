@@ -1,6 +1,7 @@
 /** The settings contract the CLI help, the web editors and the API validation all read from api-types.ts. */
 import { describe, expect, test } from "bun:test";
 import {
+  ACTIVE_JOB_STATES,
   DEFAULT_ENCODE_SETTINGS,
   DEFAULT_NR_SETTINGS,
   DEFAULT_SCALE_SETTINGS,
@@ -12,6 +13,9 @@ import {
   NR_STYLE_LABELS,
   SCALE_MODES,
   SETTING_RANGES,
+  TERMINAL_JOB_STATES,
+  isActiveState,
+  isTerminalState,
 } from "../src/server/api-types.ts";
 
 describe("defaults", () => {
@@ -54,5 +58,18 @@ describe("labels", () => {
   test("every look style has words, and nothing else does", () => {
     expect(Object.keys(NR_STYLE_LABELS).map(Number)).toEqual([...NR_STYLES]);
     for (const style of NR_STYLES) expect(NR_STYLE_LABELS[style], String(style)).not.toBe("");
+  });
+});
+
+describe("job states", () => {
+  test("every state is exactly one of active and terminal", () => {
+    const states = [...ACTIVE_JOB_STATES, ...TERMINAL_JOB_STATES];
+    expect(new Set(states).size).toBe(states.length);
+    for (const state of states) expect(isActiveState(state), state).toBe(!isTerminalState(state));
+  });
+
+  test("a job that is still queued or running is active, and one that has ended is not", () => {
+    for (const state of ["queued", "running"] as const) expect(isActiveState(state), state).toBe(true);
+    for (const state of ["done", "failed", "cancelled"] as const) expect(isActiveState(state), state).toBe(false);
   });
 });

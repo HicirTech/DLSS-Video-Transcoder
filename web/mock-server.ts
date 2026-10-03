@@ -8,7 +8,7 @@
  */
 import index from "./index.html";
 import type { JobRequest, WsEvent } from "../src/server/api-types";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS } from "../src/server/api-types";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, isActiveState } from "../src/server/api-types";
 import { ApiError } from "./src/errors";
 import {
   MOCK_PROBE,
@@ -124,7 +124,7 @@ engine.subscribe((event) => {
 
 /** Keeps the feed lively: queues a fake job now and then while little is running. */
 const feeder = setInterval(() => {
-  const active = engine.list().filter((job) => job.state === "queued" || job.state === "running").length;
+  const active = engine.list().filter((job) => isActiveState(job.state)).length;
   if (active >= 2) return;
   const serial = Math.floor(Math.random() * 900 + 100);
   const kind: JobRequest["kind"] = Math.random() < 0.5 ? "image" : "video";
