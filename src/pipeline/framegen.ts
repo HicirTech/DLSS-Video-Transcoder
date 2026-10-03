@@ -110,6 +110,13 @@ export interface FrameGenResult {
 
 /** Real inter-frame intervals to tolerate with zero synthesised frames before concluding generation is disabled. */
 const FG_PROBE_INTERVALS = 8;
+/**
+ * Ceiling, in bytes, on the frame buffers the overlapped runner holds at once. One credit is one
+ * frame-sized buffer (framegen-run.ts), so a run gets floor(limit / frameBytes) credits (129 at
+ * 1080p, 32 at 2160p), and a frame so large that fewer than maxGenerated + 3 credits fit runs on
+ * the sequential runner instead. No option changes it. 1 GiB is the reference pipeline.py's
+ * BUFFER_LIMIT_BYTES carried over, not a value measured for this program.
+ */
 const DEFAULT_BUFFER_LIMIT = 1 << 30;
 
 /** Raised when the host synthesised nothing; carries the plan so "auto" can retry with a cascade. Caught in processFrameGen below, nowhere else. */
