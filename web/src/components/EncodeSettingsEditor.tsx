@@ -20,8 +20,6 @@ const CODEC_LABELS: Record<EncodeSettings["codec"], string> = {
 const CONTAINER_LABELS: Record<EncodeSettings["container"], string> = { mp4: "MP4", mkv: "MKV", mov: "MOV" };
 
 export function EncodeSettingsEditor({ value, onChange }: EncodeSettingsEditorProps) {
-  // useId, not a constant: every tab stays mounted, so two panels can render
-  // this component at once and a fixed id would appear twice in one document.
   const codecLabelId = useId();
   const containerLabelId = useId();
   const update = (patch: Partial<EncodeSettings>): void => onChange({ ...value, ...patch });
