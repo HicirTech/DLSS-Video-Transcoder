@@ -46,9 +46,10 @@ export const RESET_SCENE_SCORE = 0.24;
 export const DUPLICATE_SCENE_SCORE = 0.0005;
 
 /**
- * Mean absolute luma difference (0-255 luma units) above which SceneCutDetector reports a cut. No source
- * or measurement is recorded for 40. A job with motion "flow" resets at RESET_SCENE_SCORE (61.2 in these
- * units); a job without it, and the GPU-resident NR path, reset at this, so the two are not interchangeable.
+ * Mean absolute luma difference (0-255 luma units; 40 is 0.157 of the range) above which SceneCutDetector
+ * reports a cut. An empirical choice: no reference value or measurement backs it. A job with motion "flow"
+ * resets at RESET_SCENE_SCORE (0.24, 61.2 in these units); a job without it, and the GPU-resident NR path,
+ * reset at this, so the two are not interchangeable.
  */
 const SCENE_CUT_LUMA_DIFF = 40;
 
