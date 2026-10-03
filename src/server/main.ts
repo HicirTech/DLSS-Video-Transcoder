@@ -6,7 +6,6 @@
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, extname, isAbsolute, join, resolve } from "node:path";
 import index from "../../web/index.html";
-import { runProbe } from "../ngx/probe.ts";
 import { buildRuntimeCatalog } from "../ngx/runtime-catalog.ts";
 import { runtimeReport } from "../ngx/runtime-inventory.ts";
 import { APP_DATA_DIR, RUNTIME_DIR } from "../paths.ts";
@@ -22,12 +21,14 @@ import {
 import { checkDllDir } from "./dll-dir.ts";
 import { JobManager } from "./jobs.ts";
 import { isWithin } from "./path-scope.ts";
+import { ProbeRunner } from "./probe-runner.ts";
 import { asJobRequest, validateJobRequest } from "./validate.ts";
 
 const UPLOADS_DIR = join(APP_DATA_DIR, "uploads");
 mkdirSync(UPLOADS_DIR, { recursive: true });
 const PORT = Number(process.env.PORT ?? 4080);
 const SETTINGS_DEFAULTS: SettingsDefaults = { settings: DEFAULT_NR_SETTINGS, scale: DEFAULT_SCALE_SETTINGS, encode: DEFAULT_ENCODE_SETTINGS };
+const probeRunner = new ProbeRunner();
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8" } });
@@ -56,7 +57,13 @@ const server = Bun.serve({
   development: process.env.NODE_ENV !== "production",
   routes: {
     "/": index,
-    "/api/probe": async () => json(await runProbe({ runtimeDir: RUNTIME_DIR, appDataPath: APP_DATA_DIR })),
+    "/api/probe": async () => {
+      try {
+        return json(await probeRunner.run());
+      } catch (error) {
+        return fail((error as Error).message, 500);
+      }
+    },
     "/api/runtime": async () => json(await runtimeReport(RUNTIME_DIR)),
     "/api/tools": () => json(toolsReport()),
     "/api/catalog": () => json(buildRuntimeCatalog(RUNTIME_DIR)),
