@@ -11,16 +11,12 @@ import { defaultOutputPath } from "../pipeline/output-path.ts";
 import { evenSize } from "../pipeline/resize.ts";
 import { adapterOption, numberOption, option, positionalArgs, runtimeDirOption } from "./args.ts";
 import { commandSpec, SR_FACTOR_OPTION } from "./commands.ts";
-import { printHelp } from "./help.ts";
+import { usageError } from "./usage-error.ts";
 
 export async function srCommand(args: string[]): Promise<void> {
   const positional = positionalArgs(args, commandSpec("sr"));
   const input = positional[0];
-  if (!input) {
-    console.error("error: missing <input.png>\n");
-    printHelp("sr");
-    process.exit(1);
-  }
+  if (!input) usageError("missing <input.png>", "sr");
   const bytes = new Uint8Array(await Bun.file(input).arrayBuffer());
   if (!isPng(bytes)) {
     console.error(`${input}: only PNG input is supported by the sr command`);
@@ -68,28 +64,22 @@ export async function srCommand(args: string[]): Promise<void> {
 }
 
 /** `--preset` as a DlssRenderPreset key, or the default preset when absent. */
-function presetKeyOption(args: string[]): keyof typeof DlssRenderPreset {
+export function presetKeyOption(args: string[]): keyof typeof DlssRenderPreset {
   // DlssRenderPreset keys are mixed case ("Default", not "DEFAULT"), so match
   // case-insensitively; an unknown name is an error, not a silent fallback to L.
   const presetInput = option(args, "--preset") ?? DEFAULT_SR_PRESET;
   const presetKey = (Object.keys(DlssRenderPreset) as (keyof typeof DlssRenderPreset)[]).find((k) => k.toLowerCase() === presetInput.toLowerCase());
-  if (!presetKey) {
-    console.error(`error: unknown --preset '${presetInput}'. Valid: ${Object.keys(DlssRenderPreset).join(", ")}`);
-    process.exit(1);
-  }
+  if (!presetKey) usageError(`unknown --preset '${presetInput}'. Valid: ${Object.keys(DlssRenderPreset).join(", ")}`);
   return presetKey;
 }
 
 /** The folder of the installed SR DLL that `--dlss-version` names, or undefined to use the bundled runtime DLL. */
-function dllDirOption(args: string[], runtimeDir: string): string | undefined {
+export function dllDirOption(args: string[], runtimeDir: string): string | undefined {
   const wantVersion = option(args, "--dlss-version");
   if (!wantVersion) return undefined;
   const sr = buildRuntimeCatalog(runtimeDir).features.find((f) => f.id === 1);
   const match = sr?.versions.find((v) => v.version === wantVersion || v.version.startsWith(wantVersion));
-  if (!match) {
-    console.error(`DLSS SR version ${wantVersion} not found; run 'bun run src/cli.ts versions' to list`);
-    process.exit(1);
-  }
+  if (!match) usageError(`--dlss-version ${wantVersion} matches no installed DLSS SR version; list them with 'bun run src/cli.ts versions'`);
   console.log(`using DLSS SR ${match.version} (${match.source}) from ${match.dir}`);
   return match.dir;
 }
