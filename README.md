@@ -29,7 +29,8 @@ version-switchable (DLSS-Swapper style).
 - **NVIDIA DLSS runtime DLLs** placed under `runtime/` (see [Runtime folder](#runtime-folder)).
   These are **not** redistributed — you supply your own licensed copies.
 - **ffmpeg / ffprobe** for video: found through `FFMPEG_PATH` / `FFPROBE_PATH`, then `PATH`, then
-  `runtime/ffmpeg/bin` (place your own build there).
+  `runtime/ffmpeg/bin` (place your own build there) and the folders the common installers use, such as
+  the one `winget install Gyan.FFmpeg` fills. Without both tools a video job fails when it starts.
 
 ## Install & run
 
@@ -64,10 +65,11 @@ command alike; the server stores uploads in its `uploads/` subfolder.
 ### Key options
 
 - **`sr`** — `--factor N` (2, 0.1–8; the output size snaps to the nearest DLSS mode: 1.00 DLAA,
-  1.50 MaxQuality, 1.72 Balanced, 2.00 MaxPerf, 3.00 UltraPerformance), `--preset NAME` (L; model preset),
+  1.50 MaxQuality, 1.72 Balanced, 2.00 MaxPerf, 3.00 UltraPerformance; a value of 1 or less runs DLAA at
+  the source size, and a value above 1 never snaps to DLAA), `--preset NAME` (L; model preset),
   `--dlss-version VER`
 - **`nr`** — `--intensity F` (1, 0–2; no further effect above 1), `--style N` (0; Default / Natural / Cinematic),
-  `--local-tone F` (1), `--local-structure F` (1), `--auto-mask`. `--preset`, `--skin-structure` and
+  `--local-tone F` (1, 0–2), `--local-structure F` (1, 0–2), `--auto-mask`. `--preset`, `--skin-structure` and
   `--ui-correction` are accepted but ignored by `nvngx_dlssnr.dll` 310.8.2.0.
 - **`fg`** — `--fps RATE` (a named rate from 23.976 to 480, or an exact `num/den`; default: source fps
   × `--multiplier`), `--multiplier N` (2, whole number 1–16; used when `--fps` is absent),
@@ -91,6 +93,11 @@ choice, in the CLI or the web UI: it takes the NVIDIA GPU with CUDA and the most
 and NVOFA helpers use CUDA device 0, which on a machine with more than one NVIDIA GPU can be another
 device.
 
+**Exit status.** 0 when the command succeeds; 1 when the run fails (`probe`: neural rendering is not
+ready); 2 when the command line is wrong — an unknown command or option, a value an option does not
+accept (an `fg --fps` that is not a rate, an `sr --dlss-version` that is not installed), or a missing
+input.
+
 ---
 
 ## Web UI
@@ -98,8 +105,8 @@ device.
 At **http://localhost:4080/** — no separate build step (Bun serves `web/index.html`).
 For front-end-only work: `bun run web/mock-server.ts` on port 3080, or append `?mock=1`.
 
-**Image tab** — SR upscale / Neural Rendering / bypass engine, DLSS version, output size, NR look controls,
-before/after compare.  
+**Image tab** — PNG input only; SR upscale / Neural Rendering / bypass engine, DLSS version, output size,
+NR look controls, before/after compare.  
 **Video tab** — the same engines on video with optical-flow motion, output size, CPU or NVENC encoding;
 or Frame Generation to 23.976–480 fps (auto / native / cascade), which uses only the codec and quality
 of the encoding settings, always writes an mp4 and ignores the engine, motion, size and
