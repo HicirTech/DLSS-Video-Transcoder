@@ -6,9 +6,7 @@ import {
   crc32,
   decodePng,
   encodePng,
-  encodePngChunk,
   isPng,
-  readPngHeader,
   type RgbaImage,
 } from "../src/codec/png.ts";
 
@@ -71,6 +69,20 @@ function ihdr(width: number, height: number, bitDepth: number, colorType: number
 
 function idat(filteredScanlines: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
   return chunk("IDAT", new Uint8Array(nodeDeflate(filteredScanlines)));
+}
+
+/** The IHDR fields of an encoded file, read from the bytes: signature (8), chunk length (4) and type (4) come first. */
+function readIhdr(bytes: Uint8Array): Record<string, number> {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return {
+    width: view.getUint32(16),
+    height: view.getUint32(20),
+    bitDepth: bytes[24],
+    colorType: bytes[25],
+    compressionMethod: bytes[26],
+    filterMethod: bytes[27],
+    interlaceMethod: bytes[28],
+  };
 }
 
 const IEND = chunk("IEND");
@@ -338,7 +350,7 @@ describe("round trip", () => {
       const decoded = decodePng(bytes);
       const t2 = performance.now();
       expect(isPng(bytes)).toBe(true);
-      expect(readPngHeader(bytes)).toEqual({
+      expect(readIhdr(bytes)).toEqual({
         width,
         height,
         bitDepth: 8,
@@ -514,17 +526,9 @@ describe("hand-constructed images", () => {
     const rows = concat([[0, 1, 2, 3, 4]]);
     const gama = chunk("gAMA", [0, 0, 0xb1, 0x8f]);
     const text = chunk("tEXt", Array.from(new TextEncoder().encode("Comment\0hello")));
-    const priv = encodePngChunk("prVt", Uint8Array.from([9, 9, 9]));
+    const priv = chunk("prVt", [9, 9, 9]);
     const decoded = decodePng(png(ihdr(1, 1, 8, 6), gama, text, idat(rows), priv, IEND));
     expectSameImage(decoded, 1, 1, Uint8Array.from([1, 2, 3, 4]));
-  });
-
-  test("encodePngChunk matches the reference chunk writer", () => {
-    const data = randomBytes(37, 5);
-    expect(Array.from(encodePngChunk("tEXt", data))).toEqual(Array.from(chunk("tEXt", data)));
-    expect(Array.from(encodePngChunk("IEND"))).toEqual(Array.from(IEND));
-    expect(() => encodePngChunk("bad")).toThrow(PngError);
-    expect(() => encodePngChunk("b4dd")).toThrow(PngError);
   });
 });
 
@@ -709,7 +713,6 @@ describe("errors", () => {
     const badIdatData = Uint8Array.from(valid);
     badIdatData[8 + 25 + 8 + 2] ^= 0x80; // a payload byte inside IDAT: its CRC no longer matches
     expect(() => decodePng(badIdatData)).toThrow(/CRC mismatch in chunk "IDAT"/);
-    expect(() => readPngHeader(badIhdrCrc)).toThrow(/CRC/);
   });
 
   test("unsupported colour type / bit depth combinations", () => {
@@ -736,7 +739,6 @@ describe("errors", () => {
     const notPng = Uint8Array.from(valid);
     notPng[0] = 0x88;
     expect(() => decodePng(notPng)).toThrow(/signature/);
-    expect(() => readPngHeader(notPng)).toThrow(/signature/);
   });
 
   test("bad IHDR contents", () => {
