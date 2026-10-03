@@ -1,11 +1,11 @@
 /**
  * Request validation for the job API. Pure and free of `Bun.serve`, so it is
- * unit-testable; main.ts adds the checks that need the filesystem.
+ * unit-testable; main.ts adds the checks that need the filesystem. It imports no
+ * Node module, because the mock backends in web/ call it too.
  *
  * The limits come from api-types.ts, which the web UI clamps to as well, so a
  * value the UI accepts is never rejected here and vice versa.
  */
-import { isAbsolute, relative, resolve, sep } from "node:path";
 import { resolveTargetRate } from "../pipeline/framegen-plan.ts";
 import {
   ENCODE_CODECS,
@@ -21,20 +21,6 @@ import {
   SETTING_RANGES,
   type JobRequest,
 } from "./api-types.ts";
-
-/**
- * True when `child` resolves inside `root`.
- *
- * The check is on the first path segment, not a string prefix: a relative path
- * such as `..cache/out.mp4` names a child directory that merely starts with two
- * dots, and rejecting it would refuse a legitimate output path.
- */
-export function isWithin(child: string, root: string): boolean {
-  const rel = relative(resolve(root), resolve(child));
-  if (rel === "") return true;
-  if (isAbsolute(rel)) return false;
-  return rel.split(sep)[0] !== "..";
-}
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join, resolve, sep } from "node:path";
 import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, ENGINE_KINDS, JOB_KINDS, MOTION_KINDS, SETTING_RANGES } from "../src/server/api-types.ts";
-import { isWithin, validateJobRequest } from "../src/server/validate.ts";
+import { validateJobRequest } from "../src/server/validate.ts";
 
 const ROOT = resolve(sep === "\\" ? "C:\\app\\logs" : "/app/logs");
 
@@ -17,27 +17,6 @@ function request(overrides: Record<string, unknown> = {}): Record<string, unknow
     ...overrides,
   };
 }
-
-describe("isWithin", () => {
-  test("accepts the root itself and paths under it", () => {
-    expect(isWithin(ROOT, ROOT)).toBe(true);
-    expect(isWithin(join(ROOT, "out.mp4"), ROOT)).toBe(true);
-    expect(isWithin(join(ROOT, "a", "b", "out.mp4"), ROOT)).toBe(true);
-  });
-
-  test("accepts a child whose name merely starts with two dots", () => {
-    // The bug this covers: a string-prefix check read "..cache" as an escape.
-    expect(isWithin(join(ROOT, "..cache", "out.mp4"), ROOT)).toBe(true);
-    expect(isWithin(join(ROOT, "..", "logs", "..hidden.mp4"), ROOT)).toBe(true);
-  });
-
-  test("rejects escapes and sibling directories that share a prefix", () => {
-    expect(isWithin(join(ROOT, "..", "etc", "passwd"), ROOT)).toBe(false);
-    expect(isWithin(resolve(ROOT, ".."), ROOT)).toBe(false);
-    expect(isWithin(`${ROOT}2${sep}out.mp4`, ROOT)).toBe(false);
-    expect(isWithin(`${ROOT}-backup${sep}out.mp4`, ROOT)).toBe(false);
-  });
-});
 
 describe("validateJobRequest", () => {
   test("accepts a well-formed request", () => {
