@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { EncodeSettings, NrSettings, ScaleSettings } from "../../../src/server/api-types";
 import {
+  clampToRange,
   DEFAULT_ENCODE_SETTINGS,
   DEFAULT_NR_SETTINGS,
   DEFAULT_SCALE_SETTINGS,
@@ -64,9 +65,7 @@ function pick<T>(value: unknown, allowed: readonly T[], fallback: T): T {
  * value the API would reject.
  */
 function clamp(value: number, field: keyof typeof SETTING_RANGES, fallback: number): number {
-  const { min, max, integer } = SETTING_RANGES[field];
-  if (!Number.isFinite(value)) return fallback;
-  return Math.min(max, Math.max(min, integer ? Math.round(value) : value));
+  return Number.isFinite(value) ? clampToRange(field, value) : fallback;
 }
 
 /** Parses the persisted JSON, repairing anything missing, malformed or out of range. */

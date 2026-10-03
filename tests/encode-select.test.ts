@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildNvencProbeArgs, cpuSiblingCodec, isNvenc, nvencGpuArgs, resolveEncodeCodec } from "../src/pipeline/encode-select.ts";
-import { encoderArgs } from "../src/pipeline/video.ts";
+import { encoderArgs } from "../src/pipeline/ffmpeg-args.ts";
+import { NVENC_PRESET } from "../src/pipeline/nvenc.ts";
 
 describe("encode-select", () => {
   test("isNvenc identifies the hardware encoders", () => {
@@ -42,6 +43,31 @@ describe("encode-select", () => {
     for (const codec of ["h264", "hevc", "av1"] as const) {
       expect(encoderArgs({ codec, quality: 20, container: "mp4", copyAudio: false }, 1)).not.toContain("-gpu");
     }
+  });
+
+  test("every NVENC encoder runs the one NVENC preset, which no CPU encoder is given", () => {
+    for (const codec of ["h264_nvenc", "hevc_nvenc", "av1_nvenc"] as const) {
+      const args = encoderArgs({ codec, quality: 20, container: "mp4", copyAudio: false }, 0);
+      expect(args[args.indexOf("-preset") + 1], codec).toBe(NVENC_PRESET);
+    }
+    for (const codec of ["h264", "hevc", "av1"] as const) {
+      const args = encoderArgs({ codec, quality: 20, container: "mp4", copyAudio: false }, 0);
+      expect(args[args.indexOf("-preset") + 1], codec).not.toBe(NVENC_PRESET);
+    }
+  });
+
+  test("encoderArgs holds the quality inside 0..51 and rounds it", () => {
+    const crf = (quality: number): string => {
+      const args = encoderArgs({ codec: "h264", quality, container: "mp4", copyAudio: false }, 0);
+      return args[args.indexOf("-crf") + 1]!;
+    };
+    expect([crf(-4), crf(18), crf(20.6), crf(99)]).toEqual(["0", "18", "21", "51"]);
+  });
+
+  test("encoderArgs refuses a codec the API does not list, naming the ones it does", () => {
+    expect(() => encoderArgs({ codec: "vp9" as never, quality: 20, container: "mp4", copyAudio: false }, 0)).toThrow(
+      'Unknown codec "vp9". Choose one of: h264, hevc, av1, h264_nvenc, hevc_nvenc, av1_nvenc.',
+    );
   });
 
   test("resolveEncodeCodec passes CPU codecs through without probing", () => {

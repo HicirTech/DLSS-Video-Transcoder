@@ -162,6 +162,12 @@ export const SETTING_RANGES = {
   quality: { min: 0, max: 51, integer: true },
 } as const;
 
+/** `value` held inside the range of a numeric setting, rounded first when that setting only takes whole numbers. */
+export function clampToRange(field: keyof typeof SETTING_RANGES, value: number): number {
+  const { min, max, integer } = SETTING_RANGES[field];
+  return Math.min(max, Math.max(min, integer ? Math.round(value) : value));
+}
+
 export interface JobRequest {
   kind: JobKind;
   /** Absolute path on the machine running the server. */

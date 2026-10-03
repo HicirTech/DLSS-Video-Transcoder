@@ -62,7 +62,7 @@ self.onmessage = (e: MessageEvent<InMsg>) => {
         return { devPtr, pitch: m.pitch };
       });
       extSem = importD3D12Fence(m.fenceHandle);
-      enc = NvencEncoder.open({ width: m.width, height: m.height, fpsNum: m.fpsNum, fpsDen: m.fpsDen, codec: m.codec, preset: "p5", cq: m.cq, ordinal: m.ordinal, inputs });
+      enc = NvencEncoder.open({ width: m.width, height: m.height, fpsNum: m.fpsNum, fpsDen: m.fpsDen, codec: m.codec, cq: m.cq, ordinal: m.ordinal, inputs });
       sink = Bun.spawn([m.ffmpeg, ...m.sinkArgs], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
       self.postMessage({ type: "opened" });
     } catch (err) {

@@ -7,13 +7,14 @@
  */
 import { existsSync } from "node:fs";
 import type { EncodeSettings, EngineKind, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
-import { DEFAULT_ENCODE_SETTINGS, ENCODE_CODECS } from "../server/api-types.ts";
+import { DEFAULT_ENCODE_SETTINGS } from "../server/api-types.ts";
 import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine, type Engine } from "./engine.ts";
-import { nvencGpuArgs, resolveEncodeCodec } from "./encode-select.ts";
+import { resolveEncodeCodec } from "./encode-select.ts";
+import { aspectArgs, encoderArgs } from "./ffmpeg-args.ts";
 import { defaultOutputPath } from "./output-path.ts";
 import { framesWrittenOf, removePartialOutput } from "./partial-output.ts";
-import { ratMul, type Rational, ratToNumber, rational, tryParseRate } from "./rational.ts";
+import { type Rational, ratToNumber, rational, tryParseRate } from "./rational.ts";
 import { createMotionEstimator } from "./flow.ts";
 import { SceneCutDetector } from "./scene-score.ts";
 import { FrameReader } from "./frame-reader.ts";
@@ -230,32 +231,6 @@ export function videoInfoFrom(data: ProbeJson, input: string): VideoInfo {
 }
 
 /**
- * ffmpeg's output-side encoder argv for the rawvideo sinks. `cudaOrdinal` pins
- * the NVENC encoders to the job's CUDA device (the renderer's, see
- * GpuSession.cudaOrdinal); the CPU codecs ignore it.
- */
-export function encoderArgs(encode: EncodeSettings, cudaOrdinal: number): string[] {
-  const q = String(Math.max(0, Math.min(51, Math.round(encode.quality))));
-  const gpu = nvencGpuArgs(cudaOrdinal);
-  switch (encode.codec) {
-    case "h264":
-      return ["-c:v", "libx264", "-preset", "medium", "-crf", q, "-pix_fmt", "yuv420p"];
-    case "hevc":
-      return ["-c:v", "libx265", "-preset", "medium", "-crf", q, "-pix_fmt", "yuv420p", "-tag:v", "hvc1"];
-    case "av1":
-      return ["-c:v", "libsvtav1", "-preset", "6", "-crf", q, "-pix_fmt", "yuv420p"];
-    case "h264_nvenc":
-      return ["-c:v", "h264_nvenc", ...gpu, "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0", "-pix_fmt", "yuv420p"];
-    case "hevc_nvenc":
-      return ["-c:v", "hevc_nvenc", ...gpu, "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0", "-pix_fmt", "yuv420p", "-tag:v", "hvc1"];
-    case "av1_nvenc":
-      return ["-c:v", "av1_nvenc", ...gpu, "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0", "-pix_fmt", "yuv420p"];
-    default:
-      throw new Error(`Unknown codec "${String(encode.codec)}". Choose one of: ${ENCODE_CODECS.join(", ")}.`);
-  }
-}
-
-/**
  * Whether frames can be encoded in-process on the GPU (nvenc.ts) so ffmpeg only
  * muxes the compressed elementary stream, instead of an uncompressed rawvideo
  * pipe plus swscale. Null means take the rawvideo path.
@@ -270,26 +245,6 @@ export function nvencNativeTarget(codec: EncodeSettings["codec"], width: number,
   if (codec === "h264_nvenc") return width <= 4096 && height <= 4096 ? { codec: "h264", demux: "h264" } : null;
   if (codec === "hevc_nvenc") return width <= 8192 && height <= 8192 ? { codec: "hevc", demux: "hevc" } : null;
   return null;
-}
-
-/**
- * Output argv that re-states the source's display aspect on a `width`x`height`
- * encode; empty for a square-pixel source, so the usual file is untouched.
- *
- * `demux` non-null means the video is stream-copied from an elementary stream,
- * which needs BOTH flags. -aspect writes the container tag, but with -c:v copy
- * ffmpeg tags the container from stream parameters it read before any filter
- * ran, so the aspect inside the bitstream would still claim 1:1. Measured with
- * the bundled ffmpeg: -aspect alone leaves the VUI at 1:1, the bitstream filter
- * alone leaves the container at 1:1, the pair agrees everywhere.
- */
-export function aspectArgs(displayAspect: Rational | null, width: number, height: number, demux: string | null): string[] {
-  if (!displayAspect) return [];
-  const args = ["-aspect", `${displayAspect.num}:${displayAspect.den}`];
-  if (!demux) return args;
-  // The bitstream stores SAR: the sample shape that makes this pixel grid display at DAR.
-  const sar = ratMul(displayAspect, rational(height, width));
-  return [...args, "-bsf:v", `${demux}_metadata=sample_aspect_ratio=${sar.num}/${sar.den}`];
 }
 
 /** Integer num/den of an ffmpeg rate string ("30000/1001", "25") that videoInfoFrom has already proven usable, for NVENC's rate fields. */
@@ -478,7 +433,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
       progress(0, `encode: NVENC ${nativeTarget.codec} (threaded GPU pipeline, mux-only)`);
       const result = await runThreadedEncode({
         engine, ffmpeg, decodeArgs: decodeArgv, frameBytes, sinkArgs,
-        enc: { width: outWidth, height: outHeight, fpsNum: num, fpsDen: den, codec: nativeTarget.codec, preset: "p5", cq: encode.quality, ordinal: cudaOrdinal },
+        enc: { width: outWidth, height: outHeight, fpsNum: num, fpsDen: den, codec: nativeTarget.codec, cq: encode.quality, ordinal: cudaOrdinal },
         totalFrames: info.frames, guide, onProgress: progress, signal: options.signal, onFinishing: options.onFinishing,
       });
       frames = result.frames;

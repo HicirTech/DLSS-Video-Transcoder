@@ -6,9 +6,10 @@
  */
 import type { EncodeSettings } from "../server/api-types.ts";
 import type { NvencSdkCodec } from "./nvenc.ts";
+import { aspectArgs, encoderArgs } from "./ffmpeg-args.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "./framegen-plan.ts";
 import { formatRational, type Rational } from "./rational.ts";
-import { aspectArgs, encoderArgs, nvencNativeTarget } from "./video.ts";
+import { nvencNativeTarget } from "./video.ts";
 import { abortWorkers } from "./worker-abort.ts";
 
 export interface FrameGenEncodeArgs {
