@@ -158,7 +158,6 @@ export const DLSS_PRESET_PARAM: Record<number, string> = {
   5: "DLSS.Hint.Render.Preset.DLAA",
 };
 
-/** Output/render ratio per PerfQuality (fallback when GetOptimalSettings is not queried). */
 /**
  * A PerfQuality value as its NVSDK_NGX_PerfQuality_Value_* name, for messages.
  * Derived from the enum rather than tabulated: DLSS_PRESET_PARAM's path suffixes
