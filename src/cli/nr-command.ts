@@ -9,16 +9,12 @@ import { enhanceStill } from "../pipeline/image.ts";
 import { defaultOutputPath } from "../pipeline/output-path.ts";
 import { adapterOption, enumOption, flag, numberOption, positionalArgs, runtimeDirOption } from "./args.ts";
 import { commandSpec } from "./commands.ts";
-import { printHelp } from "./help.ts";
+import { usageError } from "./usage-error.ts";
 
 export async function nrCommand(args: string[]): Promise<void> {
   const positional = positionalArgs(args, commandSpec("nr"));
   const input = positional[0];
-  if (!input) {
-    console.error("error: missing <input.png>\n");
-    printHelp("nr");
-    process.exit(1);
-  }
+  if (!input) usageError("missing <input.png>", "nr");
   const bytes = new Uint8Array(await Bun.file(input).arrayBuffer());
   if (!isPng(bytes)) {
     console.error(`${input}: only PNG input is supported by the nr command`);
