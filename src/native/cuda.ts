@@ -11,6 +11,7 @@
  * module already required the DLL to be present.
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";
+import { formatDeviceUuid } from "./device-uuid.ts";
 import { OutU32, OutU64 } from "./memory.ts";
 
 const SYMBOLS = {
@@ -151,8 +152,7 @@ export function cudaDevicesForLuids(luids: readonly { luidLow: number; luidHigh:
 function deviceUuid(dev: number): string | null {
   const bytes = new Uint8Array(16);
   if ((cu().cuDeviceGetUuid_v2(bytes, dev) as number) !== 0) return null;
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-  return `GPU-${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return formatDeviceUuid(bytes);
 }
 
 export function cudaSynchronize(): void {
