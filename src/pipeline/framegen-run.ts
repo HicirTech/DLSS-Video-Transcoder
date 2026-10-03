@@ -24,7 +24,7 @@ export interface RunParams {
   stages: Stage[];
   writer: NearestTimestampWriter;
   capacity: number;
-  /** Called with the number of source frames stage 0 has evaluated. */
+  /** Called with the number of source frames stage 0 has evaluated, or decoded when the plan has no stage. */
   onProcessed: (count: number) => void;
   /** Throws when the run should abort (e.g. nothing generated after enough intervals); called after each stage-0 evaluation. */
   check: () => void;
@@ -146,7 +146,12 @@ class OverlappedRun {
     if (d.name === "decode") {
       const frame = d.value as TimedFrame | null;
       if (frame === null) { this.ended = true; this.used -= 1; }
-      else { this.edges[0]!.push(frame); this.decoded++; }
+      else {
+        this.edges[0]!.push(frame);
+        this.decoded++;
+        // Without a stage nothing evaluates, so onProcessed would never fire: the decode is the only per-frame step left to report.
+        if (this.stages.length === 0) this.p.onProcessed(this.decoded);
+      }
     } else if (d.name.startsWith("guide:")) {
       this.analyzed[Number(d.name.slice(6))]!.push(d.value as AnalyzedFrame);
     } else if (d.name.startsWith("pack:")) {
