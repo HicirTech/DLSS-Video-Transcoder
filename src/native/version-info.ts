@@ -97,6 +97,14 @@ function findVersionBlob(view: DataView, sections: PeSection[]): { offset: numbe
   return { offset: rvaToOffset(blobRva), size: blobSize };
 }
 
+/** True when `bytes` holds `needle` at `offset`. */
+function matchesAt(bytes: Uint8Array, offset: number, needle: Uint8Array): boolean {
+  for (let j = 0; j < needle.length; j++) {
+    if (bytes[offset + j] !== needle[j]) return false;
+  }
+  return true;
+}
+
 /**
  * Scan the (already located) version blob for the StringFileInfo child named
  * `key` and return its UTF-16LE value. Display-only; returns null on any miss.
@@ -108,14 +116,7 @@ function readStringValue(bytes: Uint8Array, blobStart: number, blobEnd: number, 
     for (let i = 0; i < key.length; i++) needle[i * 2] = key.charCodeAt(i) & 0xff;
     const limit = Math.min(blobEnd, bytes.length);
     for (let p = blobStart; p + needle.length <= limit; p += 2) {
-      let match = true;
-      for (let j = 0; j < needle.length; j++) {
-        if (bytes[p + j] !== needle[j]) {
-          match = false;
-          break;
-        }
-      }
-      if (!match) continue;
+      if (!matchesAt(bytes, p, needle)) continue;
       // Advance past the key and its terminating null wchar, then pad to a
       // 32-bit boundary relative to the blob start, then read the value wchars.
       let q = p + needle.length;

@@ -46,6 +46,49 @@ export class DxgiAdapter extends ComObject {
   }
 }
 
+/** The DXGI_ADAPTER_DESC1 of one adapter, as an AdapterInfo. */
+function readAdapterInfo(raw: ComObject, index: number): AdapterInfo {
+  // DXGI_ADAPTER_DESC1 (dxgi.h, x64, 312 bytes): Description WCHAR[128] @0;
+  // VendorId @256; DeviceId @260; SubSysId @264; Revision @268;
+  // DedicatedVideoMemory @272; DedicatedSystemMemory @280; SharedSystemMemory @288;
+  // AdapterLuid {LowPart u32 @296, HighPart i32 @300}; Flags @304.
+  const desc = new NativeStruct(312);
+  const hrDesc = (raw as unknown as { call: ComObject["call"] }).call.call(
+    raw,
+    10,
+    { args: [FFIType.ptr], returns: FFIType.i32 },
+    desc.bytes,
+  ) as number;
+  checkHresult(hrDesc, `IDXGIAdapter1.GetDesc1(${index})`);
+  const nameChars: number[] = [];
+  for (let i = 0; i < 128; i++) {
+    const code = desc.getU16(i * 2);
+    if (code === 0) break;
+    nameChars.push(code);
+  }
+  const vendorId = desc.getU32(256);
+  const flags = desc.getU32(304);
+  const dedicated = desc.getU64(272);
+  const luidLow = desc.getU32(296);
+  const luidHigh = desc.getI32(300);
+  return {
+    index,
+    name: String.fromCharCode(...nameChars),
+    vendorId,
+    deviceId: desc.getU32(260),
+    subSysId: desc.getU32(264),
+    revision: desc.getU32(268),
+    dedicatedVideoMemory: dedicated,
+    dedicatedVideoMemoryMB: Number(dedicated / 1048576n),
+    luidLow,
+    luidHigh,
+    luid: `${hex32(luidHigh).slice(2)}-${hex32(luidLow).slice(2)}`,
+    flags,
+    software: (flags & DXGI_ADAPTER_FLAG_SOFTWARE) !== 0,
+    isNvidia: vendorId === VENDOR_NVIDIA,
+  };
+}
+
 export class DxgiFactory extends ComObject {
   static create(): DxgiFactory {
     const out = new OutPointer();
@@ -68,45 +111,7 @@ export class DxgiFactory extends ComObject {
         const raw = new ComObject(adapterPtr, `IDXGIAdapter1[${index}]`);
         let info: AdapterInfo;
         try {
-          // DXGI_ADAPTER_DESC1 (dxgi.h, x64, 312 bytes): Description WCHAR[128] @0;
-          // VendorId @256; DeviceId @260; SubSysId @264; Revision @268;
-          // DedicatedVideoMemory @272; DedicatedSystemMemory @280; SharedSystemMemory @288;
-          // AdapterLuid {LowPart u32 @296, HighPart i32 @300}; Flags @304.
-          const desc = new NativeStruct(312);
-          const hrDesc = (raw as unknown as { call: ComObject["call"] }).call.call(
-            raw,
-            10,
-            { args: [FFIType.ptr], returns: FFIType.i32 },
-            desc.bytes,
-          ) as number;
-          checkHresult(hrDesc, `IDXGIAdapter1.GetDesc1(${index})`);
-          const nameChars: number[] = [];
-          for (let i = 0; i < 128; i++) {
-            const code = desc.getU16(i * 2);
-            if (code === 0) break;
-            nameChars.push(code);
-          }
-          const vendorId = desc.getU32(256);
-          const flags = desc.getU32(304);
-          const dedicated = desc.getU64(272);
-          const luidLow = desc.getU32(296);
-          const luidHigh = desc.getI32(300);
-          info = {
-            index,
-            name: String.fromCharCode(...nameChars),
-            vendorId,
-            deviceId: desc.getU32(260),
-            subSysId: desc.getU32(264),
-            revision: desc.getU32(268),
-            dedicatedVideoMemory: dedicated,
-            dedicatedVideoMemoryMB: Number(dedicated / 1048576n),
-            luidLow,
-            luidHigh,
-            luid: `${hex32(luidHigh).slice(2)}-${hex32(luidLow).slice(2)}`,
-            flags,
-            software: (flags & DXGI_ADAPTER_FLAG_SOFTWARE) !== 0,
-            isNvidia: vendorId === VENDOR_NVIDIA,
-          };
+          info = readAdapterInfo(raw, index);
         } catch (error) {
           raw.release(); // this adapter's COM ref never made it into `adapters`
           throw error;
