@@ -42,8 +42,10 @@ bun run cli <command>    # see CLI reference below
 ```
 
 Server env vars: `PORT` (default **4080**), `NR_HOST` (default **127.0.0.1**, loopback only: the API
-has no authentication), `NR_RUNTIME_DIR` (default `<repo>/runtime`), `NR_APPDATA` (default
-`<repo>/logs`; uploads are stored in `logs/uploads/`), `NODE_ENV=production` (turns dev mode off).
+has no authentication), `NR_RUNTIME_DIR` (default `<repo>/runtime`; the CLI ignores it and uses
+`<repo>/runtime` unless given `--runtime`), `NODE_ENV=production` (turns dev mode off).
+`NR_APPDATA` (default `<repo>/logs`) is the folder NGX writes its logs to, for the server and every CLI
+command alike; the server stores uploads in its `uploads/` subfolder.
 
 ---
 

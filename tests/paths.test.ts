@@ -1,11 +1,15 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { APP_DATA_DIR, callerDir, DEFAULT_RUNTIME_DIR, featureDir, PROJECT_ROOT } from "../src/paths.ts";
+import { APP_DATA_DIR, callerDir, DEFAULT_RUNTIME_DIR, featureDir, NGX_DATA_DIR, PROJECT_ROOT } from "../src/paths.ts";
 
 test("the default runtime folder is <repo>/runtime and the default app-data folder <repo>/logs", () => {
   expect(DEFAULT_RUNTIME_DIR).toBe(join(PROJECT_ROOT, "runtime"));
   // Unless NR_APPDATA overrides it, which the unit suite does not set.
   if (!process.env.NR_APPDATA) expect(APP_DATA_DIR).toBe(join(PROJECT_ROOT, "logs"));
+});
+
+test("frame generation's NGX folder is a subfolder of the app-data folder", () => {
+  expect(NGX_DATA_DIR).toBe(join(APP_DATA_DIR, "ngx"));
 });
 
 test("the caller shim and each feature have their own folder under the runtime folder", () => {
