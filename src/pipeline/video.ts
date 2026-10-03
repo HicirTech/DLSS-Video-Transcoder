@@ -76,9 +76,14 @@ export interface VideoJobResult {
  * pipe plus swscale. Null means take the rawvideo path.
  *
  * The gates are NVENC's own limits: 4:2:0 needs even dimensions, and the
- * hardware caps the frame size per codec — H.264 at 4096 and HEVC at 8192 on
- * current GPUs. av1_nvenc falls through to null: nvenc.ts's CODEC_GUID only
- * carries the H.264 and HEVC GUIDs, so there is no in-process AV1 encoder.
+ * encoder caps the frame size per codec. The driver reports the caps as
+ * NV_ENC_CAPS_WIDTH_MAX / HEIGHT_MAX (nvEncodeAPI.h), but probeNvencCaps asks
+ * for the H.264 GUID only and no caller reads its answer, so the caps are fixed
+ * here. HEVC 8192 x 8192 is the size NVIDIA's NVENC Application Note (Video
+ * Codec SDK 13.0, section 2, HEVC capabilities) lists; the note states no H.264
+ * maximum, so 4096 x 4096 is this program's assumption. av1_nvenc falls through
+ * to null: nvenc.ts's CODEC_GUID only carries the H.264 and HEVC GUIDs, so there
+ * is no in-process AV1 encoder.
  */
 export function nvencNativeTarget(codec: EncodeSettings["codec"], width: number, height: number): { codec: NvencSdkCodec; demux: string } | null {
   if (width % 2 !== 0 || height % 2 !== 0) return null;
