@@ -14,7 +14,6 @@ export const RUNTIME_DIR = process.env.NR_RUNTIME_DIR ? resolve(process.env.NR_R
 const LOGS_DIR = resolve(PROJECT_ROOT, "logs");
 /** The folder NGX may write logs and uploads into: NR_APPDATA, else <repo>/logs. */
 export const APP_DATA_DIR = process.env.NR_APPDATA ? resolve(process.env.NR_APPDATA) : LOGS_DIR;
-export const CALLER_DIR = resolve(RUNTIME_DIR, "caller");
 export const NGX_DATA_DIR = resolve(LOGS_DIR, "ngx");
 
 /** Where the generated nvngx.dll shim sits for a runtime folder: beside the feature folders, never inside one. */

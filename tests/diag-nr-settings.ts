@@ -14,12 +14,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "../src/ngx/nr.ts";
+import { DEFAULT_RUNTIME_DIR } from "../src/paths.ts";
 import { processImage } from "../src/pipeline/image.ts";
 import { DEFAULT_NR_SETTINGS, type NrSettings } from "../src/server/api-types.ts";
 
-const ROOT = join(import.meta.dir, "..");
 const input = Bun.argv[2] ?? "W:/GPUVideoProcessor/1.png";
-const runtimeDir = join(ROOT, "runtime");
+const runtimeDir = DEFAULT_RUNTIME_DIR;
 const out = mkdtempSync(join(tmpdir(), "nr-settings-"));
 
 async function hashFor(label: string, overrides: Partial<NrSettings>): Promise<string> {

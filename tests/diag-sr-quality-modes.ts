@@ -9,13 +9,12 @@
  *
  *   bun run tests/diag-sr-quality-modes.ts
  */
-import { join } from "node:path";
+import { DEFAULT_RUNTIME_DIR } from "../src/paths.ts";
 import { openGpu } from "../src/pipeline/gpu.ts";
 import { DlssSrSession } from "../src/ngx/sr.ts";
 import { DLSS_RATIO, perfQualityName } from "../src/ngx/results.ts";
 
-const ROOT = join(import.meta.dir, "..");
-const runtimeDir = join(ROOT, "runtime");
+const runtimeDir = DEFAULT_RUNTIME_DIR;
 const RENDER_WIDTH = 800;
 const RENDER_HEIGHT = 1168; // even, so no dimension rounding enters the result
 

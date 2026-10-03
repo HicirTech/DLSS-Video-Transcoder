@@ -24,7 +24,7 @@ import {
   type DlssgIntervalInput,
   type DlssgIntervalResult,
 } from "../src/ngx/dlssg-feature.ts";
-import { CALLER_DIR, RUNTIME_DIR } from "../src/paths.ts";
+import { callerDir as defaultCallerDir, RUNTIME_DIR } from "../src/paths.ts";
 import { encodeMotionR16G16 } from "../src/pipeline/flow.ts";
 import { openGpu } from "../src/pipeline/gpu.ts";
 
@@ -74,7 +74,7 @@ function option(name: string, fallback: string): string {
 }
 
 const runtimeDir = option("--runtime-dir", join(RUNTIME_DIR, "dlssg"));
-const callerDir = option("--caller-dir", CALLER_DIR);
+const callerDir = option("--caller-dir", defaultCallerDir(RUNTIME_DIR));
 const dumpDir = option("--dump", "");
 
 /**
