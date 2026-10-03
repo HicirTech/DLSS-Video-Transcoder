@@ -120,7 +120,29 @@ export async function inventoryRuntimeFiles(runtimeDir: string): Promise<Runtime
   return files;
 }
 
-export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
+/** What every probe step reads and extends: the report under construction and the facts all steps share. */
+interface ProbeContext {
+  options: ProbeOptions;
+  runtimeDir: string;
+  appDataPath: string;
+  report: ProbeReport;
+  /** The blocking reasons the verdict carries; the same array as `report.verdict.reasons`. */
+  reasons: string[];
+  say: (line: string) => void;
+  /** What the pipeline feeds NVOFA. */
+  pipelineGrid: ProbeReport["opticalFlow"]["pipelineGrid"];
+}
+
+/** What the adapter step managed to create, released by the teardown even when a later step fails. */
+interface ProbeGpu {
+  factory: DxgiFactory | null;
+  adapters: DxgiAdapter[];
+  adapter: DxgiAdapter | null;
+  cudaOrdinal: number | null;
+  device: D3D12Device | null;
+}
+
+function createProbeContext(options: ProbeOptions): ProbeContext {
   const log: string[] = [];
   const say = (line: string) => {
     log.push(line);
@@ -156,8 +178,11 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
     verdict: { neuralRenderingReady: false, reasons },
     log,
   };
+  return { options, runtimeDir, appDataPath, report, reasons, say, pipelineGrid };
+}
 
-  // --- adapters + device ---
+/** Lists the adapters, picks the one a job would use and creates its D3D12 device. */
+function probeAdapters({ options, report, reasons, say }: ProbeContext): ProbeGpu {
   let factory: DxgiFactory | null = null;
   let adapters: DxgiAdapter[] = [];
   let adapter: DxgiAdapter | null = null;
@@ -210,8 +235,10 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   } catch (error) {
     reasons.push(`Could not list graphics adapters: ${(error as Error).message}`);
   }
+  return { factory, adapters, adapter, cudaOrdinal, device };
+}
 
-  // --- hardware optical flow ---
+function probeOpticalFlow({ report, say, pipelineGrid }: ProbeContext, { adapter, cudaOrdinal }: ProbeGpu): void {
   // Advisory, not a verdict reason: a video job with motion=flow falls back to
   // the CPU matcher when the engine is missing. It is reported so the fallback
   // message has a line to point at, and so the engine's limits are on record.
@@ -228,13 +255,18 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
         : `hardware optical flow (NVOFA) unavailable on CUDA device ${cudaOrdinal}: ${caps.detail}`,
     );
   }
+}
 
-  // --- runtime folder ---
+/** Lists the runtime DLLs; true when nvngx_dlssnr.dll, the one feature 18 needs, is installed. */
+async function inspectRuntimeFolder({ report, reasons, runtimeDir }: ProbeContext): Promise<boolean> {
   report.runtime.files = await inventoryRuntimeFiles(runtimeDir);
   const dlssnr = report.runtime.files.find((f) => f.name === "nvngx_dlssnr.dll");
   if (!dlssnr?.present) reasons.push(`The DLSS Neural Rendering runtime file nvngx_dlssnr.dll was not found in ${runtimeDir}. Copy it into that folder.`);
+  return Boolean(dlssnr?.present);
+}
 
-  // --- NGX core ---
+/** Finds the NGX core, reads its version and exports, and loads it; null when there is none or it will not load. */
+async function loadNgxCore({ options, report, reasons, say }: ProbeContext): Promise<NgxCore | null> {
   let core: NgxCore | null = null;
   const locations = locateNgxCores();
   if (locations.length === 0) {
@@ -262,143 +294,143 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
       reasons.push(`NGX core failed to load: ${(error as Error).message}`);
     }
   }
+  return core;
+}
 
-  // --- forwarder shim: prepared before Init so every NGX call routes through nvngx.dll ---
-  if (core) {
+/** The forwarder shim is prepared before Init so every NGX call routes through nvngx.dll. */
+async function connectForwarder({ report, reasons, say, runtimeDir }: ProbeContext, core: NgxCore): Promise<void> {
+  try {
+    const shimDir = callerDir(runtimeDir);
+    mkdirSync(shimDir, { recursive: true });
+    trace("prepareForwarder");
+    const { forwarder, wrote } = await prepareForwarder(shimDir);
+    report.forwarder.path = forwarder.path;
+    report.forwarder.generated = true;
+    report.forwarder.loaded = true;
+    core.useForwarder(forwarder);
+    say(`DLSS runtime setup ${wrote ? "written" : "up to date"} and connected to the NVIDIA NGX core`);
+    const test = selfTestForwarder(forwarder);
+    report.forwarder.selfTest = `${test.ok ? "ok" : "FAILED"}: ${test.detail}`;
+    say(`DLSS runtime self-test ${test.ok ? "passed" : "failed"}: ${test.detail}`);
+    if (!test.ok) reasons.push("The DLSS runtime setup failed its self-test, so calls could not be routed to the NVIDIA driver.");
+  } catch (error) {
+    report.forwarder.selfTest = `error: ${(error as Error).message}`;
+    reasons.push(`The DLSS runtime setup could not be completed: ${(error as Error).message}`);
+  }
+}
+
+/** Init comes first: the core keeps global state that later queries rely on. */
+function initializeNgx({ options, report, reasons, say, runtimeDir, appDataPath }: ProbeContext, core: NgxCore, device: D3D12Device): void {
+  report.ngxInit.attempted = true;
+  try {
+    let result: number;
+    const mode = options.init ?? "ext";
+    if (mode === "plain") {
+      trace("NVSDK_NGX_D3D12_Init (4 arguments)");
+      result = core.initPlain(device.ptr, NGX_APPLICATION_ID, appDataPath);
+      say(`Init -> ${ngxName(result)}`);
+    } else if (mode === "spy") {
+      const spy = new SpyParameter();
+      trace("NVSDK_NGX_D3D12_Init_Ext (fifth argument = spy vtable object)");
+      result = core.initExtRaw(device.ptr, NGX_APPLICATION_ID, appDataPath, spy.ptr);
+      say(`Init_Ext(spy) -> ${ngxName(result)}; spy saw: ${spy.summary()}`);
+      report.capabilities["spy.calls"] = spy.summary();
+      spy.close(); // release the 32 JSCallback trampolines the spy vtable allocated
+    } else {
+      const featureInfo = options.nullFeatureInfo ? null : new FeatureCommonInfo([runtimeDir]);
+      trace(`NVSDK_NGX_D3D12_Init_Ext (featureInfo=${featureInfo ? "struct with 1 search path" : "NULL"})`);
+      result = core.initExt(device.ptr, NGX_APPLICATION_ID, appDataPath, featureInfo);
+      say(`Init_Ext -> ${ngxName(result)}`);
+    }
+    if (!ngxOk(result) && options.projectInit) {
+      trace("NVSDK_NGX_D3D12_Init_ProjectID");
+      result = core.initProjectId(device.ptr, "b0c4f6a2-7c3e-4a3f-9f1e-0a6d2e9c1b45", "0.1", appDataPath, new FeatureCommonInfo([runtimeDir]));
+      say(`Init_ProjectID -> ${ngxName(result)}`);
+    }
+    report.ngxInit.result = ngxName(result);
+    report.ngxInit.ok = ngxOk(result);
+    if (!ngxOk(result)) reasons.push(`NVIDIA NGX runtime initialization failed: ${ngxName(result)}`);
+  } catch (error) {
+    report.ngxInit.result = (error as Error).message;
+    reasons.push(`NVIDIA NGX runtime initialization failed: ${(error as Error).message}`);
+  }
+}
+
+function readCapabilities({ report, say }: ProbeContext, core: NgxCore): void {
+  try {
+    trace("NVSDK_NGX_D3D12_GetCapabilityParameters");
+    const caps = core.capabilityParameters();
+    trace("NgxParameters.detectLayout");
+    const layout = NgxParameters.detectLayout(caps);
+    report.capabilities["NgxParameters.vtableLayout"] = layout;
+    say(`parameter memory layout: ${layout}`);
+    const readNames: string[] = [
+      NgxParam.SuperSamplingAvailable,
+      NgxParam.SuperSamplingNeedsUpdatedDriver,
+      NgxParam.SuperSamplingMinDriverVersionMajor,
+      NgxParam.SuperSamplingMinDriverVersionMinor,
+      NgxParam.SuperSamplingFeatureInitResult,
+      NgxParam.FrameGenerationAvailable,
+      NgxParam.FrameGenerationNeedsUpdatedDriver,
+      NgxParam.FrameGenerationMinDriverVersionMajor,
+      NgxParam.FrameGenerationMinDriverVersionMinor,
+      NgxParam.RayReconstructionAvailable,
+      NrParam.Available,
+      NrParam.NeedsUpdatedDriver,
+      NrParam.MinDriverVersionMajor,
+      NrParam.MinDriverVersionMinor,
+      NrParam.FeatureInitResult,
+      NgxParam.SnippetOptLevel,
+      NgxParam.SnippetIsDevBranch,
+    ];
+    if (layout !== "unknown") {
+      for (const name of readNames) {
+        trace(`Get ${name}`);
+        report.capabilities[name] = caps.getU32(name);
+      }
+    } else {
+      say("skipping capability reads: the parameter memory layout could not be confirmed");
+    }
+  } catch (error) {
+    // Advisory: these parameters describe the runtime, they do not gate it.
+    say(`capability query failed: ${(error as Error).message}`);
+  }
+}
+
+function queryFeatureRequirements({ report, say, runtimeDir, appDataPath }: ProbeContext, core: NgxCore, adapter: DxgiAdapter): void {
+  const searchPaths = new FeatureCommonInfo([runtimeDir]);
+  for (const id of [NgxFeature.SuperSampling, NgxFeature.FrameGeneration, NgxFeature.RayReconstruction, NgxFeature.NeuralRendering]) {
+    const feature: ProbeFeature = {
+      id,
+      name: featureName(id),
+      support: "not queried",
+      supportCode: null,
+      minHwArchitecture: null,
+      minOsVersion: null,
+      detail: "",
+    };
     try {
-      const shimDir = callerDir(runtimeDir);
-      mkdirSync(shimDir, { recursive: true });
-      trace("prepareForwarder");
-      const { forwarder, wrote } = await prepareForwarder(shimDir);
-      report.forwarder.path = forwarder.path;
-      report.forwarder.generated = true;
-      report.forwarder.loaded = true;
-      core.useForwarder(forwarder);
-      say(`DLSS runtime setup ${wrote ? "written" : "up to date"} and connected to the NVIDIA NGX core`);
-      const test = selfTestForwarder(forwarder);
-      report.forwarder.selfTest = `${test.ok ? "ok" : "FAILED"}: ${test.detail}`;
-      say(`DLSS runtime self-test ${test.ok ? "passed" : "failed"}: ${test.detail}`);
-      if (!test.ok) reasons.push("The DLSS runtime setup failed its self-test, so calls could not be routed to the NVIDIA driver.");
+      trace(`NVSDK_NGX_D3D12_GetFeatureRequirements(${id})`);
+      const r = core.featureRequirements(adapter.ptr, id, NGX_APPLICATION_ID, appDataPath, searchPaths);
+      feature.support = r.support;
+      feature.supportCode = r.supportedBits;
+      feature.minHwArchitecture = r.minHwArchitecture;
+      feature.minOsVersion = r.minOsVersion;
+      feature.detail = `GetFeatureRequirements -> ${ngxName(r.result)}`;
+      // NotImplemented here means the driver declines to answer, not that the
+      // feature is missing — the features still work, so do not say "query
+      // failed". Readiness is judged from the prerequisites below.
+      if ((r.result >>> 0) === 0xbad00012) feature.support = "not reported by this driver";
     } catch (error) {
-      report.forwarder.selfTest = `error: ${(error as Error).message}`;
-      reasons.push(`The DLSS runtime setup could not be completed: ${(error as Error).message}`);
+      feature.support = "query failed";
+      feature.detail = (error as Error).message;
     }
+    report.features.push(feature);
+    say(`feature ${id} ${feature.name}: ${feature.support} (${feature.detail})`);
   }
+}
 
-  // --- Init first: the core keeps global state that later queries rely on ---
-  if (core && device) {
-    report.ngxInit.attempted = true;
-    try {
-      let result: number;
-      const mode = options.init ?? "ext";
-      if (mode === "plain") {
-        trace("NVSDK_NGX_D3D12_Init (4 arguments)");
-        result = core.initPlain(device.ptr, NGX_APPLICATION_ID, appDataPath);
-        say(`Init -> ${ngxName(result)}`);
-      } else if (mode === "spy") {
-        const spy = new SpyParameter();
-        trace("NVSDK_NGX_D3D12_Init_Ext (fifth argument = spy vtable object)");
-        result = core.initExtRaw(device.ptr, NGX_APPLICATION_ID, appDataPath, spy.ptr);
-        say(`Init_Ext(spy) -> ${ngxName(result)}; spy saw: ${spy.summary()}`);
-        report.capabilities["spy.calls"] = spy.summary();
-        spy.close(); // release the 32 JSCallback trampolines the spy vtable allocated
-      } else {
-        const featureInfo = options.nullFeatureInfo ? null : new FeatureCommonInfo([runtimeDir]);
-        trace(`NVSDK_NGX_D3D12_Init_Ext (featureInfo=${featureInfo ? "struct with 1 search path" : "NULL"})`);
-        result = core.initExt(device.ptr, NGX_APPLICATION_ID, appDataPath, featureInfo);
-        say(`Init_Ext -> ${ngxName(result)}`);
-      }
-      if (!ngxOk(result) && options.projectInit) {
-        trace("NVSDK_NGX_D3D12_Init_ProjectID");
-        result = core.initProjectId(device.ptr, "b0c4f6a2-7c3e-4a3f-9f1e-0a6d2e9c1b45", "0.1", appDataPath, new FeatureCommonInfo([runtimeDir]));
-        say(`Init_ProjectID -> ${ngxName(result)}`);
-      }
-      report.ngxInit.result = ngxName(result);
-      report.ngxInit.ok = ngxOk(result);
-      if (!ngxOk(result)) reasons.push(`NVIDIA NGX runtime initialization failed: ${ngxName(result)}`);
-    } catch (error) {
-      report.ngxInit.result = (error as Error).message;
-      reasons.push(`NVIDIA NGX runtime initialization failed: ${(error as Error).message}`);
-    }
-  }
-
-  // --- capability parameters ---
-  if (core && report.ngxInit.ok) {
-    try {
-      trace("NVSDK_NGX_D3D12_GetCapabilityParameters");
-      const caps = core.capabilityParameters();
-      trace("NgxParameters.detectLayout");
-      const layout = NgxParameters.detectLayout(caps);
-      report.capabilities["NgxParameters.vtableLayout"] = layout;
-      say(`parameter memory layout: ${layout}`);
-      const readNames: string[] = [
-        NgxParam.SuperSamplingAvailable,
-        NgxParam.SuperSamplingNeedsUpdatedDriver,
-        NgxParam.SuperSamplingMinDriverVersionMajor,
-        NgxParam.SuperSamplingMinDriverVersionMinor,
-        NgxParam.SuperSamplingFeatureInitResult,
-        NgxParam.FrameGenerationAvailable,
-        NgxParam.FrameGenerationNeedsUpdatedDriver,
-        NgxParam.FrameGenerationMinDriverVersionMajor,
-        NgxParam.FrameGenerationMinDriverVersionMinor,
-        NgxParam.RayReconstructionAvailable,
-        NrParam.Available,
-        NrParam.NeedsUpdatedDriver,
-        NrParam.MinDriverVersionMajor,
-        NrParam.MinDriverVersionMinor,
-        NrParam.FeatureInitResult,
-        NgxParam.SnippetOptLevel,
-        NgxParam.SnippetIsDevBranch,
-      ];
-      if (layout !== "unknown") {
-        for (const name of readNames) {
-          trace(`Get ${name}`);
-          report.capabilities[name] = caps.getU32(name);
-        }
-      } else {
-        say("skipping capability reads: the parameter memory layout could not be confirmed");
-      }
-    } catch (error) {
-      // Advisory: these parameters describe the runtime, they do not gate it.
-      say(`capability query failed: ${(error as Error).message}`);
-    }
-  }
-
-  // --- feature requirements ---
-  if (core && adapter && (options.requirements ?? true)) {
-    const searchPaths = new FeatureCommonInfo([runtimeDir]);
-    for (const id of [NgxFeature.SuperSampling, NgxFeature.FrameGeneration, NgxFeature.RayReconstruction, NgxFeature.NeuralRendering]) {
-      const feature: ProbeFeature = {
-        id,
-        name: featureName(id),
-        support: "not queried",
-        supportCode: null,
-        minHwArchitecture: null,
-        minOsVersion: null,
-        detail: "",
-      };
-      try {
-        trace(`NVSDK_NGX_D3D12_GetFeatureRequirements(${id})`);
-        const r = core.featureRequirements(adapter.ptr, id, NGX_APPLICATION_ID, appDataPath, searchPaths);
-        feature.support = r.support;
-        feature.supportCode = r.supportedBits;
-        feature.minHwArchitecture = r.minHwArchitecture;
-        feature.minOsVersion = r.minOsVersion;
-        feature.detail = `GetFeatureRequirements -> ${ngxName(r.result)}`;
-        // NotImplemented here means the driver declines to answer, not that the
-        // feature is missing — the features still work, so do not say "query
-        // failed". Readiness is judged from the prerequisites below.
-        if ((r.result >>> 0) === 0xbad00012) feature.support = "not reported by this driver";
-      } catch (error) {
-        feature.support = "query failed";
-        feature.detail = (error as Error).message;
-      }
-      report.features.push(feature);
-      say(`feature ${id} ${feature.name}: ${feature.support} (${feature.detail})`);
-    }
-  }
-
-  // --- verdict ---
+function judgeReadiness({ report, reasons }: ProbeContext, { cudaOrdinal }: ProbeGpu, nrRuntimeInstalled: boolean, core: NgxCore | null): void {
   // GetFeatureRequirements returns NotImplemented for every feature on this
   // driver, so it cannot confirm feature 18; readiness is judged on the real
   // prerequisites instead — an adapter a job would accept (a CUDA device behind
@@ -410,14 +442,15 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   // let the report say YES while listing an Init failure underneath.
   const forwarderOk = report.forwarder.loaded && Boolean(report.forwarder.selfTest?.startsWith("ok"));
   const prerequisites =
-    cudaOrdinal !== null && Boolean(dlssnr?.present) && forwarderOk && report.device.created && core !== null && report.ngxInit.ok;
+    cudaOrdinal !== null && nrRuntimeInstalled && forwarderOk && report.device.created && core !== null && report.ngxInit.ok;
   // Both halves: the prerequisites are what readiness means, and an empty reason
   // list is what makes the verdict and the text under it agree. A failure that
   // pushes a reason without clearing a prerequisite still blocks.
   report.verdict.neuralRenderingReady = prerequisites && reasons.length === 0;
   report.ok = report.device.created && core !== null;
+}
 
-  // --- teardown ---
+function releaseGpu({ factory, adapters, device }: ProbeGpu): void {
   // Never Shutdown1 here. On this driver core it releases the D3D12 device
   // itself and leaves D3D12 unable to make another on the same adapter: the next
   // D3D12CreateDevice in the process faults inside D3D12Core (measured — a
@@ -429,5 +462,19 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   device?.release();
   for (const a of adapters) a.release();
   factory?.release();
-  return report;
+}
+
+export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
+  const context = createProbeContext(options);
+  const gpu = probeAdapters(context);
+  probeOpticalFlow(context, gpu);
+  const nrRuntimeInstalled = await inspectRuntimeFolder(context);
+  const core = await loadNgxCore(context);
+  if (core) await connectForwarder(context, core);
+  if (core && gpu.device) initializeNgx(context, core, gpu.device);
+  if (core && context.report.ngxInit.ok) readCapabilities(context, core);
+  if (core && gpu.adapter && (options.requirements ?? true)) queryFeatureRequirements(context, core, gpu.adapter);
+  judgeReadiness(context, gpu, nrRuntimeInstalled, core);
+  releaseGpu(gpu);
+  return context.report;
 }
