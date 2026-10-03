@@ -19,7 +19,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-/** A marker file the stand-in writes into, in a folder removed after the test. */
+/** A path in a fresh folder that is removed after the test: where the stand-in writes its pid, or a file where a folder is needed. */
 function markerFile(): string {
   const dir = mkdtempSync(join(tmpdir(), "probe-runner-"));
   dirs.push(dir);
