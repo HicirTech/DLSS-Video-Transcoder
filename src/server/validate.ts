@@ -116,7 +116,7 @@ export function validateJobRequest(value: unknown): string | null {
   if (wrongMotion) return wrongMotion;
   if (v.dllDir !== undefined) {
     if (typeof v.dllDir !== "string") return "dllDir must be a string when present.";
-    // Neither loads a DLL that a version folder could replace: accepting the field would silently ignore it.
+    // Frame generation and the bypass engine load no DLL that a version folder could replace: accepting the field would ignore it without a word.
     if (v.frameGen !== undefined) return "dllDir does not apply to frame generation, which runs the bundled DLSS Frame Generation runtime and has no version choice; omit it.";
     if (v.engine === "bypass") return "dllDir does not apply to the bypass engine, which loads no DLSS DLL; omit it.";
   }
