@@ -11,7 +11,7 @@ import type { WorkerPairRun } from "./worker-pair-run.ts";
 import type { DecodeCredit, DecodeOut, DecodeStart } from "./workers/decode-worker.ts";
 
 /** What both encode workers answer, whatever else an "encoded" ack carries. */
-export type EncodeReply = { type: "opened" } | { type: "encoded" } | { type: "done" } | { type: "error"; message: string };
+type EncodeReply = { type: "opened" } | { type: "encoded" } | { type: "done" } | { type: "error"; message: string };
 
 /** What a finished run reports. */
 export interface FrameCounts {
@@ -20,12 +20,12 @@ export interface FrameCounts {
 }
 
 /** One frame as the decode worker posted it. */
-export interface DecodedFrame {
+interface DecodedFrame {
   index: number;
   buf: ArrayBuffer;
 }
 
-export interface FrameFlow<Ack extends { type: "encoded" }> {
+interface FrameFlow<Ack extends { type: "encoded" }> {
   decodeWorker: Worker;
   encodeWorker: Worker;
   /** Posted to the decode worker once the encoder has opened. */

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildSampleOffsets, luma, meanAbsLumaDiff, RESET_SCENE_SCORE, SCENE_CUT_LUMA_DIFF, SceneCutDetector, sparseLuma } from "../src/pipeline/scene-score.ts";
+import { buildSampleOffsets, luma, meanAbsLumaDiff, RESET_SCENE_SCORE, SceneCutDetector, sparseLuma } from "../src/pipeline/scene-score.ts";
 
 function solid(width: number, height: number, r: number, g: number, b: number): Uint8Array {
   const buf = new Uint8Array(width * height * 4);
@@ -40,12 +40,12 @@ test("the sample grid is about 48x27 and starts half a step in", () => {
 
 const grey = (level: number): Uint8Array => solid(96, 64, level, level, level);
 
-test("SceneCutDetector never calls the first frame a cut, and needs a step above SCENE_CUT_LUMA_DIFF", () => {
+test("SceneCutDetector never calls the first frame a cut, and needs a mean step above 40 luma units", () => {
   const detector = new SceneCutDetector(96, 64);
   expect(detector.isCut(grey(100))).toBe(false); // nothing to compare with yet
-  expect(detector.isCut(grey(100 + SCENE_CUT_LUMA_DIFF))).toBe(false); // exactly the threshold is not above it
-  expect(detector.isCut(grey(100 + SCENE_CUT_LUMA_DIFF - 1))).toBe(false); // back down by 1: well under
-  expect(detector.isCut(grey(100 + 2 * SCENE_CUT_LUMA_DIFF))).toBe(true); // a step of 41 is above it
+  expect(detector.isCut(grey(140))).toBe(false); // a step of exactly 40 is not above it
+  expect(detector.isCut(grey(139))).toBe(false); // back down by 1
+  expect(detector.isCut(grey(180))).toBe(true); // a step of 41 is
 });
 
 test("SceneCutDetector compares each frame with the one before it, not with the first", () => {
@@ -62,7 +62,6 @@ test("the guide resets on the first frame and on each cut, and reports only cuts
 });
 
 test("the two reset thresholds are not the same: a job with a motion estimator resets later than one without", () => {
-  // Pinned so that merging them is a decision made with a measurement, not a side effect of an edit.
-  expect(SCENE_CUT_LUMA_DIFF).toBe(40);
+  // The detector's 40 is pinned by the test above; this pins the estimator's, so that merging them is a decision made with a measurement.
   expect(RESET_SCENE_SCORE * 255).toBeCloseTo(61.2, 9);
 });

@@ -29,7 +29,7 @@ export interface AsyncEncodeOpen {
 /** Encode pool slot `slot` once the fence reaches `value`, then ack the slot as free. */
 export interface AsyncEncodeFrame { type: "frame"; slot: number; value: bigint }
 /** What the main thread sends the async encode worker. */
-export type AsyncEncodeIn = AsyncEncodeOpen | AsyncEncodeFrame | { type: "finish" } | AbortRequest;
+type AsyncEncodeIn = AsyncEncodeOpen | AsyncEncodeFrame | { type: "finish" } | AbortRequest;
 /** What it answers. */
 export type AsyncEncodeOut =
   | { type: "opened" }

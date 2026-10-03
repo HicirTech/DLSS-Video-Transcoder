@@ -18,7 +18,7 @@ export interface DecodeStart { type: "start"; ffmpeg: string; args: string[]; fr
 /** Allow `n` more frames to be read and posted. */
 export interface DecodeCredit { type: "credit"; n: number }
 /** What the main thread sends the decode worker. */
-export type DecodeIn = DecodeStart | DecodeCredit | AbortRequest;
+type DecodeIn = DecodeStart | DecodeCredit | AbortRequest;
 /** What it answers: each frame (its buffer transferred), then "end" or "error". */
 export type DecodeOut =
   | { type: "frame"; index: number; buf: ArrayBuffer }

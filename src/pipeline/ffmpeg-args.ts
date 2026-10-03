@@ -53,7 +53,7 @@ export function aspectArgs(displayAspect: Rational | null, width: number, height
   return [...args, "-bsf:v", `${demux}_metadata=sample_aspect_ratio=${sar.num}/${sar.den}`];
 }
 
-export interface FrameSize {
+interface FrameSize {
   width: number;
   height: number;
 }
@@ -87,7 +87,7 @@ export function faststartArgs(container: EncodeSettings["container"]): string[] 
   return container === "mp4" || container === "mov" ? ["-movflags", "+faststart"] : [];
 }
 
-export interface MuxCopySpec {
+interface MuxCopySpec {
   /** ffmpeg demuxer for the elementary stream on stdin ("h264" or "hevc"): NVENC's output has no container. */
   demux: string;
   /** The rate to stamp on the stream, which carries no timing of its own. */

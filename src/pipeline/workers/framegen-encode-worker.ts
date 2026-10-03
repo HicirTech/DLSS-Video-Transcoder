@@ -27,12 +27,12 @@ export interface FramegenEncodeOpen {
   nvenc: { width: number; height: number; fpsNum: number; fpsDen: number; codec: NvencSdkCodec; cq: number } | null;
 }
 /** One finished output frame (SharedArrayBuffer-backed, so posting it copies nothing). */
-export interface FramegenEncodeFrame {
+interface FramegenEncodeFrame {
   type: "frame";
   rgba: Uint8Array;
 }
 /** What the main thread sends the frame-generation encode worker. */
-export type FramegenEncodeIn = FramegenEncodeOpen | FramegenEncodeFrame | { type: "finish" } | AbortRequest;
+type FramegenEncodeIn = FramegenEncodeOpen | FramegenEncodeFrame | { type: "finish" } | AbortRequest;
 /** What it answers: whether NVENC is in use (and a note on why not), one ack per frame, then "done" or "error". */
 export type FramegenEncodeOut =
   | { type: "opened"; nvenc: boolean; note: string }
