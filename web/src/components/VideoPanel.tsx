@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { Alert, Box, Button, Chip, FormControl, FormControlLabel, FormHelperText, InputLabel, Link, MenuItem, Select, Stack, Switch, Typography } from "@mui/material";
+import { Alert, Box, Button, Chip, FormControl, FormControlLabel, FormHelperText, InputLabel, Link, MenuItem, Select, Stack, Switch, Tooltip, Typography } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import type { EngineKind, FrameGenEngine, FrameGenFps, JobRequest, JobStatus, MotionKind, ToolsReport } from "../../../src/server/api-types";
 import { FFMPEG_SUPPLY_HINT, FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM } from "../../../src/server/api-types";
@@ -20,6 +20,10 @@ interface VideoPanelProps {
   tools: ToolsReport | null;
   toolsError: string | null;
 }
+
+/** What the NVENC chip measures and what it leaves to each job: ToolsReport.nvenc only says that ffmpeg lists the encoder. */
+const NVENC_CHIP_HELP =
+  "Whether this ffmpeg build lists the h264_nvenc encoder. It does not test your GPU, hevc_nvenc or av1_nvenc: each job test-encodes one frame with its own codec on its own GPU and falls back to the CPU codec when that fails.";
 
 function ToolsBanner({ tools, toolsError }: { tools: ToolsReport | null; toolsError: string | null }) {
   if (toolsError) {
@@ -44,11 +48,13 @@ function ToolsBanner({ tools, toolsError }: { tools: ToolsReport | null; toolsEr
     <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
       <Chip label={`ffmpeg ${tools.ffmpeg.version ?? ""}`.trim()} color="success" variant="outlined" />
       <Chip label={`ffprobe ${tools.ffprobe.version ?? ""}`.trim()} color="success" variant="outlined" />
-      <Chip
-        label={tools.nvenc === null ? "NVENC unknown" : tools.nvenc ? "NVENC available" : "NVENC unavailable"}
-        color={tools.nvenc ? "success" : "default"}
-        variant="outlined"
-      />
+      <Tooltip title={NVENC_CHIP_HELP}>
+        <Chip
+          label={tools.nvenc === null ? "NVENC build unknown" : tools.nvenc ? "ffmpeg built with NVENC" : "ffmpeg built without NVENC"}
+          color={tools.nvenc ? "success" : "default"}
+          variant="outlined"
+        />
+      </Tooltip>
       <Typography variant="caption" color="text.secondary">
         <Mono dim>{tools.ffmpeg.path}</Mono>
       </Typography>
