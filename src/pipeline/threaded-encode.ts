@@ -15,7 +15,9 @@
  */
 import { throwIfAborted } from "./cancel.ts";
 import type { Engine } from "./engine.ts";
+import { connectFrameFlow, type FrameCounts } from "./frame-flow.ts";
 import { WorkerPairRun } from "./worker-pair-run.ts";
+import type { EncodeFrame, EncodeOpen } from "./workers/encode-worker.ts";
 
 /** Max frames in flight across the whole pipeline: the decode worker's initial credit. */
 const CREDIT_WINDOW = 8;
@@ -30,10 +32,7 @@ export interface ThreadedEncodeParams {
   /** ffmpeg mux argv after the binary; must read the elementary stream on pipe:0. */
   sinkArgs: string[];
   /** NVENC settings; `ordinal` is the renderer's CUDA device (GpuSession.cudaOrdinal), so encode and render share one GPU. */
-  enc: {
-    width: number; height: number; fpsNum: number; fpsDen: number;
-    codec: "h264" | "hevc"; cq?: number; ordinal: number;
-  };
+  enc: EncodeOpen["enc"];
   totalFrames: number | null;
   /** Per-frame guide computed on the main thread (scene cut / motion). */
   guide: (rgba: Uint8Array, frameIndex: number) => { reset: boolean; motion: Float32Array | null; sceneCut: boolean };
@@ -46,7 +45,7 @@ export interface ThreadedEncodeParams {
   createWorker?: (script: URL) => Worker;
 }
 
-export function runThreadedEncode(p: ThreadedEncodeParams): Promise<{ frames: number; sceneCuts: number }> {
+export function runThreadedEncode(p: ThreadedEncodeParams): Promise<FrameCounts> {
   throwIfAborted(p.signal);
   const progress = p.onProgress ?? (() => {});
   const createWorker = p.createWorker ?? ((script: URL) => new Worker(script.href));
@@ -60,65 +59,30 @@ export function runThreadedEncode(p: ThreadedEncodeParams): Promise<{ frames: nu
       throw error;
     }
 
-    let sent = 0; // frames handed to the encode worker
-    let frames = 0; // frames processed by the engine
-    let sceneCuts = 0;
-    let decodeEnded = false;
-
     // The engine belongs to the caller; the workers are all this run owns.
-    const run = new WorkerPairRun<{ frames: number; sceneCuts: number }>({
+    const run = new WorkerPairRun<FrameCounts>({
       decodeWorker: decodeW, encodeWorker: encodeW, signal: p.signal, onFinishing: p.onFinishing, resolve, reject,
     });
-    const finishIfDone = (): void => {
-      if (run.running && decodeEnded && run.framesWritten === sent) run.finish();
-    };
-
-    encodeW.onmessage = (event: MessageEvent) => {
-      const msg = event.data as { type: string; message?: string };
-      if (msg.type === "encoded") run.recordEncoded();
-      // After a stop the encoder may still answer "opened" or "encoded": neither may start the decoder or report progress.
-      if (!run.active) return;
-      if (msg.type === "opened") {
-        decodeW.postMessage({ type: "start", ffmpeg: p.ffmpeg, args: p.decodeArgs, frameBytes: p.frameBytes });
-        decodeW.postMessage({ type: "credit", n: CREDIT_WINDOW });
-      } else if (msg.type === "encoded") {
-        if (!decodeEnded) decodeW.postMessage({ type: "credit", n: 1 });
-        const total = p.totalFrames;
-        const written = run.framesWritten;
-        progress(total ? Math.min(0.98, written / total) : 0.5, `frame ${written}/${total ?? "?"}`, written);
-        finishIfDone();
-      } else if (msg.type === "done") {
-        run.succeed({ frames, sceneCuts });
-      } else if (msg.type === "error") {
-        run.fail(`encode: ${msg.message}`);
-      }
-    };
-
-    decodeW.onmessage = (event: MessageEvent) => {
-      const msg = event.data as { type: string; index?: number; buf?: ArrayBuffer; frames?: number; message?: string };
-      if (!run.active) return;
-      if (msg.type === "frame") {
-        try {
-          const rgba = new Uint8Array(msg.buf!);
-          const g = p.guide(rgba, frames);
-          if (g.sceneCut) sceneCuts++;
-          const result = p.engine.process({ rgba, reset: g.reset, motion: g.motion });
-          frames++;
-          const out = result.buffer as ArrayBuffer;
-          encodeW.postMessage({ type: "frame", index: msg.index, buf: out }, [out]);
-          sent++;
-        } catch (error) {
-          run.fail(`engine: ${(error as Error).message}`);
-        }
-      } else if (msg.type === "end") {
-        decodeEnded = true;
-        finishIfDone();
-      } else if (msg.type === "error") {
-        run.fail(`decode: ${msg.message}`);
-      }
-    };
+    connectFrameFlow(run, {
+      decodeWorker: decodeW,
+      encodeWorker: encodeW,
+      decodeStart: { ffmpeg: p.ffmpeg, args: p.decodeArgs, frameBytes: p.frameBytes },
+      creditWindow: CREDIT_WINDOW,
+      totalFrames: p.totalFrames,
+      onProgress: progress,
+      processFrame: (decoded, frameNumber) => {
+        const rgba = new Uint8Array(decoded.buf);
+        const g = p.guide(rgba, frameNumber);
+        const result = p.engine.process({ rgba, reset: g.reset, motion: g.motion });
+        const out = result.buffer as ArrayBuffer;
+        const frame: EncodeFrame = { type: "frame", index: decoded.index, buf: out };
+        encodeW.postMessage(frame, [out]);
+        return g.sceneCut;
+      },
+    });
 
     // Bring the encoder + mux up first; decoding starts on "opened".
-    encodeW.postMessage({ type: "open", ffmpeg: p.ffmpeg, sinkArgs: p.sinkArgs, enc: p.enc });
+    const open: EncodeOpen = { type: "open", ffmpeg: p.ffmpeg, sinkArgs: p.sinkArgs, enc: p.enc };
+    encodeW.postMessage(open);
   });
 }

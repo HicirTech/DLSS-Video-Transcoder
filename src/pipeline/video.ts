@@ -13,6 +13,8 @@ import { createEngine, type Engine } from "./engine.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
 import { aspectArgs, audioArgs, decodeArgv, encoderArgs, faststartArgs, muxCopyArgs } from "./ffmpeg-args.ts";
 import { ffmpegFailedMessage, NoFramesDecodedError } from "./ffmpeg-failure.ts";
+import type { FrameCounts } from "./frame-flow.ts";
+import { frameProgress } from "./frame-progress.ts";
 import { defaultOutputPath } from "./output-path.ts";
 import { framesWrittenOf, removePartialOutput } from "./partial-output.ts";
 import { type Rational, ratToNumber, rational, tryParseRate } from "./rational.ts";
@@ -276,6 +278,13 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const renderHeight = upscaling ? info.height : target.height;
   progress(0, `source ${info.width}x${info.height}${info.displayAspect ? ` (non-square pixels, display ${info.displayAspect.num}:${info.displayAspect.den})` : ""} ${info.codec} ${info.fpsText} fps, ${info.frames ?? "?"} frames; ${upscaling ? `upscaling to ${target.width}x${target.height}` : `working size ${target.width}x${target.height}`}`);
 
+  /** Says so in the progress line and builds the job's result, once an encode of `counts` frames at `size` has finished. */
+  const completed = (size: { width: number; height: number }, counts: FrameCounts): VideoJobResult => {
+    if (counts.frames === 0) throw new NoFramesDecodedError();
+    progress(1, `encoded ${counts.frames} frames to ${output}${counts.sceneCuts ? ` (${counts.sceneCuts} scene cuts reset history)` : ""}`);
+    return { output, width: size.width, height: size.height, fps: info.fps, frames: counts.frames, sceneCuts: counts.sceneCuts, engine: options.engine, ms: Math.round(performance.now() - started) };
+  };
+
   // The probe above is synchronous; a cancel sent during it is only delivered after a yield.
   await throwIfAbortedAfterYield(options.signal);
   const session = openGpu({ adapterIndex: options.adapterIndex, adapterUuid: options.adapterUuid, debugLayer: options.debugLayer });
@@ -319,9 +328,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
           enc: { fpsNum: num, fpsDen: den, codec: nrNative.codec, cq: encode.quality, ordinal: cudaOrdinal },
           totalFrames: info.frames, guide, onProgress: progress, signal: options.signal, onFinishing: options.onFinishing,
         });
-        if (r.frames === 0) throw new NoFramesDecodedError();
-        progress(1, `encoded ${r.frames} frames to ${output}${r.sceneCuts ? ` (${r.sceneCuts} scene cuts reset history)` : ""}`);
-        return { output, width: target.width, height: target.height, fps: info.fps, frames: r.frames, sceneCuts: r.sceneCuts, engine: options.engine, ms: Math.round(performance.now() - started) };
+        return completed(target, r);
       } catch (error) {
         // The orchestrator has already made the mux ffmpeg release the file.
         removePartialOutput(output, framesWrittenOf(error), outputExisted);
@@ -440,8 +447,8 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
           const wrote = encoder.stdin.write(result);
           if (wrote instanceof Promise) await wrote;
           frames++;
-          const total = info.frames;
-          progress(total ? Math.min(0.98, frames / total) : 0.5, `frame ${frames}/${total ?? "?"}`, frames);
+          const { fraction, message } = frameProgress(frames, info.frames);
+          progress(fraction, message, frames);
         }
         options.onFinishing?.();
         encoder.stdin.end();
@@ -468,7 +475,5 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
     engine.close();
     session.close();
   }
-  if (frames === 0) throw new NoFramesDecodedError();
-  progress(1, `encoded ${frames} frames to ${output}${sceneCuts ? ` (${sceneCuts} scene cuts reset history)` : ""}`);
-  return { output, width: outWidth, height: outHeight, fps: info.fps, frames, sceneCuts, engine: options.engine, ms: Math.round(performance.now() - started) };
+  return completed({ width: outWidth, height: outHeight }, { frames, sceneCuts });
 }
