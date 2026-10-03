@@ -6,12 +6,13 @@
  * crash inside NVIDIA code then leaves the last trace line as the culprit.
  */
 import { mkdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { D3D12Device } from "../native/d3d12.ts";
 import { DxgiFactory, type DxgiAdapter } from "../native/dxgi.ts";
 import { hex32 } from "../native/memory.ts";
 import { parsePe } from "../native/pe.ts";
 import { parseVersionInfo } from "../native/version-info.ts";
+import { callerDir } from "../paths.ts";
 import { DEFAULT_FLOW_WIDTH, MIN_FLOW_SIDE } from "../pipeline/flow.ts";
 import { chooseGpu, gpuCandidates, isEligibleGpu } from "../pipeline/gpu.ts";
 import { probeNvof } from "../pipeline/nvof.ts";
@@ -265,10 +266,10 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   // --- forwarder shim: prepared before Init so every NGX call routes through nvngx.dll ---
   if (core) {
     try {
-      const callerDir = join(runtimeDir, "caller");
-      mkdirSync(callerDir, { recursive: true });
+      const shimDir = callerDir(runtimeDir);
+      mkdirSync(shimDir, { recursive: true });
       trace("prepareForwarder");
-      const { forwarder, wrote } = await prepareForwarder(callerDir);
+      const { forwarder, wrote } = await prepareForwarder(shimDir);
       report.forwarder.path = forwarder.path;
       report.forwarder.generated = true;
       report.forwarder.loaded = true;

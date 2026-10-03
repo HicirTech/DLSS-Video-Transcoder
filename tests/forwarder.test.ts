@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildForwarderDll, FORWARDER_EXPORTS, stackAllocationUnwindCodes, writeForwarder, writeForwarderSync } from "../src/ngx/forwarder.ts";
-import { loadForwarder, selfTestForwarder, type ForwarderModule } from "../src/ngx/forwarder-runtime.ts";
+import { loadForwarder, selfTestForwarder, shimPath, type ForwarderModule } from "../src/ngx/forwarder-runtime.ts";
 import { parsePe, type PeInfo } from "../src/native/pe.ts";
 
 // The three stubs that call through a slot; each reserves shadow space plus three stack arguments,
@@ -158,6 +158,12 @@ test("the unwinder finds each loaded stub and unwinds it to its caller's return 
     kernel32.close();
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("the shim is named nvngx.dll inside its folder, whether or not the folder ends in a separator", () => {
+  expect(shimPath("C:\\app\\runtime\\caller")).toBe("C:\\app\\runtime\\caller\\nvngx.dll");
+  expect(shimPath("C:\\app\\runtime\\caller\\")).toBe("C:\\app\\runtime\\caller\\nvngx.dll");
+  expect(shimPath("C:/app/runtime/caller/")).toBe("C:/app/runtime/caller\\nvngx.dll");
 });
 
 test("writeForwarderSync replaces a shim whose bytes differ and leaves an identical one alone", () => {

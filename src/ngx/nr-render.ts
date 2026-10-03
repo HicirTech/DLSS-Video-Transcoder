@@ -23,12 +23,14 @@ import {
 } from "../native/d3d12.ts";
 import { viewNative } from "../native/memory.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
+import { callerDir, featureDir } from "../paths.ts";
 import type { NrSettings } from "../server/api-types.ts";
 import { FeatureCommonInfo, NgxCore } from "./core.ts";
 import { prepareForwarderSync } from "./forwarder-runtime.ts";
 import { NgxParamObject } from "./param-object.ts";
 import { NrParam } from "./params.ts";
 import { NGX_APPLICATION_ID, PerfQuality, ngxCheck } from "./results.ts";
+import { featureByKey } from "./runtime-catalog.ts";
 
 const UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 const NGX_MODELS = "C:\\ProgramData\\NVIDIA\\NGX\\models";
@@ -60,11 +62,11 @@ export class DlssNrSession {
   static open(session: GpuSession, opts: NrRenderOptions): DlssNrSession {
     const appData = opts.appDataPath ?? join(opts.runtimeDir, "..", "logs");
     mkdirSync(appData, { recursive: true });
-    const dllDir = opts.dllDir ?? join(opts.runtimeDir, "dlssnr");
-    const dll = join(dllDir, "nvngx_dlssnr.dll");
+    const dllDir = opts.dllDir ?? featureDir(opts.runtimeDir, "nr");
+    const dll = join(dllDir, featureByKey("nr").dllName);
 
     const core = NgxCore.load({ path: dll, folder: dllDir, source: "driverstore", modifiedAt: statSync(dll).mtime });
-    const { forwarder } = prepareForwarderSync(join(opts.runtimeDir, "caller"));
+    const { forwarder } = prepareForwarderSync(callerDir(opts.runtimeDir));
     core.useForwarder(forwarder);
     ngxCheck(
       core.initExt(session.device.ptr, NGX_APPLICATION_ID, appData, new FeatureCommonInfo([dllDir, NGX_MODELS])),

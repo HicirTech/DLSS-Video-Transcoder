@@ -44,16 +44,21 @@ export function loadForwarder(path: string): ForwarderModule {
   };
 }
 
+/** Where the generated shim sits inside `dir`: NGX accepts calls only from a module named nvngx.dll. */
+export function shimPath(dir: string): string {
+  return `${dir.replace(/[\\/]+$/, "")}\\nvngx.dll`;
+}
+
 /** Generate the shim under `dir` (as `nvngx.dll`) and load it. */
 export async function prepareForwarder(dir: string): Promise<{ forwarder: ForwarderModule; wrote: boolean }> {
-  const path = `${dir.replace(/[\\/]+$/, "")}\\nvngx.dll`;
+  const path = shimPath(dir);
   const { wrote } = await writeForwarder(path);
   return { forwarder: loadForwarder(path), wrote };
 }
 
 /** Synchronous sibling of prepareForwarder, for callers that cannot await (engine factories). */
 export function prepareForwarderSync(dir: string): { forwarder: ForwarderModule; wrote: boolean } {
-  const path = `${dir.replace(/[\\/]+$/, "")}\\nvngx.dll`;
+  const path = shimPath(dir);
   const { wrote } = writeForwarderSync(path);
   return { forwarder: loadForwarder(path), wrote };
 }

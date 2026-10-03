@@ -8,7 +8,7 @@ import { isAbsolute, join } from "node:path";
 import { readVersionInfo } from "../native/version-info.ts";
 import { DlssgFeature, DlssgUnavailableError, capabilityRefusal, type DlssgRuntimeOptions } from "../ngx/dlssg-feature.ts";
 import { featureByKey } from "../ngx/runtime-catalog.ts";
-import { RUNTIME_DIR } from "../paths.ts";
+import { callerDir, featureDir, RUNTIME_DIR } from "../paths.ts";
 import { HostStatus, encodeProbeLine, type DlssgLaunch, type DlssgProbeLine, type DlssgSetup } from "./dlssg-protocol.ts";
 import { claimStdout, logToStderr, serveDlssg, type GeneratorOpening } from "./dlssg-serve.ts";
 import { openGpu, type GpuSession } from "./gpu.ts";
@@ -42,7 +42,7 @@ function parseArguments(args: readonly string[]): { launch: DlssgLaunch; runtime
   if (!isAbsolute(runtimeRoot)) return `--runtime must be an absolute path, got "${runtimeRoot}". ${USAGE}`;
   // The same layout sr.ts, nr-render.ts and probe.ts use: the feature's own folder is its NGX
   // search path, and the caller shim sits beside it, never inside it (DlssgFeature refuses that).
-  const runtime = { runtimeDir: join(runtimeRoot, FRAME_GENERATION.runtimeSubdir), callerDir: join(runtimeRoot, "caller") };
+  const runtime = { runtimeDir: featureDir(runtimeRoot, "fg"), callerDir: callerDir(runtimeRoot) };
   if (mode === "--probe") return { launch: { mode }, runtime };
   const sharedMemoryName = options.get("--shared");
   if (!sharedMemoryName) return `--serve needs --shared, the name of the shared frame memory the parent created. ${USAGE}`;
