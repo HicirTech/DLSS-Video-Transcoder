@@ -9,7 +9,7 @@
  * encodes the slot straight from GPU memory. DLSS runs on D3D12 compute and
  * NVENC on the separate encoder units, so frame i+1's DLSS overlaps frame i's
  * encode. A slot only becomes free again when the encode worker acks it, which
- * bounds memory to `poolSize` frames.
+ * bounds memory to POOL_SLOTS frames.
  */
 import { AsyncSubmit } from "../native/async-submit.ts";
 import { closeHandle } from "../native/cuda-interop.ts";
@@ -19,6 +19,9 @@ import { throwIfAborted } from "./cancel.ts";
 import type { GpuSession } from "./gpu.ts";
 import type { NvencSdkCodec } from "./nvenc.ts";
 import { WorkerPairRun } from "./worker-pair-run.ts";
+
+/** Shared buffer slots, and so the most frames in flight between DLSS and NVENC. */
+const POOL_SLOTS = 4;
 
 export interface AsyncNrEncodeParams {
   session: GpuSession;
@@ -35,7 +38,6 @@ export interface AsyncNrEncodeParams {
   /** Per-frame guide (main thread), NR takes no motion. */
   guide: (rgba: Uint8Array, index: number) => { reset: boolean; sceneCut: boolean };
   onProgress?: (fraction: number, message: string, frames?: number) => void;
-  poolSize?: number;
   /** Cooperative cancellation: until the encode is finishing, the run stops at the next frame and rejects with JobCancelledError. */
   signal?: AbortSignal;
   /** Called once as the run starts finishing; see VideoJobOptions.onFinishing. */
@@ -113,10 +115,9 @@ export function runAsyncNrEncode(p: AsyncNrEncodeParams): Promise<{ frames: numb
   // Before anything below is allocated or spawned.
   throwIfAborted(p.signal);
   const progress = p.onProgress ?? (() => {});
-  const K = p.poolSize ?? 4;
   const frameBytes = p.width * p.height * 4;
 
-  const pool = createSharedPool(p.session, K, p.totalBytes);
+  const pool = createSharedPool(p.session, POOL_SLOTS, p.totalBytes);
   let workers: { encodeWorker: Worker; decodeWorker: Worker };
   try {
     workers = startWorkers();
@@ -128,7 +129,7 @@ export function runAsyncNrEncode(p: AsyncNrEncodeParams): Promise<{ frames: numb
   const { encodeWorker, decodeWorker } = workers;
 
   return new Promise((resolve, reject) => {
-    const freeSlots: number[] = []; for (let i = 0; i < K; i++) freeSlots.push(i);
+    const freeSlots: number[] = []; for (let i = 0; i < POOL_SLOTS; i++) freeSlots.push(i);
     let frames = 0, sceneCuts = 0, decodeEnded = false;
     // Any reply from the encode worker means it handled "open", which closes
     // the NT handles; one that died before that leaves them to this side.
@@ -155,7 +156,7 @@ export function runAsyncNrEncode(p: AsyncNrEncodeParams): Promise<{ frames: numb
       if (!run.active) return;
       if (m.type === "opened") {
         decodeWorker.postMessage({ type: "start", ffmpeg: p.ffmpeg, args: p.decodeArgs, frameBytes });
-        decodeWorker.postMessage({ type: "credit", n: K });
+        decodeWorker.postMessage({ type: "credit", n: POOL_SLOTS });
       } else if (m.type === "encoded") {
         freeSlots.push(m.slot!);
         if (!decodeEnded) decodeWorker.postMessage({ type: "credit", n: 1 });
