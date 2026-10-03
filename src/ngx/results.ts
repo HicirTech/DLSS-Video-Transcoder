@@ -185,10 +185,9 @@ export const DLSS_RATIO: Record<number, number> = {
  * rule: the CLI and the job engine must agree, or a job and its command line
  * would produce different sizes from the same number.
  *
- * A request to upscale never snaps to DLAA. DLAA's ratio is 1.0, so with
- * UltraQuality gone it would be the nearest match for anything under ~1.25 —
- * and answering "make it 1.2x bigger" with a same-size image is worse than the
- * hard error this replaces.
+ * A factor above 1 never snaps to DLAA. Its ratio, 1.0, is the nearest to
+ * anything under 1.25 (the midpoint to MaxQuality's 1.5), so a request to
+ * upscale would come back at the source size. A factor of 1 or less runs DLAA.
  */
 export function qualityForFactor(factor: number): number {
   const candidates = Object.entries(DLSS_RATIO).filter(([, ratio]) => factor > 1 ? ratio > 1 : true);
