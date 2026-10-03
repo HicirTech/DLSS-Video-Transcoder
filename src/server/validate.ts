@@ -6,6 +6,7 @@
  * The limits come from api-types.ts, which the web UI clamps to as well, so a
  * value the UI accepts is never rejected here and vice versa.
  */
+import { DEVICE_UUID_GROUP_LENGTHS, DEVICE_UUID_PATTERN } from "../native/device-uuid.ts";
 import { resolveTargetRate } from "../pipeline/framegen-plan.ts";
 import {
   ENCODE_CODECS,
@@ -115,8 +116,8 @@ export function validateJobRequest(value: unknown): string | null {
   if (wrongMotion) return wrongMotion;
   if (v.dllDir !== undefined && typeof v.dllDir !== "string") return "dllDir must be a string when present.";
   if (v.adapterUuid !== undefined) {
-    if (typeof v.adapterUuid !== "string" || !/^GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v.adapterUuid)) {
-      return 'adapterUuid must be a CUDA device UUID as GET /api/probe lists it ("GPU-" followed by 8-4-4-4-12 hex digits).';
+    if (typeof v.adapterUuid !== "string" || !DEVICE_UUID_PATTERN.test(v.adapterUuid)) {
+      return `adapterUuid must be a CUDA device UUID as GET /api/probe lists it ("GPU-" followed by ${DEVICE_UUID_GROUP_LENGTHS.join("-")} hex digits).`;
     }
     // Frame generation picks its GPU in its host process (README, "Shared options"); a stored GPU choice cannot apply to it.
     if (v.frameGen !== undefined) return `adapterUuid does not apply to frame generation, which picks its GPU itself (${FRAME_GEN_GPU_CHOICE}); omit it.`;
