@@ -123,7 +123,10 @@ export const COMMANDS: readonly CommandSpec[] = [
   },
 ];
 
-/** "1.00=DLAA, 1.30=UltraQuality, ..." — the --factor help and the sr summary must name the same modes, so both read DLSS_RATIO. */
+/**
+ * "1.00=DLAA, 1.50=MaxQuality, 1.72=Balanced, 2.00=MaxPerf, 3.00=UltraPerformance": the --factor help
+ * and the sr summary must name the same modes, so both read DLSS_RATIO.
+ */
 function srModeList(): string {
   return Object.entries(DLSS_RATIO)
     .sort((a, b) => a[1] - b[1])
