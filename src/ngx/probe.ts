@@ -386,8 +386,8 @@ function judgeReadiness({ report, reasons }: ProbeContext, { cudaOrdinal }: Prob
   // both loaded and passed its self-test (a loaded-but-broken shim cannot reach
   // the driver). CreateFeature(18) itself is left to the nr command and the
   // pipeline: running it in-process can destabilise a long-lived server.
-  // Init belongs here: it runs whenever core and device exist, and leaving it out
-  // let the report say YES while listing an Init failure underneath.
+  // Init belongs here: it runs whenever core and device exist, so a failed Init
+  // must turn the verdict to NO.
   const forwarderOk = report.forwarder.loaded && Boolean(report.forwarder.selfTest?.startsWith("ok"));
   const prerequisites =
     cudaOrdinal !== null && nrRuntimeInstalled && forwarderOk && report.device.created && core !== null && report.ngxInit.ok;
