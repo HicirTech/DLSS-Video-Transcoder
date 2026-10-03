@@ -56,10 +56,8 @@ const NAMED_RATES: Record<FrameGenFps, Rational> = {
 
 /**
  * The exact rate of a named choice, or undefined. Checks the choice list instead of indexing,
- * because the name is a raw user string (`--fps`, the API's frameGen.targetFps): on an ordinary
- * object NAMED_RATES["toString"] is Object.prototype.toString, which is truthy, so the caller
- * skipped its parse branch and handed a function to the planner, which died inside the rational
- * arithmetic with "Invalid mix of BigInt and other type in multiplication".
+ * because the name is a raw user string (`--fps`, the API's frameGen.targetFps) and indexing
+ * NAMED_RATES with "toString" would find Object.prototype.toString, not a rate.
  */
 function namedRate(name: string): Rational | undefined {
   return (FRAME_GEN_FPS_CHOICES as readonly string[]).includes(name) ? NAMED_RATES[name as FrameGenFps] : undefined;
