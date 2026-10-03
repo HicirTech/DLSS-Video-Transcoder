@@ -4,7 +4,7 @@
  * these runs a command.
  */
 import { describe, expect, test } from "bun:test";
-import { EXIT_USAGE } from "../src/cli/usage-error.ts";
+import { EXIT_FAILED, EXIT_USAGE } from "../src/cli/usage-error.ts";
 import { PROJECT_ROOT } from "../src/paths.ts";
 
 function runCli(...args: string[]): { status: number | null; out: string; err: string } {
@@ -20,6 +20,14 @@ describe("a help page ends with exit status 0", () => {
       expect(err, args.join(" ")).toBe("");
     }
     expect(runCli("sr", "--help").out).toContain("--factor");
+  });
+
+  test("the overview states what each exit status means, with probe's meaning kept", () => {
+    const { out } = runCli("help");
+    expect(out).toContain("exit status:");
+    expect(out).toContain("  0  the command succeeded (probe: neural rendering is ready)");
+    expect(out).toContain(`  ${EXIT_FAILED}  the run failed (probe: neural rendering is not ready)`);
+    expect(out).toContain(`  ${EXIT_USAGE}  the command line is wrong: an unknown command or option, a value an option does not accept, or a missing argument`);
   });
 });
 
