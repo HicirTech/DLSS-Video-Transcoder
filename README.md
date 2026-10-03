@@ -123,8 +123,8 @@ All JSON, same-origin base:
 
 | Method & path | Returns |
 | --- | --- |
-| `GET /api/probe` | ProbeReport (hardware/runtime probe) |
-| `GET /api/runtime` | Runtime report |
+| `GET /api/probe` | ProbeReport (hardware/runtime probe). It runs in a process of its own, one probe at a time; `500 { error }` if that process fails or runs over 30 s |
+| `GET /api/runtime` | Runtime report: the DLLs in the runtime folder, read without a probe |
 | `GET /api/tools` | ffmpeg / ffprobe / NVENC availability |
 | `GET /api/catalog` | DLL version catalog |
 | `GET /api/settings/defaults` | defaults |

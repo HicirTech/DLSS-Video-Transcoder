@@ -2,8 +2,9 @@
  * Shared contract between the Bun server (src/server) and the React UI (web/).
  *
  * HTTP endpoints (all JSON unless noted):
- *   GET  /api/probe                 -> ProbeReport      (runs the hardware / runtime probe, can take a few seconds)
- *   GET  /api/runtime               -> ProbeReport["runtime"]
+ *   GET  /api/probe                 -> ProbeReport      (runs the hardware / runtime probe in a process of its own, can take a few seconds;
+ *                                                        500 { error } if that process fails or does not finish in time)
+ *   GET  /api/runtime               -> ProbeReport["runtime"]  (reads the runtime folder only; no probe runs)
  *   GET  /api/settings/defaults     -> SettingsDefaults
  *   GET  /api/jobs                  -> JobStatus[]
  *   POST /api/jobs   body JobRequest -> JobStatus
