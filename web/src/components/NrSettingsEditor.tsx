@@ -52,8 +52,6 @@ function formatSkin(value: number): string {
  * reference tool and is not offered here at all.
  */
 export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
-  // useId, not a constant: every tab stays mounted, so two panels can render
-  // this component at once and a fixed id would appear twice in one document.
   const styleLabelId = useId();
   const presetLabelId = useId();
   const update = (patch: Partial<NrSettings>): void => onChange({ ...value, ...patch });
