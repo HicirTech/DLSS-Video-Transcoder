@@ -2,7 +2,7 @@
 import { ENCODE_CODECS, FRAME_GEN_ENGINES, SETTING_RANGES } from "../server/api-types.ts";
 import { processFrameGen } from "../pipeline/framegen.ts";
 import { choiceOption, numberOption, option, positionalArgs, runtimeDirOption } from "./args.ts";
-import { commandSpec } from "./commands.ts";
+import { commandSpec, FG_MULTIPLIER_OPTION } from "./commands.ts";
 import { printHelp } from "./help.ts";
 
 export async function fgCommand(args: string[]): Promise<void> {
@@ -17,8 +17,7 @@ export async function fgCommand(args: string[]): Promise<void> {
     input,
     output: positional[1],
     targetFps: option(args, "--fps"),
-    // 16x is the top of the FPS table's reach from a 30 fps source (480).
-    multiplier: numberOption(args, "--multiplier", { min: 1, max: 16, integer: true, fallback: 2 }),
+    multiplier: numberOption(args, "--multiplier", FG_MULTIPLIER_OPTION),
     engine: choiceOption(args, "--engine", FRAME_GEN_ENGINES),
     // The same range the API validates against and the UI clamps to.
     quality: numberOption(args, "--quality", { ...SETTING_RANGES.quality, fallback: 20 }),
