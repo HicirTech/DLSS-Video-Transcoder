@@ -24,7 +24,7 @@ import {
   type DlssgIntervalInput,
   type DlssgIntervalResult,
 } from "../src/ngx/dlssg-feature.ts";
-import { callerDir as defaultCallerDir, RUNTIME_DIR } from "../src/paths.ts";
+import { callerDir as defaultCallerDir, featureDir, RUNTIME_DIR } from "../src/paths.ts";
 import { encodeMotionR16G16 } from "../src/pipeline/flow.ts";
 import { openGpu } from "../src/pipeline/gpu.ts";
 
@@ -73,7 +73,7 @@ function option(name: string, fallback: string): string {
   return index >= 0 && process.argv[index + 1] !== undefined ? process.argv[index + 1]! : fallback;
 }
 
-const runtimeDir = option("--runtime-dir", join(RUNTIME_DIR, "dlssg"));
+const runtimeDir = option("--runtime-dir", featureDir(RUNTIME_DIR, "fg"));
 const callerDir = option("--caller-dir", defaultCallerDir(RUNTIME_DIR));
 const dumpDir = option("--dump", "");
 

@@ -13,8 +13,7 @@
  *
  *   bun run tests/diag-dlssg-psnr.ts [--input <video>] [--generated N (3 = 4x)] [--kept-frames K (0 = whole clip)]
  */
-import { join } from "node:path";
-import { RUNTIME_DIR } from "../src/paths.ts";
+import { featureDir, RUNTIME_DIR } from "../src/paths.ts";
 import { DlssgSession } from "../src/pipeline/dlssg.ts";
 import { HOST_PROCESS_NAME } from "../src/pipeline/dlssg-host-launch.ts";
 import { createMotionEstimator } from "../src/pipeline/flow.ts";
@@ -125,7 +124,7 @@ const sorted = [...scores].sort((a, b) => a - b);
 const median = sorted.length ? percentile(sorted, 0.5) : Number.NaN;
 // A reset interval (a scene cut) is empty by design; any other empty one had generation disabled.
 const disabledIntervals = Math.max(0, counts.emptyIntervals - counts.sceneCuts);
-console.log(`${input} kept every ${sourceStep}th frame: ${counts.kept} kept, native ${sourceStep}x on ${HOST_PROCESS_NAME} (${join(RUNTIME_DIR, "dlssg")}), optical flow ${opticalFlow}, ${seconds.toFixed(1)} s`);
+console.log(`${input} kept every ${sourceStep}th frame: ${counts.kept} kept, native ${sourceStep}x on ${HOST_PROCESS_NAME} (${featureDir(RUNTIME_DIR, "fg")}), optical flow ${opticalFlow}, ${seconds.toFixed(1)} s`);
 console.log(`intervals: ${counts.generatedIntervals} generated, ${counts.emptyIntervals} empty after the first (${disabledIntervals} beyond the scene cuts), ${counts.mismatchedIntervals} with a frame count other than ${generatedCount}, ${counts.sceneCuts} scene cut(s)`);
 if (sorted.length) {
   console.log(`PSNR of ${sorted.length} generated frames against the dropped real frames: median ${median.toFixed(2)} dB, mean ${(scores.reduce((sum, value) => sum + value, 0) / scores.length).toFixed(2)}, 5th percentile ${percentile(sorted, 0.05).toFixed(2)}, min ${sorted[0]!.toFixed(2)}, max ${sorted.at(-1)!.toFixed(2)}`);

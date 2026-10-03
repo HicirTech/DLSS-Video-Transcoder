@@ -3,7 +3,7 @@
  * tell the user when it fails.
  */
 import { join, resolve } from "node:path";
-import { featureByKey } from "../ngx/runtime-catalog.ts";
+import { callerDir, featureDir } from "../paths.ts";
 import type { DlssgLaunch } from "./dlssg-protocol.ts";
 
 /** What messages call the host process: its script, and the image Task Manager lists it under. */
@@ -36,13 +36,13 @@ function withoutNgxLogging(environment: NodeJS.ProcessEnv): Record<string, strin
 
 /** The host process for the runtime folder `runtimeRoot` (the one holding dlssg/ and caller/). */
 export function dlssgHost(runtimeRoot: string): DlssgHost {
-  const cwd = join(runtimeRoot, featureByKey("fg").runtimeSubdir);
+  const cwd = featureDir(runtimeRoot, "fg");
   // dlssg-host.ts refuses a relative --runtime: the host runs in cwd, not in this process's folder.
   const absoluteRoot = resolve(runtimeRoot);
   return {
     cwd,
     env: withoutNgxLogging(process.env),
-    hint: `Check that ${cwd} holds nvngx_dlssg.dll, that ${join(absoluteRoot, "caller")} can be written, and that your GPU driver is up to date, then run the job again.`,
+    hint: `Check that ${cwd} holds nvngx_dlssg.dll, that ${callerDir(absoluteRoot)} can be written, and that your GPU driver is up to date, then run the job again.`,
     command: (launch) => [process.execPath, HOST_ENTRY, launch.mode, "--runtime", absoluteRoot, ...(launch.mode === "--serve" ? ["--shared", launch.sharedMemoryName] : [])],
   };
 }
