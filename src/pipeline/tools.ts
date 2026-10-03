@@ -5,7 +5,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_RUNTIME_DIR } from "../paths.ts";
-import type { ToolsReport } from "../server/api-types.ts";
+import { FFMPEG_SUPPLY_HINT, type ToolsReport } from "../server/api-types.ts";
 
 /** Where a build placed under the project's runtime folder is found; it stays there when NR_RUNTIME_DIR moves the DLLs. */
 export const BUNDLED_FFMPEG_DIR = join(DEFAULT_RUNTIME_DIR, "ffmpeg", "bin");
@@ -42,7 +42,7 @@ export function requireFfmpegTools(purpose: string): { ffmpeg: string; ffprobe: 
   const ffmpeg = findTool("ffmpeg");
   const ffprobe = findTool("ffprobe");
   if (!ffmpeg || !ffprobe) {
-    throw new Error(`ffmpeg and ffprobe are required for ${purpose} (install with \`winget install Gyan.FFmpeg\` or set FFMPEG_PATH / FFPROBE_PATH).`);
+    throw new Error(`ffmpeg and ffprobe are required for ${purpose}; ${FFMPEG_SUPPLY_HINT}.`);
   }
   return { ffmpeg, ffprobe };
 }

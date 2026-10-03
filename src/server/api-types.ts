@@ -386,6 +386,12 @@ export interface ProbeReport {
   log: string[];
 }
 
+/**
+ * Every way to make ffmpeg and ffprobe findable (src/pipeline/tools.ts looks for them in this order), in
+ * the words the job errors and the web banner share. runtime/ffmpeg/bin is tools.ts's BUNDLED_FFMPEG_DIR.
+ */
+export const FFMPEG_SUPPLY_HINT = "set FFMPEG_PATH / FFPROBE_PATH in the environment, put both on PATH, place them in the project's runtime/ffmpeg/bin folder, or run `winget install Gyan.FFmpeg`";
+
 export interface ToolsReport {
   ffmpeg: { path: string | null; version: string | null };
   ffprobe: { path: string | null; version: string | null };
