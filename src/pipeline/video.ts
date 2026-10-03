@@ -26,7 +26,7 @@ import { runThreadedEncode } from "./threaded-encode.ts";
 import { runAsyncNrEncode } from "./async-nr-encode.ts";
 import { tryCreateNvofBackend } from "./nvof.ts";
 import { DXGI_FORMAT_R8G8B8A8_UNORM, linearLayout } from "../native/d3d12.ts";
-import { describeGpu, openGpu } from "./gpu.ts";
+import { describeGpu, openGpu, type GpuSession } from "./gpu.ts";
 import { resolveTargetSize } from "./image.ts";
 import { evenSize } from "./resize.ts";
 import { requireFfmpegTools } from "./tools.ts";
@@ -257,7 +257,41 @@ function rateParts(text: string): { num: number; den: number } {
   return { num: Number(rate.num), den: Number(rate.den) };
 }
 
-export async function processVideo(options: VideoJobOptions): Promise<VideoJobResult> {
+/** What every encode path of a job shares, settled once before a path is chosen. */
+interface VideoJob {
+  options: VideoJobOptions;
+  progress: NonNullable<VideoJobOptions["onProgress"]>;
+  ffmpeg: string;
+  info: VideoInfo;
+  /** The size the output is written at: the scale setting applied, then rounded to even. */
+  target: { width: number; height: number };
+  output: string;
+  /** Whether the destination existed before the job: see partial-output.ts. */
+  outputExisted: boolean;
+  upscaling: boolean;
+  renderWidth: number;
+  renderHeight: number;
+  session: GpuSession;
+  cudaOrdinal: number;
+  /** The encode settings with the codec resolved on this GPU. */
+  encode: EncodeSettings;
+  completed: (size: { width: number; height: number }, counts: FrameCounts) => VideoJobResult;
+}
+
+/** An open engine and what the two engine-driven encode paths feed it. */
+interface EnginePath {
+  engine: Engine;
+  outWidth: number;
+  outHeight: number;
+  /** Decode argv without the binary; both encode paths spawn it themselves. */
+  decodeArgs: ReturnType<typeof decodeArgv>;
+  /** Whether the source is opened as a second input so its audio is copied. */
+  wantAudio: boolean;
+  frameBytes: number;
+  guide: (rgba: Uint8Array, index: number) => { reset: boolean; motion: Float32Array | null; sceneCut: boolean };
+}
+
+async function prepareVideoJob(options: VideoJobOptions): Promise<VideoJob> {
   const started = performance.now();
   const progress = options.onProgress ?? (() => {});
   const { ffmpeg, ffprobe } = requireFfmpegTools("video jobs");
@@ -298,52 +332,51 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const resolvedCodec = resolveEncodeCodec(requestedEncode.codec, ffmpeg, cudaOrdinal);
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
   const encode: EncodeSettings = { ...requestedEncode, codec: resolvedCodec.codec };
+  return { options, progress, ffmpeg, info, target, output, outputExisted, upscaling, renderWidth, renderHeight, session, cudaOrdinal, encode, completed };
+}
 
-  // Fastest path, tried first: DLSS output stays on the GPU and NVENC reads it
-  // through a shared buffer, so the two overlap with no CPU frame copy between
-  // them — measured ~212 fps vs ~163 fps for the threaded pipeline at 1080p.
-  // Only NR at 1:1 qualifies (no upscale) with an NVENC codec at even, in-cap
-  // dimensions. motion is ignored: feature 18 consumes no motion vectors, so
-  // motion="flow" would only burn optical-flow time here.
-  const nrNative = options.engine === "nr" && !upscaling && options.runtimeDir ? nvencNativeTarget(encode.codec, target.width, target.height) : null;
-  if (nrNative && probeNvencCaps(cudaOrdinal).available) {
-    try {
-      const { num, den } = rateParts(info.fpsText);
-      const layout = linearLayout(target.width, target.height, DXGI_FORMAT_R8G8B8A8_UNORM);
-      const decodeArgs = decodeArgv({ input: options.input, source: info, output: target });
-      const wantAudio = info.hasAudio && encode.copyAudio;
-      const sinkArgs = muxCopyArgs({
-        demux: nrNative.demux, frameRate: info.fpsText, audioSource: wantAudio ? options.input : null,
-        container: encode.container, displayAspect: info.displayAspect, size: target, output,
-      });
-      const cuts = new SceneCutDetector(target.width, target.height);
-      const guide = (rgba: Uint8Array, index: number) => cuts.guide(rgba, index);
-      progress(0, `encode: NVENC ${nrNative.codec} (GPU-resident async zero-copy pipeline)`);
-      const { DlssNrSession } = await import("../ngx/nr-render.ts");
-      const nr = DlssNrSession.open(session, { width: target.width, height: target.height, settings: options.settings, runtimeDir: options.runtimeDir!, dllDir: options.dllDir, appDataPath: options.appDataPath });
-      try {
-        const r = await runAsyncNrEncode({
-          session, nr, ffmpeg, decodeArgs, sinkArgs,
-          width: target.width, height: target.height, rowPitch: layout.rowPitch, totalBytes: layout.totalBytes,
-          enc: { fpsNum: num, fpsDen: den, codec: nrNative.codec, cq: encode.quality, ordinal: cudaOrdinal },
-          totalFrames: info.frames, guide, onProgress: progress, signal: options.signal, onFinishing: options.onFinishing,
-        });
-        return completed(target, r);
-      } catch (error) {
-        // The orchestrator has already made the mux ffmpeg release the file.
-        removePartialOutput(output, framesWrittenOf(error), outputExisted);
-        throw error;
-      } finally {
-        nr.close();
-      }
-    } finally {
-      session.close();
-    }
-  }
-
-  let engine: Engine;
+/** The GPU-resident async path (see processVideo), which closes the GPU session when it ends. */
+async function runGpuResidentNr(
+  { options, progress, ffmpeg, info, output, outputExisted, target, session, cudaOrdinal, encode, completed }: VideoJob,
+  nrNative: { codec: NvencSdkCodec; demux: string },
+): Promise<VideoJobResult> {
   try {
-    engine = createEngine(options.engine, session, {
+    const { num, den } = rateParts(info.fpsText);
+    const layout = linearLayout(target.width, target.height, DXGI_FORMAT_R8G8B8A8_UNORM);
+    const decodeArgs = decodeArgv({ input: options.input, source: info, output: target });
+    const wantAudio = info.hasAudio && encode.copyAudio;
+    const sinkArgs = muxCopyArgs({
+      demux: nrNative.demux, frameRate: info.fpsText, audioSource: wantAudio ? options.input : null,
+      container: encode.container, displayAspect: info.displayAspect, size: target, output,
+    });
+    const cuts = new SceneCutDetector(target.width, target.height);
+    const guide = (rgba: Uint8Array, index: number) => cuts.guide(rgba, index);
+    progress(0, `encode: NVENC ${nrNative.codec} (GPU-resident async zero-copy pipeline)`);
+    const { DlssNrSession } = await import("../ngx/nr-render.ts");
+    const nr = DlssNrSession.open(session, { width: target.width, height: target.height, settings: options.settings, runtimeDir: options.runtimeDir!, dllDir: options.dllDir, appDataPath: options.appDataPath });
+    try {
+      const r = await runAsyncNrEncode({
+        session, nr, ffmpeg, decodeArgs, sinkArgs,
+        width: target.width, height: target.height, rowPitch: layout.rowPitch, totalBytes: layout.totalBytes,
+        enc: { fpsNum: num, fpsDen: den, codec: nrNative.codec, cq: encode.quality, ordinal: cudaOrdinal },
+        totalFrames: info.frames, guide, onProgress: progress, signal: options.signal, onFinishing: options.onFinishing,
+      });
+      return completed(target, r);
+    } catch (error) {
+      // The orchestrator has already made the mux ffmpeg release the file.
+      removePartialOutput(output, framesWrittenOf(error), outputExisted);
+      throw error;
+    } finally {
+      nr.close();
+    }
+  } finally {
+    session.close();
+  }
+}
+
+function openEngine({ options, session, upscaling, renderWidth, renderHeight, target }: VideoJob): Engine {
+  try {
+    return createEngine(options.engine, session, {
       width: renderWidth,
       height: renderHeight,
       outputWidth: upscaling ? target.width : undefined,
@@ -357,18 +390,13 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
     session.close(); // setup failed before the main try/finally owns it, so close here or leak the GPU session
     throw error;
   }
-  const outWidth = engine.outputWidth;
-  const outHeight = engine.outputHeight;
+}
 
-  // Decode argv without the binary; both encode paths below spawn it themselves.
-  const decodeArgs = decodeArgv({ input: options.input, source: info, output: { width: renderWidth, height: renderHeight } });
-
-  // Only open the source as a second input when its audio is actually copied:
-  // otherwise the encoder demuxes and decodes the whole source a second time,
-  // which cost more per frame than the raw video pipe it was competing with.
-  // Video is always input 0 (the pipe); audio, when copied, is input 1 (source).
-  const wantAudio = info.hasAudio && encode.copyAudio;
-
+/** The per-frame guide, and the motion estimator behind it when the job asked for flow. */
+function createGuide(
+  { options, progress, session, cudaOrdinal, renderWidth, renderHeight }: VideoJob,
+  engine: Engine,
+): { guide: EnginePath["guide"]; estimator: ReturnType<typeof createMotionEstimator> | null } {
   // Scene-cut / motion guide. Both backends keep a one-frame history, so `guide`
   // must be called exactly once per frame and in decode order.
   const cuts = new SceneCutDetector(renderWidth, renderHeight);
@@ -391,6 +419,101 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
     }
     return { ...cuts.guide(rgba, index), motion: null };
   };
+  return { guide, estimator };
+}
+
+/** Decode, DLSS and NVENC each on their own thread, with ffmpeg only muxing the elementary stream. */
+async function runThreadedNvenc(
+  { options, progress, ffmpeg, info, output, cudaOrdinal, encode }: VideoJob,
+  { engine, outWidth, outHeight, decodeArgs, wantAudio, frameBytes, guide }: EnginePath,
+  nativeTarget: { codec: NvencSdkCodec; demux: string },
+  counts: FrameCounts,
+): Promise<void> {
+  const { num, den } = rateParts(info.fpsText);
+  const sinkArgs = muxCopyArgs({
+    demux: nativeTarget.demux, frameRate: info.fpsText, audioSource: wantAudio ? options.input : null,
+    container: encode.container, displayAspect: info.displayAspect, size: { width: outWidth, height: outHeight }, output,
+  });
+  progress(0, `encode: NVENC ${nativeTarget.codec} (threaded GPU pipeline, mux-only)`);
+  const result = await runThreadedEncode({
+    engine, ffmpeg, decodeArgs, frameBytes, sinkArgs,
+    enc: { width: outWidth, height: outHeight, fpsNum: num, fpsDen: den, codec: nativeTarget.codec, cq: encode.quality, ordinal: cudaOrdinal },
+    totalFrames: info.frames, guide, onProgress: progress, signal: options.signal, onFinishing: options.onFinishing,
+  });
+  counts.frames = result.frames;
+  counts.sceneCuts = result.sceneCuts;
+}
+
+/** Raw RGBA frames out to ffmpeg, which does the encode; the fallback for everything the NVENC paths cannot take. */
+async function runRawvideo(
+  { options, progress, ffmpeg, info, output, cudaOrdinal, encode }: VideoJob,
+  { engine, outWidth, outHeight, decodeArgs, wantAudio, frameBytes, guide }: EnginePath,
+  counts: FrameCounts,
+): Promise<void> {
+  // Fallback: raw RGBA out to ffmpeg, which does the encode.
+  const decoder = Bun.spawn([ffmpeg, ...decodeArgs], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const encoder = Bun.spawn(
+    [
+      ffmpeg, "-v", "error", "-y",
+      "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${outWidth}x${outHeight}`, "-r", info.fpsText, "-i", "pipe:0",
+      ...(wantAudio ? ["-i", options.input] : []),
+      "-map", "0:v:0", ...audioArgs(wantAudio, encode.container), ...encoderArgs(encode, cudaOrdinal), ...aspectArgs(info.displayAspect, outWidth, outHeight, null), ...faststartArgs(encode.container),
+      ...(wantAudio ? ["-shortest"] : []),
+      output,
+    ],
+    { stdin: "pipe", stdout: "ignore", stderr: "pipe" },
+  );
+  const reader = new FrameReader(decoder.stdout);
+  try {
+    // Kept one frame ahead: the decode of frame n+1 overlaps the GPU pass on n.
+    let pending = reader.next(frameBytes);
+    for (;;) {
+      throwIfAborted(options.signal);
+      const rgba = await pending;
+      if (!rgba) break;
+      pending = reader.next(frameBytes);
+      const g = guide(rgba, counts.frames);
+      if (g.sceneCut) counts.sceneCuts++;
+      const result = engine.process({ rgba, reset: g.reset, motion: g.motion });
+      const wrote = encoder.stdin.write(result);
+      if (wrote instanceof Promise) await wrote;
+      counts.frames++;
+      const { fraction, message } = frameProgress(counts.frames, info.frames);
+      progress(fraction, message, counts.frames);
+    }
+    options.onFinishing?.();
+    encoder.stdin.end();
+  } catch (error) {
+    // Both children are ours: kill them and wait, so the encoder has released
+    // the output file by the time runEngineJob's catch deletes it.
+    try { decoder.kill(); } catch {}
+    try { encoder.kill(); } catch {}
+    await Promise.allSettled([decoder.exited, encoder.exited]);
+    throw error;
+  }
+  const [decodeExit, encodeExit] = await Promise.all([decoder.exited, encoder.exited]);
+  const decodeErr = (await new Response(decoder.stderr).text()).trim();
+  const encodeErr = (await new Response(encoder.stderr).text()).trim();
+  if (decodeExit !== 0) throw new Error(ffmpegFailedMessage("decode", decodeExit, decodeErr));
+  if (encodeExit !== 0) throw new Error(ffmpegFailedMessage("encode", encodeExit, encodeErr));
+}
+
+async function runEngineJob(job: VideoJob): Promise<VideoJobResult> {
+  const { options, info, output, outputExisted, session, cudaOrdinal, encode, renderWidth, renderHeight, completed } = job;
+  const engine = openEngine(job);
+  const outWidth = engine.outputWidth;
+  const outHeight = engine.outputHeight;
+
+  // Decode argv without the binary; both encode paths below spawn it themselves.
+  const decodeArgs = decodeArgv({ input: options.input, source: info, output: { width: renderWidth, height: renderHeight } });
+
+  // Only open the source as a second input when its audio is actually copied:
+  // otherwise the encoder demuxes and decodes the whole source a second time,
+  // which cost more per frame than the raw video pipe it was competing with.
+  // Video is always input 0 (the pipe); audio, when copied, is input 1 (source).
+  const wantAudio = info.hasAudio && encode.copyAudio;
+
+  const { guide, estimator } = createGuide(job, engine);
 
   const frameBytes = renderWidth * renderHeight * 4;
   // Second choice: decode, DLSS and NVENC each on their own thread, encoding on
@@ -401,79 +524,34 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const nativeTarget = nvencNativeTarget(encode.codec, outWidth, outHeight);
   const useThreaded = nativeTarget !== null && probeNvencCaps(cudaOrdinal).available;
 
-  let frames = 0;
-  let sceneCuts = 0;
+  const path: EnginePath = { engine, outWidth, outHeight, decodeArgs, wantAudio, frameBytes, guide };
+  const counts: FrameCounts = { frames: 0, sceneCuts: 0 };
   try {
-    if (useThreaded && nativeTarget) {
-      const { num, den } = rateParts(info.fpsText);
-      const sinkArgs = muxCopyArgs({
-        demux: nativeTarget.demux, frameRate: info.fpsText, audioSource: wantAudio ? options.input : null,
-        container: encode.container, displayAspect: info.displayAspect, size: { width: outWidth, height: outHeight }, output,
-      });
-      progress(0, `encode: NVENC ${nativeTarget.codec} (threaded GPU pipeline, mux-only)`);
-      const result = await runThreadedEncode({
-        engine, ffmpeg, decodeArgs, frameBytes, sinkArgs,
-        enc: { width: outWidth, height: outHeight, fpsNum: num, fpsDen: den, codec: nativeTarget.codec, cq: encode.quality, ordinal: cudaOrdinal },
-        totalFrames: info.frames, guide, onProgress: progress, signal: options.signal, onFinishing: options.onFinishing,
-      });
-      frames = result.frames;
-      sceneCuts = result.sceneCuts;
-    } else {
-      // Fallback: raw RGBA out to ffmpeg, which does the encode.
-      const decoder = Bun.spawn([ffmpeg, ...decodeArgs], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
-      const encoder = Bun.spawn(
-        [
-          ffmpeg, "-v", "error", "-y",
-          "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${outWidth}x${outHeight}`, "-r", info.fpsText, "-i", "pipe:0",
-          ...(wantAudio ? ["-i", options.input] : []),
-          "-map", "0:v:0", ...audioArgs(wantAudio, encode.container), ...encoderArgs(encode, cudaOrdinal), ...aspectArgs(info.displayAspect, outWidth, outHeight, null), ...faststartArgs(encode.container),
-          ...(wantAudio ? ["-shortest"] : []),
-          output,
-        ],
-        { stdin: "pipe", stdout: "ignore", stderr: "pipe" },
-      );
-      const reader = new FrameReader(decoder.stdout);
-      try {
-        // Kept one frame ahead: the decode of frame n+1 overlaps the GPU pass on n.
-        let pending = reader.next(frameBytes);
-        for (;;) {
-          throwIfAborted(options.signal);
-          const rgba = await pending;
-          if (!rgba) break;
-          pending = reader.next(frameBytes);
-          const g = guide(rgba, frames);
-          if (g.sceneCut) sceneCuts++;
-          const result = engine.process({ rgba, reset: g.reset, motion: g.motion });
-          const wrote = encoder.stdin.write(result);
-          if (wrote instanceof Promise) await wrote;
-          frames++;
-          const { fraction, message } = frameProgress(frames, info.frames);
-          progress(fraction, message, frames);
-        }
-        options.onFinishing?.();
-        encoder.stdin.end();
-      } catch (error) {
-        // Both children are ours: kill them and wait, so the encoder has released
-        // the output file by the time the catch below deletes it.
-        try { decoder.kill(); } catch {}
-        try { encoder.kill(); } catch {}
-        await Promise.allSettled([decoder.exited, encoder.exited]);
-        throw error;
-      }
-      const [decodeExit, encodeExit] = await Promise.all([decoder.exited, encoder.exited]);
-      const decodeErr = (await new Response(decoder.stderr).text()).trim();
-      const encodeErr = (await new Response(encoder.stderr).text()).trim();
-      if (decodeExit !== 0) throw new Error(ffmpegFailedMessage("decode", decodeExit, decodeErr));
-      if (encodeExit !== 0) throw new Error(ffmpegFailedMessage("encode", encodeExit, encodeErr));
-    }
+    if (useThreaded && nativeTarget) await runThreadedNvenc(job, path, nativeTarget, counts);
+    else await runRawvideo(job, path, counts);
   } catch (error) {
     // The threaded orchestrator reports its count on the error; the rawvideo loop counted here.
-    removePartialOutput(output, useThreaded ? framesWrittenOf(error) : frames, outputExisted);
+    removePartialOutput(output, useThreaded ? framesWrittenOf(error) : counts.frames, outputExisted);
     throw error;
   } finally {
     estimator?.close();
     engine.close();
     session.close();
   }
-  return completed({ width: outWidth, height: outHeight }, { frames, sceneCuts });
+  return completed({ width: outWidth, height: outHeight }, counts);
+}
+
+export async function processVideo(options: VideoJobOptions): Promise<VideoJobResult> {
+  const job = await prepareVideoJob(options);
+  const { target, encode, cudaOrdinal, upscaling } = job;
+
+  // Fastest path, tried first: DLSS output stays on the GPU and NVENC reads it
+  // through a shared buffer, so the two overlap with no CPU frame copy between
+  // them — measured ~212 fps vs ~163 fps for the threaded pipeline at 1080p.
+  // Only NR at 1:1 qualifies (no upscale) with an NVENC codec at even, in-cap
+  // dimensions. motion is ignored: feature 18 consumes no motion vectors, so
+  // motion="flow" would only burn optical-flow time here.
+  const nrNative = options.engine === "nr" && !upscaling && options.runtimeDir ? nvencNativeTarget(encode.codec, target.width, target.height) : null;
+  if (nrNative && probeNvencCaps(cudaOrdinal).available) return runGpuResidentNr(job, nrNative);
+  return runEngineJob(job);
 }
