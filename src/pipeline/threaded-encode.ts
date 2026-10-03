@@ -11,11 +11,14 @@
  *
  * One decode and one encode worker, both FIFO, keep frames in display order,
  * which is what NVENC's no-B-frame config expects. A credit window bounds frames
- * in flight (decode->main->encode) and so memory use to ~`window` frames.
+ * in flight (decode->main->encode) and so memory use to ~CREDIT_WINDOW frames.
  */
 import { throwIfAborted } from "./cancel.ts";
 import type { Engine } from "./engine.ts";
 import { WorkerPairRun } from "./worker-pair-run.ts";
+
+/** Max frames in flight across the whole pipeline: the decode worker's initial credit. */
+const CREDIT_WINDOW = 8;
 
 export interface ThreadedEncodeParams {
   engine: Engine;
@@ -35,8 +38,6 @@ export interface ThreadedEncodeParams {
   /** Per-frame guide computed on the main thread (scene cut / motion). */
   guide: (rgba: Uint8Array, frameIndex: number) => { reset: boolean; motion: Float32Array | null; sceneCut: boolean };
   onProgress?: (fraction: number, message: string, frames?: number) => void;
-  /** Max frames in flight across the whole pipeline (default 8). */
-  window?: number;
   /** Cooperative cancellation: until the encode is finishing, the run stops at the next frame and rejects with JobCancelledError. */
   signal?: AbortSignal;
   /** Called once as the run starts finishing; see VideoJobOptions.onFinishing. */
@@ -48,7 +49,6 @@ export interface ThreadedEncodeParams {
 export function runThreadedEncode(p: ThreadedEncodeParams): Promise<{ frames: number; sceneCuts: number }> {
   throwIfAborted(p.signal);
   const progress = p.onProgress ?? (() => {});
-  const window = p.window ?? 8;
   const createWorker = p.createWorker ?? ((script: URL) => new Worker(script.href));
   return new Promise((resolve, reject) => {
     const decodeW = createWorker(new URL("./workers/decode-worker.ts", import.meta.url));
@@ -80,7 +80,7 @@ export function runThreadedEncode(p: ThreadedEncodeParams): Promise<{ frames: nu
       if (!run.active) return;
       if (msg.type === "opened") {
         decodeW.postMessage({ type: "start", ffmpeg: p.ffmpeg, args: p.decodeArgs, frameBytes: p.frameBytes });
-        decodeW.postMessage({ type: "credit", n: window });
+        decodeW.postMessage({ type: "credit", n: CREDIT_WINDOW });
       } else if (msg.type === "encoded") {
         if (!decodeEnded) decodeW.postMessage({ type: "credit", n: 1 });
         const total = p.totalFrames;

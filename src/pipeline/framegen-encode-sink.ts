@@ -81,9 +81,12 @@ export interface OpenEncode {
   nvenc: { width: number; height: number; fpsNum: number; fpsDen: number; codec: NvencSdkCodec; cq: number } | null;
 }
 
+/** Frames the sink accepts ahead of the encoder; the bound on the memory a fast producer can buy. */
+const MAX_FRAMES_IN_FLIGHT = 8;
+
 /**
  * Main-thread handle for the encode worker. write() resolves as soon as the
- * frame is accepted, with at most `maxFramesInFlight` frames in flight, so encoding
+ * frame is accepted, with at most MAX_FRAMES_IN_FLIGHT frames in flight, so encoding
  * overlaps the rest of the pipeline while staying in display order (the worker
  * processes requests through one promise chain) and bounded in memory.
  */
@@ -99,7 +102,7 @@ export class EncodeSink {
   private openSettle: { resolve: (sink: EncodeSink) => void; reject: (error: Error) => void } | null = null;
   private finishSettle: { resolve: () => void; reject: (error: Error) => void } | null = null;
 
-  private constructor(private readonly worker: Worker, private readonly maxFramesInFlight: number) {
+  private constructor(private readonly worker: Worker) {
     worker.onmessage = (event: MessageEvent) => {
       const m = event.data as { type: string; nvenc?: boolean; note?: string; message?: string };
       if (m.type === "opened") {
@@ -143,9 +146,9 @@ export class EncodeSink {
     for (const wake of this.waiters.splice(0)) wake();
   }
 
-  static open(message: OpenEncode, maxFramesInFlight = 8): Promise<EncodeSink> {
+  static open(message: OpenEncode): Promise<EncodeSink> {
     const worker = new Worker(new URL("./workers/framegen-encode-worker.ts", import.meta.url).href);
-    const sink = new EncodeSink(worker, maxFramesInFlight);
+    const sink = new EncodeSink(worker);
     return new Promise<EncodeSink>((resolve, reject) => {
       sink.openSettle = { resolve, reject };
       worker.postMessage(message);
@@ -154,7 +157,7 @@ export class EncodeSink {
 
   async write(rgba: Uint8Array): Promise<void> {
     if (this.failure) throw this.failure;
-    while (this.inFlight >= this.maxFramesInFlight) {
+    while (this.inFlight >= MAX_FRAMES_IN_FLIGHT) {
       await new Promise<void>((resolve) => this.waiters.push(resolve));
       if (this.failure) throw this.failure;
     }

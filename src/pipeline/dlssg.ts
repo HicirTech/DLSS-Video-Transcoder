@@ -144,15 +144,18 @@ async function withHostReport(child: HostChild, what: string): Promise<string> {
 
 const probeCache = new Map<string, { at: number; probe: Promise<DlssgProbe> }>();
 
+/** How long a host's answer is reused. */
+const PROBE_CACHE_TTL_MS = 60_000;
+
 /**
- * What the host of the runtime folder `runtimeRoot` reports, memoised per folder for `ttlMs`:
- * spawning `--probe` costs roughly a second and capabilities do not change between back-to-back
- * jobs. A probe the host did not answer is not cached.
+ * What the host of the runtime folder `runtimeRoot` reports, memoised per folder for
+ * PROBE_CACHE_TTL_MS: spawning `--probe` costs roughly a second and capabilities do not change
+ * between back-to-back jobs. A probe the host did not answer is not cached.
  */
-export function probeDlssg(runtimeRoot: string, ttlMs = 60_000): Promise<DlssgProbe> {
+export function probeDlssg(runtimeRoot: string): Promise<DlssgProbe> {
   const now = Date.now();
   const hit = probeCache.get(runtimeRoot);
-  if (hit && now - hit.at < ttlMs) return hit.probe;
+  if (hit && now - hit.at < PROBE_CACHE_TTL_MS) return hit.probe;
   const probe = probeDlssgHost(dlssgHost(runtimeRoot));
   // Only a probe the host actually answered is worth keeping: the others
   // describe a machine the user is probably fixing right now, and the TTL would
