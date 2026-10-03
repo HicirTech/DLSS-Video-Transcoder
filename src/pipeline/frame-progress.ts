@@ -12,7 +12,7 @@ export interface FrameTally {
 
 /**
  * How a pipeline reports progress. `frames` is set on the lines that count frames, and only on
- * those: the job worker keeps them out of the job log, where one line per frame would be noise.
+ * those, so a caller that logs can skip them: one line per frame would drown a log.
  */
 export type ProgressReporter = (fraction: number, message: string, frames?: FrameTally) => void;
 
