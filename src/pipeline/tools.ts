@@ -4,11 +4,15 @@
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { DEFAULT_RUNTIME_DIR } from "../paths.ts";
 import type { ToolsReport } from "../server/api-types.ts";
+
+/** Where a build placed under the project's runtime folder is found; it stays there when NR_RUNTIME_DIR moves the DLLs. */
+export const BUNDLED_FFMPEG_DIR = join(DEFAULT_RUNTIME_DIR, "ffmpeg", "bin");
 
 /** Searched after PATH, because the common Windows installers do not always extend it. */
 const EXTRA_DIRS = [
-  join(import.meta.dir, "..", "..", "runtime", "ffmpeg", "bin"), // ffmpeg bundled under the project runtime
+  BUNDLED_FFMPEG_DIR,
   join(process.env.LOCALAPPDATA ?? "", "Microsoft", "WinGet", "Links"),
   "C:\\ffmpeg\\bin",
   "C:\\Program Files\\ffmpeg\\bin",

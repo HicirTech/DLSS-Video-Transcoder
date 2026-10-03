@@ -13,13 +13,14 @@ import { join } from "node:path";
 // worker does the same two imports at src/pipeline/worker.ts:36-37.
 import "../src/ngx/nr.ts";
 import "../src/ngx/sr-engine.ts";
+import { DEFAULT_RUNTIME_DIR } from "../src/paths.ts";
 import { processImage } from "../src/pipeline/image.ts";
+import { BUNDLED_FFMPEG_DIR } from "../src/pipeline/tools.ts";
 import { processVideo } from "../src/pipeline/video.ts";
 import { DEFAULT_NR_SETTINGS, type EncodeSettings, type ScaleSettings } from "../src/server/api-types.ts";
 
-const ROOT = join(import.meta.dir, "..");
 const [outDir, clip, image] = Bun.argv.slice(2) as [string, string, string];
-const runtimeDir = join(ROOT, "runtime");
+const runtimeDir = DEFAULT_RUNTIME_DIR;
 
 async function sha(path: string): Promise<string> {
   try {
@@ -35,7 +36,7 @@ async function sha(path: string): Promise<string> {
  * this is what actually proves a refactor left the pixels alone.
  */
 function streamHash(path: string): string {
-  const ffmpeg = join(ROOT, "runtime", "ffmpeg", "bin", "ffmpeg.exe");
+  const ffmpeg = join(BUNDLED_FFMPEG_DIR, "ffmpeg.exe");
   try {
     const proc = Bun.spawnSync([ffmpeg, "-v", "error", "-i", path, "-map", "0:v:0", "-c", "copy", "-f", "md5", "-"], {
       stdout: "pipe",
