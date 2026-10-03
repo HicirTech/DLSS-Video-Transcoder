@@ -4,7 +4,7 @@
  * 3080 is inside a Windows reserved port range on some machines).
  */
 import { existsSync, mkdirSync, statSync } from "node:fs";
-import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, extname, isAbsolute, join, resolve } from "node:path";
 import index from "../../web/index.html";
 import { runProbe } from "../ngx/probe.ts";
 import { buildRuntimeCatalog } from "../ngx/runtime-catalog.ts";
@@ -13,7 +13,6 @@ import {
   DEFAULT_ENCODE_SETTINGS,
   DEFAULT_NR_SETTINGS,
   DEFAULT_SCALE_SETTINGS,
-  type JobRequest,
   type WsEvent,
 } from "./api-types.ts";
 import { JobManager } from "./jobs.ts";

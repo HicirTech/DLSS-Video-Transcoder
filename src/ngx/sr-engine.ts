@@ -9,7 +9,7 @@
 import { RUNTIME_DIR } from "../paths.ts";
 import { registerSrEngine, type Engine, type EngineOptions } from "../pipeline/engine.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
-import { DlssRenderPreset, DLSS_RATIO, qualityForFactor } from "./results.ts";
+import { DlssRenderPreset, qualityForFactor } from "./results.ts";
 import { DlssSrSession } from "./sr.ts";
 
 class SrEngine implements Engine {
