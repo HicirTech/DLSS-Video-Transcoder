@@ -43,7 +43,6 @@ import {
   isNativeMultiFramePlan,
   resolveTargetRate,
 } from "./framegen-plan.ts";
-import type { NvencSdkCodec } from "./nvenc.ts";
 import { parseRational, ratDiv, ratMul, ratToNumber, rational } from "./rational.ts";
 import { evenSize } from "./resize.ts";
 import { findTool } from "./tools.ts";
@@ -188,7 +187,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     throw new Error("Could not determine the source frame count, which frame generation needs for its progress estimate. Re-mux the file (e.g. `ffmpeg -i in -c copy out.mp4`) so ffprobe can read it.");
   const frames = info.frames;
   // The nominal CFR clock, not the measured average: planning needs exact ratios (30 -> 60 must be 2x).
-  const sourceRate = parseRational(info.nominalFpsText ?? info.fpsText);
+  const sourceRate = parseRational(info.nominalFpsText);
   const multiplier = Math.max(1, Math.round(options.multiplier ?? 2));
   const targetRate = options.targetFps !== undefined ? resolveTargetRate(options.targetFps) : ratMul(sourceRate, rational(multiplier));
   const plan = chooseInterpolationPlan(sourceRate, targetRate, options.engine ?? "auto", nativeMultiplierMax, { cfr: true, hagsEnabled: caps.hagsEnabled });
