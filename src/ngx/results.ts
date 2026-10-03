@@ -5,7 +5,6 @@
 import { hex32 } from "../native/memory.ts";
 
 export const NGX_SUCCESS = 0x1;
-export const NGX_FAIL = 0xbad00000;
 
 const RESULT_NAMES: Record<number, string> = {
   0x1: "Success",
@@ -88,15 +87,6 @@ export function featureName(id: number): string {
   for (const [name, value] of Object.entries(NgxFeature)) if (value === id) return name;
   return `Feature${id}`;
 }
-
-export const FeatureSupport = {
-  Supported: 0,
-  CheckNotPresent: 1,
-  DriverVersionUnsupported: 2,
-  AdapterUnsupported: 4,
-  OSVersionBelowMinimumSupported: 8,
-  NotImplemented: 16,
-} as const;
 
 export function describeSupport(bits: number): string {
   if (bits === 0) return "supported";

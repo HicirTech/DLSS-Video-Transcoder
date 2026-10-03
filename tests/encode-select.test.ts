@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildNvencProbeArgs, cpuSiblingCodec, isNvenc, nvencGpuArgs, preferredDefaultCodec, resolveEncodeCodec } from "../src/pipeline/encode-select.ts";
+import { buildNvencProbeArgs, cpuSiblingCodec, isNvenc, nvencGpuArgs, resolveEncodeCodec } from "../src/pipeline/encode-select.ts";
 import { encoderArgs } from "../src/pipeline/video.ts";
 
 describe("encode-select", () => {
@@ -18,11 +18,6 @@ describe("encode-select", () => {
     expect(cpuSiblingCodec("av1_nvenc")).toBe("av1");
     expect(cpuSiblingCodec("h264")).toBe("h264");
     expect(cpuSiblingCodec("av1")).toBe("av1");
-  });
-
-  test("preferredDefaultCodec picks GPU when available", () => {
-    expect(preferredDefaultCodec(true)).toBe("h264_nvenc");
-    expect(preferredDefaultCodec(false)).toBe("h264");
   });
 
   test("buildNvencProbeArgs builds the one-frame lavfi null encode on the given CUDA device", () => {

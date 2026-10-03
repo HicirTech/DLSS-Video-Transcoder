@@ -22,7 +22,7 @@ export interface RgbaImage {
 export type PngColorType = 0 | 2 | 3 | 4 | 6;
 
 /** The fields of the IHDR chunk. */
-export interface PngHeader {
+interface PngHeader {
   width: number;
   height: number;
   /** Bits per sample, or per palette index for colour type 3: 1, 2, 4, 8 or 16. */
@@ -134,13 +134,8 @@ function isAsciiLetter(ch: number): boolean {
 
 /** Packs a 4-character chunk type into the big-endian 32-bit integer it occupies in the file. */
 function chunkTypeCode(type: string): number {
-  if (type.length !== 4) throw new PngError(`chunk type "${type}" must be exactly 4 characters`);
   let code = 0;
-  for (let i = 0; i < 4; i++) {
-    const ch = type.charCodeAt(i);
-    if (!isAsciiLetter(ch)) throw new PngError(`chunk type "${type}" must consist of ASCII letters`);
-    code = (code << 8) | ch;
-  }
+  for (let i = 0; i < 4; i++) code = (code << 8) | type.charCodeAt(i);
   return code >>> 0;
 }
 
@@ -162,13 +157,6 @@ function writeChunkInto(out: Uint8Array, pos: number, typeCode: number, data: Ui
   if (data) out.set(data, pos + 8);
   writeU32(out, pos + 8 + len, crc32(out.subarray(pos + 4, pos + 8 + len)));
   return pos + 12 + len;
-}
-
-/** Builds one complete PNG chunk for hand-assembling files. `type` must be four ASCII letters, e.g. `"tEXt"`. */
-export function encodePngChunk(type: string, data: Uint8Array = new Uint8Array(0)): Uint8Array {
-  const out = new Uint8Array(12 + data.length);
-  writeChunkInto(out, 0, chunkTypeCode(type), data);
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -258,10 +246,9 @@ function hex32(v: number): string {
 }
 
 /**
- * Walks the chunk stream, validating framing and CRCs. With `headerOnly` it stops right after IHDR,
- * otherwise it collects PLTE/tRNS/IDAT and requires IEND.
+ * Walks the chunk stream, validating framing and CRCs, collects PLTE/tRNS/IDAT and requires IEND.
  */
-function parseChunks(bytes: Uint8Array, headerOnly: boolean): ParsedFile {
+function parseChunks(bytes: Uint8Array): ParsedFile {
   if (!isPng(bytes)) {
     throw new PngError(bytes.length < 8 ? "file is shorter than the 8-byte signature" : "bad signature, not a PNG file");
   }
@@ -304,7 +291,6 @@ function parseChunks(bytes: Uint8Array, headerOnly: boolean): ParsedFile {
       case TYPE_IHDR:
         if (header !== null) throw new PngError("duplicate IHDR chunk");
         header = parseIhdr(bytes, dataStart, length);
-        if (headerOnly) return { header, palette, trns, idat, idatLength };
         break;
       case TYPE_PLTE:
         if (palette !== null) throw new PngError("duplicate PLTE chunk");
@@ -330,11 +316,6 @@ function parseChunks(bytes: Uint8Array, headerOnly: boolean): ParsedFile {
         break; // ancillary chunk (gAMA, iCCP, tEXt, pHYs, ...): skipped
     }
   }
-}
-
-/** Validates the signature and IHDR chunk (including its CRC) and returns the header without decoding pixels. */
-export function readPngHeader(bytes: Uint8Array): PngHeader {
-  return parseChunks(bytes, true).header;
 }
 
 // ---------------------------------------------------------------------------
@@ -375,7 +356,7 @@ interface PixelFormat {
  * @throws {PngError} on truncated, corrupt (bad CRC, bad zlib stream, bad filter byte, ...) or unsupported input.
  */
 export function decodePng(bytes: Uint8Array): RgbaImage {
-  const parsed = parseChunks(bytes, false);
+  const parsed = parseChunks(bytes);
   const { width, height, bitDepth, colorType, interlaceMethod } = parsed.header;
   const format = buildPixelFormat(parsed);
 
@@ -750,8 +731,6 @@ function convertRow(
 // ---------------------------------------------------------------------------
 // Encoding
 // ---------------------------------------------------------------------------
-
-type ZlibLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 /**
  * Encodes an 8-bit RGBA image as a PNG: colour type 6, bit depth 8, no interlace, filter type 0 on

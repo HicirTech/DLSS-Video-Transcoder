@@ -31,11 +31,6 @@ export function cpuSiblingCodec(codec: Codec): Codec {
   return isNvenc(codec) ? NVENC_TO_CPU_CODEC[codec] : codec;
 }
 
-/** Default when the caller expressed no preference: H.264 either way, GPU if it is there. */
-export function preferredDefaultCodec(nvencAvailable: boolean): Codec {
-  return nvencAvailable ? "h264_nvenc" : "h264";
-}
-
 /**
  * The argv that pins an ffmpeg NVENC encoder to a CUDA device. `gpu` is a CUDA
  * device ordinal (ffmpeg's -gpu counts CUDA devices), never a DXGI adapter
