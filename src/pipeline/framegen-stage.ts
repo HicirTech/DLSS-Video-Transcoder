@@ -203,18 +203,30 @@ async function releaseGuideThread(guide: Worker): Promise<void> {
 
 type OpenGuide = { type: "open"; width: number; height: number; detectSourceCuts: boolean; packInline: boolean } | { type: "open-packer"; width: number; height: number };
 
-/** Start a guide-side worker in either role and wait until it is ready (its NVOFA session included). */
-export function openGuideWorker(open: OpenGuide): Promise<{ worker: Worker; flow: "nvof" | "cpu" | "pack"; flowReason: string | null }> {
-  return new Promise((resolve, reject) => {
-    const role = open.type === "open" ? "guide" : "packer";
-    const worker = new Worker(new URL("./workers/framegen-guide-worker.ts", import.meta.url).href);
-    const onError = (e: Event) => { reject(new Error(`frame-generation ${role} worker failed to start: ${(e as ErrorEvent).message}`)); };
-    worker.addEventListener("error", onError, { once: true });
-    worker.onmessage = (event: MessageEvent) => {
-      const m = event.data as { type: string; flow?: "nvof" | "cpu" | "pack"; flowReason?: string | null; message?: string };
-      if (m.type === "opened") { worker.removeEventListener("error", onError); worker.onmessage = null; resolve({ worker, flow: m.flow ?? "cpu", flowReason: m.flowReason ?? null }); }
-      else if (m.type === "error") { reject(new Error(`frame-generation ${role} worker: ${m.message}`)); }
-    };
-    worker.postMessage(open);
-  });
+/**
+ * Start a guide-side worker in either role and wait until it is ready (its NVOFA session included).
+ * `createWorker` starts the thread; tests hand in a stand-in.
+ */
+export async function openGuideWorker(
+  open: OpenGuide,
+  createWorker: (script: URL) => Worker = (script) => new Worker(script.href),
+): Promise<{ worker: Worker; flow: "nvof" | "cpu" | "pack"; flowReason: string | null }> {
+  const role = open.type === "open" ? "guide" : "packer";
+  const worker = createWorker(new URL("./workers/framegen-guide-worker.ts", import.meta.url));
+  try {
+    return await new Promise((resolve, reject) => {
+      const onError = (e: Event) => { reject(new Error(`frame-generation ${role} worker failed to start: ${(e as ErrorEvent).message}`)); };
+      worker.addEventListener("error", onError, { once: true });
+      worker.onmessage = (event: MessageEvent) => {
+        const m = event.data as { type: string; flow?: "nvof" | "cpu" | "pack"; flowReason?: string | null; message?: string };
+        if (m.type === "opened") { worker.removeEventListener("error", onError); worker.onmessage = null; resolve({ worker, flow: m.flow ?? "cpu", flowReason: m.flowReason ?? null }); }
+        else if (m.type === "error") { reject(new Error(`frame-generation ${role} worker: ${m.message}`)); }
+      };
+      worker.postMessage(open);
+    });
+  } catch (error) {
+    // The caller gets no worker handle from a failed open, so nobody else can end this thread.
+    try { worker.terminate(); } catch { /* already gone */ }
+    throw error;
+  }
 }
