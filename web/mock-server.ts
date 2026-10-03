@@ -1,7 +1,7 @@
 /*
  * Standalone preview server: serves the UI from index.html and answers every /api route and
  * /ws with mock data, so the frontend can be developed without the real backend. Opening the
- * page with `?mock=1` instead keeps the same requests inside the browser (src/mock.ts).
+ * page with `?mock=1` instead keeps the same requests inside the browser (src/mock/backend.ts).
  *
  * Listens on 127.0.0.1:3080; PORT=3090 moves it. On Windows a failed bind is usually a
  * Hyper-V / WSL port reservation: `netsh interface ipv4 show excludedportrange protocol=tcp`.
@@ -10,16 +10,10 @@ import index from "./index.html";
 import type { JobRequest, WsEvent } from "../src/server/api-types";
 import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, isActiveState } from "../src/server/api-types";
 import { asJobRequest, validateJobRequest } from "../src/server/validate";
-import {
-  MOCK_PROBE,
-  MOCK_TOOLS,
-  MockJobEngine,
-  createSeedJobs,
-  mockCatalog,
-  mockPreviewSvg,
-  mockSettingsDefaults,
-  mockUpload,
-} from "./src/mock";
+import { MOCK_PROBE, MOCK_TOOLS, mockCatalog, mockSettingsDefaults, mockUpload } from "./src/mock/fixtures";
+import { MockJobEngine } from "./src/mock/job-engine";
+import { mockPreviewSvg } from "./src/mock/preview-svg";
+import { createSeedJobs } from "./src/mock/seed-jobs";
 
 const PORT = Number(process.env.PORT ?? "3080");
 const JOBS_TOPIC = "jobs";

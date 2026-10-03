@@ -12,7 +12,7 @@ import {
 import type { RuntimeManifest } from "../../src/ngx/runtime-catalog";
 import { ApiError, errorMessage } from "./errors";
 import { isRecord } from "./json";
-import { createMockBackend } from "./mock";
+import { createMockBackend } from "./mock/backend";
 
 /** One method per endpoint in src/server/api-types.ts. */
 export interface ApiClient {
