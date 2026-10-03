@@ -200,7 +200,9 @@ export interface JobRequest {
   };
   /**
    * Absolute folder of a specific DLSS DLL version to load (from GET /api/catalog);
-   * omit to use the bundled runtime DLL. Applies to the sr and nr engines.
+   * omit to use the bundled runtime DLL. Applies to the sr and nr engines: the bypass
+   * engine and frame generation load no DLL a version folder could replace, so a job
+   * with either rejects it.
    */
   dllDir?: string;
   /**
