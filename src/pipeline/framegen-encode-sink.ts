@@ -6,7 +6,7 @@
  */
 import type { EncodeSettings } from "../server/api-types.ts";
 import type { NvencSdkCodec } from "./nvenc.ts";
-import { aspectArgs, encoderArgs } from "./ffmpeg-args.ts";
+import { aspectArgs, audioArgs, encoderArgs, faststartArgs, muxCopyArgs } from "./ffmpeg-args.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "./framegen-plan.ts";
 import { formatRational, type Rational } from "./rational.ts";
 import { nvencNativeTarget } from "./video.ts";
@@ -42,7 +42,6 @@ export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): OpenEncode {
   const outputRate = formatRational(targetRate);
   // Null for CPU and AV1 codecs, and for dimensions NVENC will not take.
   const nativeTarget = nvencNativeTarget(codec, width, height);
-  const audioArgs = hasAudio ? ["-map", "1:a:0", "-c:a", "aac", "-b:a", "192k"] : ["-an"];
   /** Second input (audio only) and the video map, identical on both paths. */
   const inputsAndMap = [...(hasAudio ? ["-i", input] : []), "-map", "0:v:0"];
   /**
@@ -52,22 +51,23 @@ export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): OpenEncode {
    * ticks, so the mp4 timeline is exact and ffprobe's base-rate guess comes back
    * equal to the target rather than near it.
    */
-  const muxTail = ["-video_track_timescale", String(targetRate.num), "-movflags", "+faststart", output];
+  const timescale = ["-video_track_timescale", String(targetRate.num)];
   return {
     type: "open",
     ffmpeg,
-    // NVENC emits Annex-B and the mp4 muxer converts it to length-prefixed, so
-    // `copy` needs no bitstream filter.
     nvencArgs: nativeTarget
-      ? ["-v", "error", "-y", "-f", nativeTarget.demux, "-framerate", outputRate, "-i", "pipe:0", ...inputsAndMap, "-c:v", "copy", ...aspectArgs(displayAspect, width, height, nativeTarget.demux), ...audioArgs, ...muxTail]
+      ? muxCopyArgs({
+          demux: nativeTarget.demux, frameRate: outputRate, audioSource: hasAudio ? input : null,
+          container: "mp4", displayAspect, size: { width, height }, extra: timescale, output,
+        })
       : [],
     rawArgs: [
       "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`,
-      "-framerate", outputRate, "-i", "pipe:0", ...inputsAndMap, ...audioArgs,
+      "-framerate", outputRate, "-i", "pipe:0", ...inputsAndMap, ...audioArgs(hasAudio, "mp4"),
       // The device is fixed for frame generation; FRAMEGEN_CUDA_DEVICE says which and why.
       ...encoderArgs({ codec, quality, container: "mp4", copyAudio: true }, FRAMEGEN_CUDA_DEVICE),
       ...aspectArgs(displayAspect, width, height, null),
-      ...muxTail,
+      ...timescale, ...faststartArgs("mp4"), output,
     ],
     nvenc: nativeTarget
       ? { width, height, fpsNum: Number(targetRate.num), fpsDen: Number(targetRate.den), codec: nativeTarget.codec, cq: quality }
