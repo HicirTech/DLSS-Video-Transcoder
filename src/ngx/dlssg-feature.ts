@@ -63,7 +63,7 @@ export interface DlssgIntervalInput {
   rgba: Uint8Array;
   /**
    * The protocol's half2 motion field: R16G16_FLOAT, backward (current to previous) vectors in
-   * pixels, +x right and +y down, exactly as the guide worker packs it (flow.ts).
+   * pixels, +x right and +y down, exactly as the guide worker packs it (flow-resize.ts).
    */
   motion: Uint8Array;
   /** Start a new history (first frame, scene cut, segment start); such an interval generates nothing. */

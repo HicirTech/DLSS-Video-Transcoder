@@ -4,7 +4,7 @@ import { bitsToHalf } from "../src/pipeline/half-float.ts";
 const f32 = new Float32Array(1);
 const u32 = new Uint32Array(f32.buffer);
 
-/** Encode one float32 as an IEEE-754 half (Uint16) through flow.ts's bit encoder. */
+/** Encode one float32 as an IEEE-754 half (Uint16) through half-float.ts's bit encoder. */
 export function floatToHalf(value: number): number {
   f32[0] = value;
   return bitsToHalf(u32[0]!);

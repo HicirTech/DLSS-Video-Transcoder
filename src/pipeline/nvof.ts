@@ -1,6 +1,6 @@
 /**
  * NVIDIA hardware Optical Flow (NVOFA) via the CUDA interface of nvofapi64.dll:
- * the flow session, its GPU buffers, and the flow.ts FlowBackend that wraps them.
+ * the flow session, its GPU buffers, and the FlowBackend (block-match.ts) that wraps them.
  * Turing and later run this on a dedicated engine, separate from the CUDA and
  * graphics cores, so it costs neither shader nor CPU time.
  *
@@ -278,7 +278,7 @@ function toByte(v: number): number {
 }
 
 /**
- * Wrap an NVOFA session as a flow.ts FlowBackend: it receives the estimator's
+ * Wrap an NVOFA session as a FlowBackend (block-match.ts): it receives the estimator's
  * downscaled Float32 grayscale grids, runs hardware optical flow, and returns the
  * grid-resolution (dx, dy) field in grid pixels (current -> previous, matching
  * the block-match sign convention).
@@ -330,7 +330,7 @@ export function tryCreateNvofBackend(width: number, height: number, ordinal: num
     const detail = error instanceof Error ? error.message : String(error);
     // The pointer names the probe line that answers "does the engine come up on
     // this GPU"; its size limits never explain this failure, since the grid is
-    // MIN_FLOW_SIDE..MAX_FLOW_LONG_SIDE (flow.ts) px a side and every RTX reports a far wider range.
+    // MIN_FLOW_SIDE..MAX_FLOW_LONG_SIDE (flow-grid.ts) px a side and every RTX reports a far wider range.
     return { backend: null, reason: `NVOFA hardware optical flow could not start on its ${flowW}x${flowH} grid, so this run uses the CPU matcher instead -- slower, same result: ${detail}. Run \`probe\`: its "Hardware optical flow (NVOFA)" line says whether the engine comes up on the selected GPU and why not.` };
   }
 }
