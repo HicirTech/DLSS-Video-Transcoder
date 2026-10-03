@@ -168,13 +168,19 @@ export function perfQualityName(value: number): string {
 }
 
 /**
- * The fixed render/output ratio of each PerfQuality mode this runtime accepts.
+ * The fixed output/render ratio of each PerfQuality mode this runtime accepts:
+ * the inverse of NVIDIA's default per-axis render scale for the mode (NVIDIA
+ * developer blog, "Tips: Getting the Most out of the DLSS Unreal Engine 4
+ * Plugin", 2021-02-17: Ultra Performance 33%, Performance 50%, Balanced 58%,
+ * Quality 66%). MaxQuality is NVIDIA's Quality and MaxPerf its Performance; 1.5
+ * and 3.0 are the inverses of 2/3 and 1/3, 1.7241379 is 1/0.58, and DLAA
+ * renders at the output size. The runtime's own GetOptimalSettings callback is
+ * never queried, so these are the only ratios used.
  *
  * PerfQuality 4 (UltraQuality) is deliberately absent: nvngx_dlss.dll 310.7.129.0
  * refuses CreateFeature with UnsupportedParameter for it at every ratio tried
  * (1.3x, 1.5x, 2.0x), while 1.3x itself succeeds on modes 2 and 5 — so the mode
  * is unavailable, not the ratio. Measured by tests/diag-sr-quality-modes.ts.
- * NVIDIA has never shipped Ultra Quality in a public DLSS SR runtime.
  */
 export const DLSS_RATIO: Record<number, number> = {
   5: 1.0, 2: 1.5, 1: 1.7241379, 0: 2.0, 3: 3.0,
