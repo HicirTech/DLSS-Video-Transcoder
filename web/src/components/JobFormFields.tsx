@@ -28,7 +28,12 @@ interface PathFieldsProps {
 /** Absolute input / optional output path fields shared by the Image and Video tabs. */
 export function PathFields({ kind, input, output, disabled, onInputChange, onOutputChange }: PathFieldsProps) {
   const example = kind === "image" ? "C:\\Pictures\\photo.png" : "D:\\Footage\\clip.mp4";
-  const accept = kind === "image" ? "image/*" : "video/*";
+  // Image jobs read PNG only (processImage); the server queues any other format and the job then fails.
+  const accept = kind === "image" ? ".png,image/png" : "video/*";
+  const inputHelp =
+    kind === "image"
+      ? "Absolute path of a PNG on the machine that runs the server — or upload one. Image jobs take PNG only; any other format is queued and then fails."
+      : "Absolute path on the machine that runs the server — or upload a file.";
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -59,7 +64,7 @@ export function PathFields({ kind, input, output, disabled, onInputChange, onOut
           fullWidth
           required
           error={Boolean(uploadError)}
-          helperText={uploadError ?? "Absolute path on the machine that runs the server — or upload a file."}
+          helperText={uploadError ?? inputHelp}
           onChange={(event) => onInputChange(event.target.value)}
           slotProps={{ htmlInput: { spellCheck: false } }}
         />
