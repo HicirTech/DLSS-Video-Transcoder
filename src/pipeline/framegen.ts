@@ -44,10 +44,10 @@ import {
   isNativeMultiFramePlan,
   resolveTargetRate,
 } from "./framegen-plan.ts";
-import { parseRational, ratDiv, ratMul, ratToNumber, rational } from "./rational.ts";
+import { type Rational, parseRational, ratDiv, ratMul, ratToNumber, rational } from "./rational.ts";
 import { evenSize } from "./resize.ts";
 import { requireFfmpegTools } from "./tools.ts";
-import { probeVideo } from "./video.ts";
+import { type VideoInfo, probeVideo } from "./video.ts";
 import { ABORT_TIMEOUT_MS } from "./worker-abort.ts";
 
 export interface FrameGenOptions {
@@ -145,9 +145,85 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
   }
 }
 
-/** A frame after its stage's guide worker ran: what the native evaluation needs. */
+/** What the source and the runtime allow, settled before anything is spawned. */
+interface FrameGenJob {
+  options: FrameGenOptions;
+  progress: NonNullable<FrameGenOptions["onProgress"]>;
+  ffmpeg: string;
+  ffprobe: string;
+  caps: Awaited<ReturnType<typeof probeDlssg>>;
+  info: VideoInfo;
+  width: number;
+  height: number;
+  frameBytes: number;
+  sourceRate: Rational;
+  targetRate: Rational;
+  plan: InterpolationPlan;
+  expectedDecoded: number;
+  expectsGeneration: boolean;
+  output: string;
+  /** Whether the destination existed before the job: it decides what a failure may delete. */
+  outputExisted: boolean;
+}
+
+/** What the frame loop reports once the pipeline has run. */
+interface PipelineRun {
+  mode: FrameGenResult["mode"];
+  inputFrames: number;
+  /** null until a runner reports one; the sequential fallback keeps no ledger. */
+  peak: number | null;
+}
+
+/** One attempt at a job; processFrameGen re-runs it as a cascade when a native session turns out to be disabled. */
 async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenResult> {
   const started = performance.now();
+  const job = await planFrameGen(options);
+  const { width, height, frameBytes, targetRate, output, outputExisted } = job;
+  const { decoder, sink } = await openEncodePipeline(job);
+
+  // Drain the decoder's stderr for the whole run so it can never fill its pipe,
+  // block, and stall the frame loop (the encode worker drains its own).
+  let decodeErrText = "";
+  const decodeErrDrained = new Response(decoder.stderr as ReadableStream<Uint8Array>).text().then((t) => { decodeErrText = t; }).catch(() => {});
+
+  // Decoded and generated frames live in SharedArrayBuffers so the guide and
+  // encode threads read them without copies.
+  const reader = new FrameReader(decoder.stdout as ReadableStream<Uint8Array>, true);
+  const writer = new NearestTimestampWriter((frame) => sink.write(frame), targetRate);
+  const zeros = new Uint16Array(motionFieldBytes(width, height) / Uint16Array.BYTES_PER_ELEMENT);
+  const stages: Stage[] = [];
+  // Once, whichever of the failure path and `finally` gets there first.
+  let stagesClosed: Promise<unknown> | null = null;
+  const closeStages = (): Promise<unknown> => (stagesClosed ??= Promise.allSettled(stages.map((stage) => stage.close())));
+  const capacity = Math.floor(DEFAULT_BUFFER_LIMIT / frameBytes);
+
+  let run: PipelineRun;
+  try {
+    await openStages(job, zeros, stages);
+    run = await runPipeline(job, { reader, writer, sink }, stages, capacity);
+  } catch (error) {
+    // abort() kills the worker's ffmpeg and waits for it to release the output
+    // file, so the partial file can be deleted here and a failed job never
+    // leaves a misleading one behind. The stages close at the same time, not
+    // after it: each is bounded by ABORT_TIMEOUT_MS on its own (worker-abort.ts).
+    try { decoder.kill(); } catch {}
+    await Promise.allSettled([sink.abort(), closeStages(), decoder.exited, decodeErrDrained]);
+    removePartialOutput(output, sink.framesWritten, outputExisted);
+    throw error;
+  } finally {
+    sink.close();
+    await closeStages();
+  }
+
+  const decodeExit = await decoder.exited;
+  await decodeErrDrained;
+  if (decodeExit !== 0) throw new Error(ffmpegFailedMessage("decode", decodeExit, decodeErrText));
+
+  return finishFrameGen(job, writer, stages, run, started);
+}
+
+/** Probes the tools, the DLSSG runtime and the source, and plans the interpolation. */
+async function planFrameGen(options: FrameGenOptions): Promise<FrameGenJob> {
   const progress = options.onProgress ?? (() => {});
   // Before the host probe, which starts a GPU process of up to PROBE_TIMEOUT_MS, and again after it: the probe does not watch the signal.
   throwIfAborted(options.signal);
@@ -194,7 +270,11 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
         ? `${plan.cascadeStages} x 2x stage(s) on a ${plan.gridMultiplier}x grid, max timing error ${ratToNumber(plan.maximumTemporalError).toFixed(4)} s`
         : "no synthesis, nearest source frame";
   progress(0, `source ${info.width}x${info.height}${rescaled ? ` -> ${width}x${height} (4:2:0 needs even dimensions)` : ""}${info.displayAspect ? ` (non-square pixels, display ${info.displayAspect.num}:${info.displayAspect.den})` : ""} ${info.codec} ${formatRate(sourceRate)} fps, ${frames} frames${expectedDecoded !== frames ? ` (~${expectedDecoded} after the ${formatRate(sourceRate)} CFR decode)` : ""}; ${plan.path}: -> ${formatRate(targetRate)} fps (${detail}); HAGS ${caps.hagsEnabled ? "on" : "off"}; ~${estimatedOutput} output frames`);
+  return { options, progress, ffmpeg, ffprobe, caps, info, width, height, frameBytes, sourceRate, targetRate, plan, expectedDecoded, expectsGeneration, output, outputExisted };
+}
 
+/** Starts the decoder and opens the encode sink, which owns the audio and the output file. */
+async function openEncodePipeline({ options, progress, ffmpeg, info, width, height, targetRate, output }: FrameGenJob) {
   const decoder = Bun.spawn([ffmpeg, ...decodeArgv({ input: options.input, source: info, output: { width, height } })], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   // Only re-open the source as a second input when it actually has audio to carry;
   // otherwise ffmpeg needlessly demuxes/decodes the whole source again.
@@ -227,124 +307,107 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     throw error;
   }
   if (sink.note) progress(0, sink.note);
+  return { decoder, sink };
+}
 
-  // Drain the decoder's stderr for the whole run so it can never fill its pipe,
-  // block, and stall the frame loop (the encode worker drains its own).
-  let decodeErrText = "";
-  const decodeErrDrained = new Response(decoder.stderr as ReadableStream<Uint8Array>).text().then((t) => { decodeErrText = t; }).catch(() => {});
-
-  // Decoded and generated frames live in SharedArrayBuffers so the guide and
-  // encode threads read them without copies.
-  const reader = new FrameReader(decoder.stdout as ReadableStream<Uint8Array>, true);
-  const writer = new NearestTimestampWriter((frame) => sink.write(frame), targetRate);
-  const zeros = new Uint16Array(motionFieldBytes(width, height) / Uint16Array.BYTES_PER_ELEMENT);
-  const stages: Stage[] = [];
-  // Once, whichever of the failure path and `finally` gets there first.
-  let stagesClosed: Promise<unknown> | null = null;
-  const closeStages = (): Promise<unknown> => (stagesClosed ??= Promise.allSettled(stages.map((stage) => stage.close())));
-  const capacity = Math.floor(DEFAULT_BUFFER_LIMIT / frameBytes);
-  let mode: FrameGenResult["mode"] = "overlapped";
-  let inputFrames = 0;
-  // null until a runner reports one; the sequential fallback keeps no ledger.
-  let peak: number | null = null;
-
-  try {
-    const generatedCounts: number[] = [];
-    if (plan.path === "Native DLSSG") generatedCounts.push(plan.generatedPerInterval);
-    else if (plan.path === "Cascade") for (let stage = 0; stage < plan.cascadeStages; stage++) generatedCounts.push(1);
-    // Open every stage's host process and guide thread concurrently: each
-    // brings up its own D3D12/NGX or CUDA/NVOFA context, ~1 s of fixed cost
-    // that would otherwise be paid stage by stage.
-    const openStage = async (index: number, generatedCount: number): Promise<Stage> => {
-      // Only the last stage — 2^(stages-1) evaluations per source frame, the
-      // bottleneck — gets a packer thread; the others pack inline so the machine
-      // is not oversubscribed.
-      const packInline = index !== generatedCounts.length - 1;
-      const results = await Promise.allSettled([
-        DlssgSession.open(options.runtimeDir, { width, height, generatedCount, sharedFrames: true }),
-        openGuideWorker({ type: "open", width, height, detectSourceCuts: index === 0, packInline }),
-        packInline ? Promise.resolve(null) : openGuideWorker({ type: "open-packer", width, height }),
-      ]);
-      const [sessionResult, guideResult, packerResult] = results;
-      if (sessionResult.status === "rejected" || guideResult.status === "rejected" || packerResult.status === "rejected") {
-        // Release whatever came up so a partial failure leaks nothing.
-        if (sessionResult.status === "fulfilled") await sessionResult.value.close(ABORT_TIMEOUT_MS);
-        for (const r of [guideResult, packerResult]) if (r.status === "fulfilled" && r.value) try { r.value.worker.terminate(); } catch {}
-        throw results.find((r): r is PromiseRejectedResult => r.status === "rejected")!.reason;
-      }
-      const stage = new Stage(sessionResult.value, guideResult.value.worker, packerResult.value ? packerResult.value.worker : null, generatedCount, zeros);
-      stage.flow = guideResult.value.flow === "pack" ? "cpu" : guideResult.value.flow;
-      stage.flowReason = guideResult.value.flowReason;
-      return stage;
-    };
-    const opened = await Promise.allSettled(generatedCounts.map((generatedCount, index) => openStage(index, generatedCount)));
-    for (const result of opened) if (result.status === "fulfilled") stages.push(result.value); // so `finally` closes them
-    const failed = opened.find((result): result is PromiseRejectedResult => result.status === "rejected");
-    if (failed) throw failed.reason;
-    if (stages.length) progress(0, `guide threads: ${stages.length} + ${stages.filter((s) => s.packer).length} packer, 1 encode (optical flow ${stages.map((s) => (s.flow === "nvof" ? "NVOFA" : "CPU")).join(", ")})`);
-    // Every stage asks for the same grid, so one report covers all of them.
-    const flowReason = stages.find((s) => s.flowReason)?.flowReason;
-    if (flowReason) progress(0, flowReason);
-
-    const noneGenerated = () => stages.every((stage) => stage.generatedTotal === 0);
-    const check = (): void => {
-      // Fail fast before spending the whole encode: nothing synthesised after
-      // several real intervals means the runtime has disabled generation.
-      if (expectsGeneration && stages[0]!.intervals >= FG_PROBE_INTERVALS && noneGenerated()) throw new FrameGenDisabledError(noFramesGeneratedMessage(plan, { disabledFrames: stages[0]!.session.disabledFrames, hagsEnabled: caps.hagsEnabled }), plan);
-    };
-    const params: RunParams = {
-      reader,
-      frameBytes,
-      sourceRate,
-      stages,
-      writer,
-      capacity,
-      // expectedDecoded, not nb_frames: the decode is CFR-resampled, so the container count can be short and the bar would pass 100 %.
-      onProcessed: (count) => progress(Math.min(0.96, count / expectedDecoded), `frame ${count}/~${expectedDecoded}`, count),
-      check,
-      signal: options.signal,
-    };
-    const maxGenerated = Math.max(0, ...stages.map((s) => s.generatedCount));
-    // Even one input/output transaction may exceed the credit window for enormous frames.
-    const sequential = process.env.NR_FRAMEGEN_SEQUENTIAL === "1" || capacity < maxGenerated + 3;
-    mode = sequential ? "sequential" : "overlapped";
-    if (sequential) progress(0, `pipeline: sequential (${capacity} frame credits)`);
-    const runStarted = performance.now();
-    const run = sequential ? await runSequential(params) : await runOverlapped(params);
-    inputFrames = run.decoded;
-    peak = run.peak;
-    if (run.busy) {
-      // Busy seconds per owner over the run's wall time: the owner closest to the
-      // wall time is the bottleneck.
-      const wall = (performance.now() - runStarted) / 1000;
-      const parts = Object.entries(run.busy).sort(([a], [b]) => a.localeCompare(b)).map(([name, ms]) => `${name} ${(ms / 1000).toFixed(1)}`);
-      progress(0.97, `pipeline busy (s) over ${wall.toFixed(1)} s wall: ${parts.join(", ")}`);
+/** Opens every stage into `stages`, which the caller closes whatever happens here. */
+async function openStages({ options, progress, width, height, plan }: FrameGenJob, zeros: Uint16Array, stages: Stage[]): Promise<void> {
+  const generatedCounts: number[] = [];
+  if (plan.path === "Native DLSSG") generatedCounts.push(plan.generatedPerInterval);
+  else if (plan.path === "Cascade") for (let stage = 0; stage < plan.cascadeStages; stage++) generatedCounts.push(1);
+  // Open every stage's host process and guide thread concurrently: each
+  // brings up its own D3D12/NGX or CUDA/NVOFA context, ~1 s of fixed cost
+  // that would otherwise be paid stage by stage.
+  const openStage = async (index: number, generatedCount: number): Promise<Stage> => {
+    // Only the last stage — 2^(stages-1) evaluations per source frame, the
+    // bottleneck — gets a packer thread; the others pack inline so the machine
+    // is not oversubscribed.
+    const packInline = index !== generatedCounts.length - 1;
+    const results = await Promise.allSettled([
+      DlssgSession.open(options.runtimeDir, { width, height, generatedCount, sharedFrames: true }),
+      openGuideWorker({ type: "open", width, height, detectSourceCuts: index === 0, packInline }),
+      packInline ? Promise.resolve(null) : openGuideWorker({ type: "open-packer", width, height }),
+    ]);
+    const [sessionResult, guideResult, packerResult] = results;
+    if (sessionResult.status === "rejected" || guideResult.status === "rejected" || packerResult.status === "rejected") {
+      // Release whatever came up so a partial failure leaks nothing.
+      if (sessionResult.status === "fulfilled") await sessionResult.value.close(ABORT_TIMEOUT_MS);
+      for (const r of [guideResult, packerResult]) if (r.status === "fulfilled" && r.value) try { r.value.worker.terminate(); } catch {}
+      throw results.find((r): r is PromiseRejectedResult => r.status === "rejected")!.reason;
     }
-    if (inputFrames === 0) throw new NoFramesDecodedError();
-    // Clips shorter than the probe window still must not pass off a duplicate-frame resample as generation.
-    if (expectsGeneration && stages[0]!.intervals >= 1 && noneGenerated()) throw new FrameGenDisabledError(noFramesGeneratedMessage(plan, { disabledFrames: stages[0]?.session.disabledFrames ?? 0, hagsEnabled: caps.hagsEnabled }), plan);
-    // Not before the checks above: a FrameGenDisabledError from them makes an
-    // "auto" job re-run as a cascade, which must still be cancellable.
-    options.onFinishing?.();
-    await sink.finish();
-  } catch (error) {
-    // abort() kills the worker's ffmpeg and waits for it to release the output
-    // file, so the partial file can be deleted here and a failed job never
-    // leaves a misleading one behind. The stages close at the same time, not
-    // after it: each is bounded by ABORT_TIMEOUT_MS on its own (worker-abort.ts).
-    try { decoder.kill(); } catch {}
-    await Promise.allSettled([sink.abort(), closeStages(), decoder.exited, decodeErrDrained]);
-    removePartialOutput(output, sink.framesWritten, outputExisted);
-    throw error;
-  } finally {
-    sink.close();
-    await closeStages();
+    const stage = new Stage(sessionResult.value, guideResult.value.worker, packerResult.value ? packerResult.value.worker : null, generatedCount, zeros);
+    stage.flow = guideResult.value.flow === "pack" ? "cpu" : guideResult.value.flow;
+    stage.flowReason = guideResult.value.flowReason;
+    return stage;
+  };
+  const opened = await Promise.allSettled(generatedCounts.map((generatedCount, index) => openStage(index, generatedCount)));
+  for (const result of opened) if (result.status === "fulfilled") stages.push(result.value); // so `finally` closes them
+  const failed = opened.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failed) throw failed.reason;
+  if (stages.length) progress(0, `guide threads: ${stages.length} + ${stages.filter((s) => s.packer).length} packer, 1 encode (optical flow ${stages.map((s) => (s.flow === "nvof" ? "NVOFA" : "CPU")).join(", ")})`);
+  // Every stage asks for the same grid, so one report covers all of them.
+  const flowReason = stages.find((s) => s.flowReason)?.flowReason;
+  if (flowReason) progress(0, flowReason);
+}
+
+/** The frame loop: feeds the stages, writes the encode and finishes the sink, failing fast when generation is disabled. */
+async function runPipeline(
+  { options, progress, frameBytes, sourceRate, plan, caps, expectedDecoded, expectsGeneration }: FrameGenJob,
+  { reader, writer, sink }: { reader: FrameReader; writer: NearestTimestampWriter; sink: EncodeSink },
+  stages: Stage[],
+  capacity: number,
+): Promise<PipelineRun> {
+  const noneGenerated = () => stages.every((stage) => stage.generatedTotal === 0);
+  const check = (): void => {
+    // Fail fast before spending the whole encode: nothing synthesised after
+    // several real intervals means the runtime has disabled generation.
+    if (expectsGeneration && stages[0]!.intervals >= FG_PROBE_INTERVALS && noneGenerated()) throw new FrameGenDisabledError(noFramesGeneratedMessage(plan, { disabledFrames: stages[0]!.session.disabledFrames, hagsEnabled: caps.hagsEnabled }), plan);
+  };
+  const params: RunParams = {
+    reader,
+    frameBytes,
+    sourceRate,
+    stages,
+    writer,
+    capacity,
+    // expectedDecoded, not nb_frames: the decode is CFR-resampled, so the container count can be short and the bar would pass 100 %.
+    onProcessed: (count) => progress(Math.min(0.96, count / expectedDecoded), `frame ${count}/~${expectedDecoded}`, count),
+    check,
+    signal: options.signal,
+  };
+  const maxGenerated = Math.max(0, ...stages.map((s) => s.generatedCount));
+  // Even one input/output transaction may exceed the credit window for enormous frames.
+  const sequential = process.env.NR_FRAMEGEN_SEQUENTIAL === "1" || capacity < maxGenerated + 3;
+  const mode: FrameGenResult["mode"] = sequential ? "sequential" : "overlapped";
+  if (sequential) progress(0, `pipeline: sequential (${capacity} frame credits)`);
+  const runStarted = performance.now();
+  const run = sequential ? await runSequential(params) : await runOverlapped(params);
+  const inputFrames = run.decoded;
+  const peak = run.peak;
+  if (run.busy) {
+    // Busy seconds per owner over the run's wall time: the owner closest to the
+    // wall time is the bottleneck.
+    const wall = (performance.now() - runStarted) / 1000;
+    const parts = Object.entries(run.busy).sort(([a], [b]) => a.localeCompare(b)).map(([name, ms]) => `${name} ${(ms / 1000).toFixed(1)}`);
+    progress(0.97, `pipeline busy (s) over ${wall.toFixed(1)} s wall: ${parts.join(", ")}`);
   }
+  if (inputFrames === 0) throw new NoFramesDecodedError();
+  // Clips shorter than the probe window still must not pass off a duplicate-frame resample as generation.
+  if (expectsGeneration && stages[0]!.intervals >= 1 && noneGenerated()) throw new FrameGenDisabledError(noFramesGeneratedMessage(plan, { disabledFrames: stages[0]?.session.disabledFrames ?? 0, hagsEnabled: caps.hagsEnabled }), plan);
+  // Not before the checks above: a FrameGenDisabledError from them makes an
+  // "auto" job re-run as a cascade, which must still be cancellable.
+  options.onFinishing?.();
+  await sink.finish();
+  return { mode, inputFrames, peak };
+}
 
-  const decodeExit = await decoder.exited;
-  await decodeErrDrained;
-  if (decodeExit !== 0) throw new Error(ffmpegFailedMessage("decode", decodeExit, decodeErrText));
-
+function finishFrameGen(
+  { progress, ffprobe, width, height, sourceRate, targetRate, plan, caps, frameBytes, output }: FrameGenJob,
+  writer: NearestTimestampWriter,
+  stages: Stage[],
+  { mode, inputFrames, peak }: PipelineRun,
+  started: number,
+): FrameGenResult {
   progress(0.98, "verifying output");
   // writer.outputCount: fixed by endAt() from the decoded count, so it is the
   // length that was actually written, whatever the container declared.
