@@ -31,6 +31,8 @@ export const NR_PRESETS = [0, 1, 2, 3] as const;
 type NrPreset = (typeof NR_PRESETS)[number];
 export const NR_STYLES = [0, 1, 2] as const;
 type NrStyle = (typeof NR_STYLES)[number];
+/** The words for each look style, shared by the CLI help and the web menu so both name them alike. */
+export const NR_STYLE_LABELS: Record<NrStyle, string> = { 0: "Default", 1: "Natural", 2: "Cinematic" };
 export const SCALE_MODES = ["none", "factor", "size"] as const;
 type ScaleMode = (typeof SCALE_MODES)[number];
 export const ENCODE_CODECS = ["h264", "hevc", "av1", "h264_nvenc", "hevc_nvenc", "av1_nvenc"] as const;

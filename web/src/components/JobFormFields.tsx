@@ -1,9 +1,20 @@
 import { type ChangeEvent, useId, useState } from "react";
 import { Button, FormControl, FormHelperText, InputLabel, MenuItem, Select, Stack, TextField } from "@mui/material";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
-import type { EngineKind, MotionKind } from "../../../src/server/api-types";
+import { ENGINE_KINDS, type EngineKind, MOTION_KINDS, type MotionKind } from "../../../src/server/api-types";
 import { api } from "../api";
 import { errorMessage } from "../errors";
+
+// Record<...>: an engine or motion the API accepts without menu words is a build error, not a blank item.
+const ENGINE_MENU_LABELS: Record<EngineKind, string> = {
+  sr: "DLSS Super Resolution (upscale)",
+  nr: "DLSS Neural Rendering (enhance)",
+  bypass: "Bypass (passthrough copy, no DLSS)",
+};
+const MOTION_MENU_LABELS: Record<MotionKind, string> = {
+  none: "None — process each frame independently",
+  flow: "Optical flow (estimate motion between frames)",
+};
 
 interface PathFieldsProps {
   kind: "image" | "video";
@@ -95,9 +106,11 @@ export function EngineSelect({ value, disabled, onChange }: EngineSelectProps) {
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
-        <MenuItem value="sr">DLSS Super Resolution (upscale)</MenuItem>
-        <MenuItem value="nr">DLSS Neural Rendering (enhance)</MenuItem>
-        <MenuItem value="bypass">Bypass (passthrough copy, no DLSS)</MenuItem>
+        {ENGINE_KINDS.map((engine) => (
+          <MenuItem key={engine} value={engine}>
+            {ENGINE_MENU_LABELS[engine]}
+          </MenuItem>
+        ))}
       </Select>
       <FormHelperText>
         Super Resolution upscales to the output size below. Neural rendering enhances each frame at its current
@@ -126,8 +139,11 @@ export function MotionSelect({ value, disabled, onChange }: MotionSelectProps) {
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
-        <MenuItem value="none">None — process each frame independently</MenuItem>
-        <MenuItem value="flow">Optical flow (estimate motion between frames)</MenuItem>
+        {MOTION_KINDS.map((motion) => (
+          <MenuItem key={motion} value={motion}>
+            {MOTION_MENU_LABELS[motion]}
+          </MenuItem>
+        ))}
       </Select>
       <FormHelperText>
         Optical flow estimates motion between frames for steadier temporal results — using the GPU hardware
