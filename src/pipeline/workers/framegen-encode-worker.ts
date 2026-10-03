@@ -13,9 +13,10 @@
 import { ffmpegFailedMessage } from "../ffmpeg-failure.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "../framegen-plan.ts";
 import { NvencEncoder, probeNvencCaps, type NvencSdkCodec } from "../nvenc.ts";
-import { type AbortRequest, answerAbort } from "../worker-abort.ts";
+import { type AbortedReply, type AbortRequest, answerAbort } from "../worker-abort.ts";
 
-interface OpenMsg {
+/** Open the encoder (when `nvenc` is set and NVENC comes up) and the ffmpeg child that muxes or encodes. */
+export interface FramegenEncodeOpen {
   type: "open";
   ffmpeg: string;
   /** ffmpeg argv for the NVENC path (mux-only, `-c:v copy` from an elementary stream). */
@@ -25,13 +26,24 @@ interface OpenMsg {
   /** NVENC configuration, or null when the codec has no NVENC equivalent. The device is FRAMEGEN_CUDA_DEVICE. */
   nvenc: { width: number; height: number; fpsNum: number; fpsDen: number; codec: NvencSdkCodec; cq: number } | null;
 }
-interface FrameMsg {
+/** One finished output frame (SharedArrayBuffer-backed, so posting it copies nothing). */
+export interface FramegenEncodeFrame {
   type: "frame";
   rgba: Uint8Array;
 }
-type InMsg = OpenMsg | FrameMsg | { type: "finish" } | AbortRequest;
+/** What the main thread sends the frame-generation encode worker. */
+export type FramegenEncodeIn = FramegenEncodeOpen | FramegenEncodeFrame | { type: "finish" } | AbortRequest;
+/** What it answers: whether NVENC is in use (and a note on why not), one ack per frame, then "done" or "error". */
+export type FramegenEncodeOut =
+  | { type: "opened"; nvenc: boolean; note: string }
+  | { type: "encoded" }
+  | { type: "done" }
+  | { type: "error"; message: string }
+  | AbortedReply;
 
 declare const self: Worker;
+
+const post = (message: FramegenEncodeOut): void => self.postMessage(message);
 
 let enc: NvencEncoder | null = null;
 let proc: ReturnType<typeof Bun.spawn> | null = null;
@@ -44,7 +56,7 @@ let stopped = false;
 function fail(message: string): void {
   if (stopped) return;
   stopped = true;
-  self.postMessage({ type: "error", message });
+  post({ type: "error", message });
 }
 
 /** ffmpeg's own diagnostics, once it has exited (bounded wait so a live process cannot hang the error path). */
@@ -54,7 +66,7 @@ async function ffmpegDetail(): Promise<string> {
   return text ? `: ${text}` : "";
 }
 
-self.onmessage = (event: MessageEvent<InMsg>) => {
+self.onmessage = (event: MessageEvent<FramegenEncodeIn>) => {
   const m = event.data;
   if (m.type === "open") {
     try {
@@ -72,7 +84,7 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
       sink = proc.stdin as { write(b: Uint8Array): unknown; end(): unknown };
       // Drain stderr for the whole run so ffmpeg can never block on a full pipe.
       stderrDrained = new Response(proc.stderr as ReadableStream<Uint8Array>).text().then((t) => { stderrText = t; }).catch(() => {});
-      self.postMessage({ type: "opened", nvenc: Boolean(enc), note });
+      post({ type: "opened", nvenc: Boolean(enc), note });
     } catch (error) {
       fail(`frame-generation encode worker could not start: ${(error as Error).message ?? String(error)}`);
     }
@@ -83,7 +95,7 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
         const payload = enc ? enc.encode(m.rgba) : m.rgba;
         const written = sink.write(payload);
         if (written instanceof Promise) await written;
-        self.postMessage({ type: "encoded" });
+        post({ type: "encoded" });
       })
       .catch(async (error) => {
         try { proc?.kill(); } catch {}
@@ -111,7 +123,7 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
           return;
         }
         stopped = true;
-        self.postMessage({ type: "done" });
+        post({ type: "done" });
       })
       .catch(async (error) => {
         try { proc?.kill(); } catch {}

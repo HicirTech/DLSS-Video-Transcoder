@@ -11,13 +11,24 @@
  */
 import { ffmpegFailedMessage } from "../ffmpeg-failure.ts";
 import { FrameReader } from "../frame-reader.ts";
-import { type AbortRequest, answerAbort } from "../worker-abort.ts";
+import { type AbortedReply, type AbortRequest, answerAbort } from "../worker-abort.ts";
 
-interface StartMsg { type: "start"; ffmpeg: string; args: string[]; frameBytes: number }
-interface CreditMsg { type: "credit"; n: number }
-type InMsg = StartMsg | CreditMsg | AbortRequest;
+/** Spawn ffmpeg with `args` and read `frameBytes` per frame from its stdout. */
+export interface DecodeStart { type: "start"; ffmpeg: string; args: string[]; frameBytes: number }
+/** Allow `n` more frames to be read and posted. */
+export interface DecodeCredit { type: "credit"; n: number }
+/** What the main thread sends the decode worker. */
+export type DecodeIn = DecodeStart | DecodeCredit | AbortRequest;
+/** What it answers: each frame (its buffer transferred), then "end" or "error". */
+export type DecodeOut =
+  | { type: "frame"; index: number; buf: ArrayBuffer }
+  | { type: "end"; frames: number }
+  | { type: "error"; message: string }
+  | AbortedReply;
 
 declare const self: Worker;
+
+const post = (message: DecodeOut, transfer?: Transferable[]): void => (transfer ? self.postMessage(message, transfer) : self.postMessage(message));
 
 let credits = 0;
 let wake: (() => void) | null = null;
@@ -34,7 +45,7 @@ function awaitCredit(): Promise<void> {
   return new Promise<void>((resolve) => { wake = resolve; });
 }
 
-self.onmessage = (event: MessageEvent<InMsg>) => {
+self.onmessage = (event: MessageEvent<DecodeIn>) => {
   const msg = event.data;
   if (msg.type === "start") {
     void run(msg);
@@ -49,7 +60,7 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
   }
 };
 
-async function run(msg: StartMsg): Promise<void> {
+async function run(msg: DecodeStart): Promise<void> {
   // A "start" queued behind an "abort" must not spawn: the abort was already
   // acknowledged, so nothing would ever kill that ffmpeg.
   if (aborted) return;
@@ -67,7 +78,9 @@ async function run(msg: StartMsg): Promise<void> {
       const frame = await reader.next(msg.frameBytes);
       if (!frame || aborted) break;
       credits--;
-      self.postMessage({ type: "frame", index, buf: frame.buffer }, [frame.buffer]);
+      // FrameReader hands out ordinary (not shared) memory unless it was asked to, so this buffer can be transferred.
+      const buf = frame.buffer as ArrayBuffer;
+      post({ type: "frame", index, buf }, [buf]);
       index++;
     }
     await stderrDrained;
@@ -75,12 +88,12 @@ async function run(msg: StartMsg): Promise<void> {
     const code = await proc.exited;
     if (aborted) return;
     if (code !== 0) {
-      self.postMessage({ type: "error", message: ffmpegFailedMessage("decode", code, err) });
+      post({ type: "error", message: ffmpegFailedMessage("decode", code, err) });
       return;
     }
-    self.postMessage({ type: "end", frames: index });
+    post({ type: "end", frames: index });
   } catch (error) {
     if (aborted) return;
-    self.postMessage({ type: "error", message: (error as Error).message ?? String(error) });
+    post({ type: "error", message: (error as Error).message ?? String(error) });
   }
 }
