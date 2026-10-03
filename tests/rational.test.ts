@@ -1,6 +1,6 @@
 /** Exact bigint rationals: the property frame-rate planning depends on is that nothing becomes a float. */
 import { expect, test } from "bun:test";
-import { formatRational, parseRational, ratCeil, ratCmp, ratMul, rational } from "../src/pipeline/rational.ts";
+import { formatRational, parseRational, ratCeil, ratCmp, ratMul, rational, tryParseRate } from "../src/pipeline/rational.ts";
 
 test("parseRational keeps exact rationals, integers, and decimals without float drift", () => {
   expect(parseRational("60000/1001")).toEqual({ num: 60000n, den: 1001n });
@@ -17,4 +17,17 @@ test("rational arithmetic reduces and compares exactly", () => {
   expect(ratCeil(rational(2002, 1))).toBe(2002n);
   expect(ratCeil(rational(2001, 1000))).toBe(3n);
   expect(ratCeil(rational(2000, 1000))).toBe(2n);
+});
+
+test("tryParseRate reads the rates ffprobe prints exactly", () => {
+  expect(tryParseRate("30000/1001")).toEqual({ num: 30000n, den: 1001n });
+  expect(tryParseRate("25")).toEqual({ num: 25n, den: 1n });
+  expect(tryParseRate("30/1")).toEqual({ num: 30n, den: 1n });
+  expect(formatRational(tryParseRate("23.976")!)).toBe("2997/125");
+});
+
+test("tryParseRate answers null for every text that names no usable rate", () => {
+  for (const unusable of [undefined, "", "N/A", "0/0", "1/0", "30/x", "x/1", "-30/1", "0/1", "0"]) {
+    expect(tryParseRate(unusable), String(unusable)).toBeNull();
+  }
 });

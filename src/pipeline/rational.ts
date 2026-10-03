@@ -59,6 +59,23 @@ export function parseRational(text: string): Rational {
   return rational(BigInt(s), 1n);
 }
 
+/**
+ * A frame rate as ffprobe or ffmpeg prints it, or null when the text names no usable rate: empty,
+ * "N/A", "0/0", a zero denominator ("1/0", which ffprobe prints for a stream whose duration is
+ * zero) or a rate that is not above zero. ffmpeg rejects the unusable ones as argv, so every
+ * caller that passes a rate on has to treat null as "no rate".
+ */
+export function tryParseRate(text: string | undefined): Rational | null {
+  if (!text) return null;
+  let rate: Rational;
+  try {
+    rate = parseRational(text);
+  } catch {
+    return null;
+  }
+  return rate.num > 0n ? rate : null;
+}
+
 /** Render a Rational back to an ffmpeg `"num/den"` rate string. */
 export function formatRational(r: Rational): string {
   return `${r.num}/${r.den}`;
