@@ -1,9 +1,26 @@
 /** The `fg` command: DLSS Frame Generation, interpolating a video to a higher frame rate. */
 import { ENCODE_CODECS, FRAME_GEN_ENGINES, SETTING_RANGES } from "../server/api-types.ts";
 import { processFrameGen } from "../pipeline/framegen.ts";
+import { resolveTargetRate } from "../pipeline/framegen-plan.ts";
 import { choiceOption, numberOption, option, positionalArgs, runtimeDirOption } from "./args.ts";
 import { commandSpec, FG_MULTIPLIER_OPTION } from "./commands.ts";
 import { usageError } from "./usage-error.ts";
+
+/**
+ * `--fps` as typed, or undefined when absent. A rate the planner cannot resolve is a usage error here, the
+ * check validateJobRequest makes for the API, instead of a failure after the source has been probed and the
+ * DLSS Frame Generation host has started.
+ */
+export function targetFpsOption(args: string[]): string | undefined {
+  const rate = option(args, "--fps");
+  if (rate === undefined) return undefined;
+  try {
+    resolveTargetRate(rate);
+  } catch (error) {
+    usageError(`--fps is not a rate this build can produce: ${(error as Error).message}`);
+  }
+  return rate;
+}
 
 export async function fgCommand(args: string[]): Promise<void> {
   const positional = positionalArgs(args, commandSpec("fg"));
@@ -12,7 +29,7 @@ export async function fgCommand(args: string[]): Promise<void> {
   const result = await processFrameGen({
     input,
     output: positional[1],
-    targetFps: option(args, "--fps"),
+    targetFps: targetFpsOption(args),
     multiplier: numberOption(args, "--multiplier", FG_MULTIPLIER_OPTION),
     engine: choiceOption(args, "--engine", FRAME_GEN_ENGINES),
     // The same range the API validates against and the UI clamps to.
