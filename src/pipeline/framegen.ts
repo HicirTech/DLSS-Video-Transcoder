@@ -252,9 +252,8 @@ async function planFrameGen(options: FrameGenOptions): Promise<FrameGenJob> {
   // Estimates for the progress report only; the exact output length is set
   // from the decoded count by writer.endAt() at end of stream. `frames` is
   // nb_frames (or duration x avg_frame_rate), counted in the MEASURED clock, so
-  // it pairs with info.fps — the same measured rate — to give seconds. Dividing
-  // it by sourceRate (r_frame_rate, the clock the decoder resamples to) is what
-  // truncated the output by the ratio of the two rates.
+  // it pairs with info.fps — the same measured rate — to give seconds, never
+  // with sourceRate (r_frame_rate, the clock the decoder resamples to).
   const sourceSeconds = frames / info.fps;
   const expectedDecoded = Math.max(1, Math.round(sourceSeconds * ratToNumber(sourceRate)));
   const estimatedOutput = Math.ceil(sourceSeconds * ratToNumber(targetRate));
