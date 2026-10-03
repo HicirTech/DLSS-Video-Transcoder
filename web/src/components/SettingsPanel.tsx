@@ -22,8 +22,6 @@ interface SettingsPanelProps {
 const AUTO_GPU = "auto";
 
 export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
-  // useId, not a constant: every tab stays mounted, so two panels can render
-  // this component at once and a fixed id would appear twice in one document.
   const gpuLabelId = useId();
   const { settings, setNr, setAdapterUuid, reset, replaceAll } = useSettings();
   const toast = useToast();
