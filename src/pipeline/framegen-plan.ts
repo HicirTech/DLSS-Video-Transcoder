@@ -14,6 +14,7 @@
  * Ported from the reference project's frame_interpolation/scheduler.py,
  * models.py (FPS table) and the NearestTimestampWriter in processor.py.
  */
+import { FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, type FrameGenEngine, type FrameGenFps } from "../server/api-types.ts";
 import { parseRational, type Rational, ratAbs, ratAdd, ratCeil, ratCmp, ratDiv, ratMul, ratSub, rational } from "./rational.ts";
 
 /**
@@ -30,41 +31,39 @@ export const FRAMEGEN_CUDA_DEVICE = 0;
 // Target rates
 // ---------------------------------------------------------------------------
 
-/** The named output rates the UI/CLI offer, ascending, as exact rationals (reference models.py FPS_RATES). */
-const FPS_TABLE: ReadonlyArray<readonly [string, Rational]> = [
-  ["23.976", rational(24000, 1001)],
-  ["25", rational(25)],
-  ["29.97", rational(30000, 1001)],
-  ["30", rational(30)],
-  ["50", rational(50)],
-  ["59.94", rational(60000, 1001)],
-  ["60", rational(60)],
-  ["90", rational(90)],
-  ["119.88", rational(120000, 1001)],
-  ["120", rational(120)],
-  ["144", rational(144)],
-  ["165", rational(165)],
-  ["180", rational(180)],
-  ["240", rational(240)],
-  ["360", rational(360)],
-  ["480", rational(480)],
-];
-/** Ascending choice list. An explicit array: object key order would list the integer names ("25", "30") before "23.976". */
-export const FPS_CHOICES: readonly string[] = FPS_TABLE.map(([name]) => name);
 /**
- * Null prototype: this is indexed with a raw user string (`--fps`, and the API's
- * frameGen.targetFps). On an ordinary object FPS_RATES["toString"] returns
- * Object.prototype.toString — truthy, so the lookup below skipped its parse
- * branch and handed a function to the planner, which died inside the rational
+ * The exact rate behind each named output rate (reference models.py FPS_RATES). Keyed by
+ * FrameGenFps, so a name added to or dropped from FRAME_GEN_FPS_CHOICES fails to compile here.
+ */
+const NAMED_RATES: Record<FrameGenFps, Rational> = {
+  "23.976": rational(24000, 1001),
+  "25": rational(25),
+  "29.97": rational(30000, 1001),
+  "30": rational(30),
+  "50": rational(50),
+  "59.94": rational(60000, 1001),
+  "60": rational(60),
+  "90": rational(90),
+  "119.88": rational(120000, 1001),
+  "120": rational(120),
+  "144": rational(144),
+  "165": rational(165),
+  "180": rational(180),
+  "240": rational(240),
+  "360": rational(360),
+  "480": rational(480),
+};
+
+/**
+ * The exact rate of a named choice, or undefined. Checks the choice list instead of indexing,
+ * because the name is a raw user string (`--fps`, the API's frameGen.targetFps): on an ordinary
+ * object NAMED_RATES["toString"] is Object.prototype.toString, which is truthy, so the caller
+ * skipped its parse branch and handed a function to the planner, which died inside the rational
  * arithmetic with "Invalid mix of BigInt and other type in multiplication".
  */
-export const FPS_RATES: Readonly<Record<string, Rational>> = Object.assign(
-  Object.create(null) as Record<string, Rational>,
-  Object.fromEntries(FPS_TABLE),
-);
-
-export type FrameGenEngine = "auto" | "native" | "cascade";
-export const FRAMEGEN_ENGINES: readonly FrameGenEngine[] = ["auto", "native", "cascade"];
+function namedRate(name: string): Rational | undefined {
+  return (FRAME_GEN_FPS_CHOICES as readonly string[]).includes(name) ? NAMED_RATES[name as FrameGenFps] : undefined;
+}
 
 /**
  * Resolve a target rate: a named choice ("59.94"), an exact "num/den", or a
@@ -76,12 +75,12 @@ export function resolveTargetRate(value: string | Rational): Rational {
     return value;
   }
   const key = value.trim();
-  let rate = FPS_RATES[key];
+  let rate = namedRate(key);
   if (!rate) {
     try {
       rate = parseRational(key);
     } catch {
-      throw new Error(`Unsupported output FPS ${JSON.stringify(value)}. Choose one of: ${FPS_CHOICES.join(", ")}, or give an exact rate such as 60000/1001.`);
+      throw new Error(`Unsupported output FPS ${JSON.stringify(value)}. Choose one of: ${FRAME_GEN_FPS_CHOICES.join(", ")}, or give an exact rate such as 60000/1001.`);
     }
   }
   if (rate.num <= 0n) throw new Error("Output FPS must be positive.");
@@ -160,7 +159,7 @@ export function chooseInterpolationPlan(
   nativeMultiplierMax: number,
   options: PlanOptions = {},
 ): InterpolationPlan {
-  if (!FRAMEGEN_ENGINES.includes(engine)) throw new Error(`Unknown frame-generation engine ${JSON.stringify(engine)}. Choose auto, native or cascade.`);
+  if (!FRAME_GEN_ENGINES.includes(engine)) throw new Error(`Unknown frame-generation engine ${JSON.stringify(engine)}. Choose one of: ${FRAME_GEN_ENGINES.join(", ")}.`);
   if (sourceRate.num <= 0n || targetRate.num <= 0n) throw new Error("Source and output FPS must be positive.");
   const cfr = options.cfr ?? true;
   const hags = options.hagsEnabled ?? true;
@@ -221,7 +220,8 @@ export function chooseInterpolationPlan(
 
 /** "60", "59.94" (for 60000/1001) or "num/den" for display. */
 export function formatRate(rate: Rational): string {
-  for (const [name, value] of FPS_TABLE) if (ratCmp(value, rate) === 0) return name;
+  const name = FRAME_GEN_FPS_CHOICES.find((choice) => ratCmp(NAMED_RATES[choice], rate) === 0);
+  if (name !== undefined) return name;
   if (rate.den === 1n) return String(rate.num);
   const approx = Number(rate.num) / Number(rate.den);
   return `${approx.toFixed(3).replace(/\.?0+$/, "")} (${rate.num}/${rate.den})`;

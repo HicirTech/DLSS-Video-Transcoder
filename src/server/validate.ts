@@ -10,8 +10,11 @@ import { resolveTargetRate } from "../pipeline/framegen-plan.ts";
 import {
   ENCODE_CODECS,
   ENCODE_CONTAINERS,
+  ENGINE_KINDS,
   FRAME_GEN_ENGINES,
   FRAME_GEN_GPU_CHOICE,
+  JOB_KINDS,
+  MOTION_KINDS,
   NR_PRESETS,
   NR_STYLES,
   SCALE_MODES,
@@ -116,11 +119,14 @@ function checkFrameGen(v: Record<string, unknown>): string | null {
 export function validateJobRequest(value: unknown): string | null {
   if (!isObject(value)) return "Request body must be a JSON object.";
   const v = value;
-  if (v.kind !== "image" && v.kind !== "video") return 'kind must be "image" or "video".';
+  const wrongKind = checkEnum(v.kind, JOB_KINDS, "kind");
+  if (wrongKind) return wrongKind;
   if (typeof v.input !== "string" || v.input === "") return "input must be a non-empty absolute path.";
   if (v.output !== undefined && typeof v.output !== "string") return "output must be a string when present.";
-  if (v.engine !== "bypass" && v.engine !== "nr" && v.engine !== "sr") return 'engine must be "sr", "nr" or "bypass".';
-  if (v.motion !== "none" && v.motion !== "flow") return 'motion must be "none" or "flow".';
+  const wrongEngine = checkEnum(v.engine, ENGINE_KINDS, "engine");
+  if (wrongEngine) return wrongEngine;
+  const wrongMotion = checkEnum(v.motion, MOTION_KINDS, "motion");
+  if (wrongMotion) return wrongMotion;
   if (v.dllDir !== undefined && typeof v.dllDir !== "string") return "dllDir must be a string when present.";
   if (v.adapterUuid !== undefined) {
     if (typeof v.adapterUuid !== "string" || !/^GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v.adapterUuid)) {

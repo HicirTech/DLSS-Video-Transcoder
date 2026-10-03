@@ -13,7 +13,7 @@ import {
   DXGI_FORMAT_R8G8B8A8_UNORM,
   type D3D12Resource,
 } from "../native/d3d12.ts";
-import type { EngineKind, NrSettings } from "../server/api-types.ts";
+import { ENGINE_KINDS, type EngineKind, type NrSettings } from "../server/api-types.ts";
 import type { GpuSession } from "./gpu.ts";
 
 export interface FrameInput {
@@ -118,6 +118,6 @@ export function createEngine(kind: EngineKind, session: GpuSession, options: Eng
       if (!srFactory) throw new Error("SR engine is not registered; import src/ngx/sr-engine.ts before creating it");
       return srFactory(kind, session, options);
     default:
-      throw new Error(`Unknown engine "${String(kind)}". Choose "sr" (DLSS Super Resolution), "nr" (DLSS Neural Rendering) or "bypass" (plain copy).`);
+      throw new Error(`Unknown engine "${String(kind)}". Choose one of: ${ENGINE_KINDS.join(", ")}.`);
   }
 }

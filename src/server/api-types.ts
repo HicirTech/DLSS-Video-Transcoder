@@ -17,8 +17,26 @@
  *   /ws  server -> client messages are WsEvent JSON; the client never needs to send anything.
  */
 
-export type EngineKind = "bypass" | "nr" | "sr";
-export type MotionKind = "none" | "flow";
+// The accepted values for every constrained setting, in one place: the UI clamps
+// to these and the API rejects outside them, so the two cannot drift apart. Each
+// union below is derived from its array, and the order is the order menus and
+// messages list the values in.
+export const JOB_KINDS = ["image", "video"] as const;
+export type JobKind = (typeof JOB_KINDS)[number];
+export const ENGINE_KINDS = ["sr", "nr", "bypass"] as const;
+export type EngineKind = (typeof ENGINE_KINDS)[number];
+export const MOTION_KINDS = ["none", "flow"] as const;
+export type MotionKind = (typeof MOTION_KINDS)[number];
+export const NR_PRESETS = [0, 1, 2, 3] as const;
+type NrPreset = (typeof NR_PRESETS)[number];
+export const NR_STYLES = [0, 1, 2] as const;
+type NrStyle = (typeof NR_STYLES)[number];
+export const SCALE_MODES = ["none", "factor", "size"] as const;
+type ScaleMode = (typeof SCALE_MODES)[number];
+export const ENCODE_CODECS = ["h264", "hevc", "av1", "h264_nvenc", "hevc_nvenc", "av1_nvenc"] as const;
+type EncodeCodec = (typeof ENCODE_CODECS)[number];
+export const ENCODE_CONTAINERS = ["mp4", "mkv", "mov"] as const;
+type EncodeContainer = (typeof ENCODE_CONTAINERS)[number];
 
 /**
  * DLSS 5 Neural Rendering controls (NGX feature 18). Feature 18 enhances an image at the same
@@ -32,9 +50,9 @@ export interface NrSettings {
    * Distinct from the SR model preset J/K/L/M. Ignored by the installed runtime: see
    * NR_SETTINGS_IGNORED_BY_RUNTIME.
    */
-  preset: 0 | 1 | 2 | 3;
+  preset: NrPreset;
   /** Look style: 0 = Default, 1 = Natural, 2 = Cinematic. (Strong, visible effect.) */
-  style: 0 | 1 | 2;
+  style: NrStyle;
   /** Overall neural-rendering strength, 0..2 (1 = default); the installed runtime stops responding at NR_INTENSITY_EFFECTIVE_MAX. */
   intensity: number;
   /** Local tone-mapping strength (float). Typical 0..2, 1 = neutral. */
@@ -65,7 +83,7 @@ export const DEFAULT_NR_SETTINGS: NrSettings = {
 
 export interface ScaleSettings {
   /** none = keep source size, factor = multiply, size = explicit output size. */
-  mode: "none" | "factor" | "size";
+  mode: ScaleMode;
   factor: number;
   width: number;
   height: number;
@@ -74,10 +92,10 @@ export interface ScaleSettings {
 export const DEFAULT_SCALE_SETTINGS: ScaleSettings = { mode: "none", factor: 1.5, width: 1920, height: 1080 };
 
 export interface EncodeSettings {
-  codec: "h264" | "hevc" | "av1" | "h264_nvenc" | "hevc_nvenc" | "av1_nvenc";
+  codec: EncodeCodec;
   /** CRF / CQ style quality, lower is better. */
   quality: number;
-  container: "mp4" | "mkv" | "mov";
+  container: EncodeContainer;
   copyAudio: boolean;
 }
 
@@ -99,8 +117,6 @@ export const FRAME_GEN_NATIVE_MAXIMUM = "the runtime's MultiFrameCountMax + 1, 6
 /** Which GPU frame generation takes; a request cannot choose it (JobRequest.adapterUuid). */
 export const FRAME_GEN_GPU_CHOICE = "the DLSS Frame Generation host process takes the NVIDIA GPU with CUDA and the most VRAM, and its NVENC and NVOFA helpers use CUDA device 0";
 
-// The accepted values for every constrained setting, in one place: the UI clamps
-// to these and the API rejects outside them, so the two cannot drift apart.
 /**
  * Neural-rendering settings the installed runtime (NR_RUNTIME_MEASURED) accepts
  * but does not act on: measured with tests/diag-nr-settings.ts, every value of
@@ -131,12 +147,6 @@ export function nrSettingIgnored(name: keyof NrSettings): boolean {
 /** Where intensity stops making a difference on the runtime measured above. */
 export const NR_INTENSITY_EFFECTIVE_MAX = 1;
 
-export const NR_PRESETS = [0, 1, 2, 3] as const;
-export const NR_STYLES = [0, 1, 2] as const;
-export const SCALE_MODES = ["none", "factor", "size"] as const;
-export const ENCODE_CODECS = ["h264", "hevc", "av1", "h264_nvenc", "hevc_nvenc", "av1_nvenc"] as const;
-export const ENCODE_CONTAINERS = ["mp4", "mkv", "mov"] as const;
-
 /** Inclusive `[min, max]` for each numeric setting; `integer` fields reject fractions. */
 export const SETTING_RANGES = {
   intensity: { min: 0, max: 2, integer: false },
@@ -151,7 +161,7 @@ export const SETTING_RANGES = {
 } as const;
 
 export interface JobRequest {
-  kind: "image" | "video";
+  kind: JobKind;
   /** Absolute path on the machine running the server. */
   input: string;
   /** Absolute output path; omitted = next to the input with a suffix. */
@@ -207,7 +217,7 @@ export type CancelRequest = "none" | "pending" | "too-late";
 
 export interface JobStatus {
   id: string;
-  kind: "image" | "video";
+  kind: JobKind;
   input: string;
   output: string | null;
   engine: EngineKind;
