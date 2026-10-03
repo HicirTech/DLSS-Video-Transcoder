@@ -11,6 +11,8 @@ import { DlssgSession } from "./dlssg.ts";
 import type { TimedFrame } from "./framegen-plan.ts";
 import { type Rational, ratAdd, ratMul, ratSub, rational } from "./rational.ts";
 import { ABORT_TIMEOUT_MS } from "./worker-abort.ts";
+
+/** A frame after its stage's guide worker ran: what the native evaluation needs. */
 export interface PreparedFrame {
   frame: TimedFrame;
   previousTimestamp: Rational | null;
