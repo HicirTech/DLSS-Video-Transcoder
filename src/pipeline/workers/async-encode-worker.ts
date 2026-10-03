@@ -11,8 +11,9 @@
  */
 import { NvencEncoder, type NvencSdkCodec } from "../nvenc.ts";
 import { type AbortRequest, answerAbort } from "../worker-abort.ts";
-import { importD3D12Buffer, importD3D12Fence, waitExternalSemaphore, destroyExternalMemory, destroyExternalSemaphore, closeHandle } from "../../native/cuda-interop.ts";
+import { importD3D12Buffer, importD3D12Fence, waitExternalSemaphore, destroyExternalMemory, destroyExternalSemaphore } from "../../native/cuda-interop.ts";
 import { cudaCreateContext, cudaSynchronize } from "../../native/cuda.ts";
+import { closeHandle } from "../../native/win32.ts";
 
 interface OpenMsg {
   type: "open";

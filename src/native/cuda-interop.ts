@@ -21,10 +21,6 @@ const cuda = dlopen("nvcuda.dll", {
   cuDestroyExternalSemaphore: { args: [FFIType.u64], returns: FFIType.i32 },
 });
 
-const kernel32 = dlopen("kernel32.dll", {
-  CloseHandle: { args: [FFIType.u64], returns: FFIType.i32 },
-});
-
 function ck(r: number, what: string): void {
   if (r !== 0) throw new Error(`CUDA interop ${what} failed: CUresult ${r}`);
 }
@@ -34,11 +30,6 @@ const HANDLE_TYPE_D3D12_RESOURCE = 5;
 const SEM_HANDLE_TYPE_D3D12_FENCE = 4;
 // CUDA_EXTERNAL_MEMORY_DEDICATED — required for a D3D12 committed resource.
 const CUDA_EXTERNAL_MEMORY_DEDICATED = 0x1;
-
-/** Close a Win32 NT handle (after CUDA has imported/duplicated it). */
-export function closeHandle(handle: number): void {
-  kernel32.symbols.CloseHandle(BigInt(handle));
-}
 
 export interface ImportedBuffer {
   extMem: bigint;
