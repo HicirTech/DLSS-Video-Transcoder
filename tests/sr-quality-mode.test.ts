@@ -19,9 +19,9 @@ describe("qualityForFactor", () => {
     }
   });
 
-  // With UltraQuality gone, DLAA's 1.0 is the nearest ratio to anything under
-  // ~1.25, so a plain nearest-match would answer "1.2x bigger" with the same
-  // image — worse than the hard error this replaced.
+  // DLAA's 1.0 is the nearest ratio to anything under 1.25 (the midpoint to
+  // MaxQuality's 1.5), so a plain nearest-match would answer "1.2x bigger" with
+  // the same image.
   test("a request to upscale always lands on a mode that upscales", () => {
     for (const factor of [1.01, 1.05, 1.2, 1.3, 1.49]) {
       const ratio = DLSS_RATIO[qualityForFactor(factor)]!;
