@@ -52,3 +52,73 @@ export function aspectArgs(displayAspect: Rational | null, width: number, height
   const sar = ratMul(displayAspect, rational(height, width));
   return [...args, "-bsf:v", `${demux}_metadata=sample_aspect_ratio=${sar.num}/${sar.den}`];
 }
+
+export interface FrameSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * ffmpeg argv (after the binary) that decodes the first video stream to raw RGBA frames of `output` size
+ * on pipe:1, scaling with lanczos only when that differs from the `source` size.
+ */
+export function decodeArgv(spec: { input: string; source: FrameSize; output: FrameSize }): string[] {
+  const { input, source, output } = spec;
+  const rescaled = output.width !== source.width || output.height !== source.height;
+  return [
+    "-v", "error", "-nostdin", "-i", input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba",
+    ...(rescaled ? ["-vf", `scale=${output.width}:${output.height}:flags=lanczos`] : []),
+    "pipe:1",
+  ];
+}
+
+/**
+ * The output flags for the audio: the first audio track of input 1 (the source file, opened a
+ * second time only when its audio is carried over) copied for mkv and re-encoded to AAC 192 kb/s
+ * for the other containers, or no audio at all.
+ */
+export function audioArgs(carryAudio: boolean, container: EncodeSettings["container"]): string[] {
+  if (!carryAudio) return ["-an"];
+  return ["-map", "1:a:0", ...(container === "mkv" ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"])];
+}
+
+/** mp4 and mov take +faststart, which moves the index to the front so the file plays before it has downloaded; mkv has no such flag. */
+export function faststartArgs(container: EncodeSettings["container"]): string[] {
+  return container === "mp4" || container === "mov" ? ["-movflags", "+faststart"] : [];
+}
+
+export interface MuxCopySpec {
+  /** ffmpeg demuxer for the elementary stream on stdin ("h264" or "hevc"): NVENC's output has no container. */
+  demux: string;
+  /** The rate to stamp on the stream, which carries no timing of its own. */
+  frameRate: string;
+  /** The file whose first audio track is carried over, or null for no audio. */
+  audioSource: string | null;
+  container: EncodeSettings["container"];
+  displayAspect: Rational | null;
+  size: FrameSize;
+  /** Output flags that come after the audio ones and before the container's own, such as -video_track_timescale. */
+  extra?: readonly string[];
+  output: string;
+}
+
+/**
+ * ffmpeg argv that muxes NVENC's elementary stream (pipe:0, input 0) into the output without
+ * re-encoding. The stream is Annex-B with no timing at all, so -framerate is the only thing that
+ * lets the muxer stamp timestamps; mp4 and mov convert it to length-prefixed themselves, so `copy`
+ * needs no bitstream filter. The audio source, when there is one, is input 1. No -shortest: with -c:v copy from a
+ * raw elementary stream it drops the audio track outright, and it is safe to leave out because every
+ * path using this emits one frame per source frame (or covers the decoded length), so audio and
+ * video share a duration.
+ */
+export function muxCopyArgs(spec: MuxCopySpec): string[] {
+  const { demux, frameRate, audioSource, container, displayAspect, size, extra = [], output } = spec;
+  return [
+    "-v", "error", "-y", "-f", demux, "-framerate", frameRate, "-i", "pipe:0",
+    ...(audioSource === null ? [] : ["-i", audioSource]),
+    "-map", "0:v:0", "-c:v", "copy",
+    ...aspectArgs(displayAspect, size.width, size.height, demux),
+    ...audioArgs(audioSource !== null, container),
+    ...extra, ...faststartArgs(container), output,
+  ];
+}

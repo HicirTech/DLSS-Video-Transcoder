@@ -11,7 +11,7 @@ import { DEFAULT_ENCODE_SETTINGS } from "../server/api-types.ts";
 import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine, type Engine } from "./engine.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
-import { aspectArgs, encoderArgs } from "./ffmpeg-args.ts";
+import { aspectArgs, audioArgs, decodeArgv, encoderArgs, faststartArgs, muxCopyArgs } from "./ffmpeg-args.ts";
 import { defaultOutputPath } from "./output-path.ts";
 import { framesWrittenOf, removePartialOutput } from "./partial-output.ts";
 import { type Rational, ratToNumber, rational, tryParseRate } from "./rational.ts";
@@ -304,19 +304,12 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
     try {
       const { num, den } = rateParts(info.fpsText);
       const layout = linearLayout(target.width, target.height, DXGI_FORMAT_R8G8B8A8_UNORM);
-      const decodeArgs = [
-        "-v", "error", "-nostdin", "-i", options.input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba",
-        ...(target.width !== info.width || target.height !== info.height ? ["-vf", `scale=${target.width}:${target.height}:flags=lanczos`] : []),
-        "pipe:1",
-      ];
+      const decodeArgs = decodeArgv({ input: options.input, source: info, output: target });
       const wantAudio = info.hasAudio && encode.copyAudio;
-      const audioArgs = wantAudio ? ["-map", "1:a:0", ...(encode.container === "mkv" ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"])] : ["-an"];
-      const faststart = encode.container === "mp4" || encode.container === "mov" ? ["-movflags", "+faststart"] : [];
-      const sinkArgs = [
-        "-v", "error", "-y", "-f", nrNative.demux, "-framerate", info.fpsText, "-i", "pipe:0",
-        ...(wantAudio ? ["-i", options.input] : []),
-        "-map", "0:v:0", "-c:v", "copy", ...aspectArgs(info.displayAspect, target.width, target.height, nrNative.demux), ...audioArgs, ...faststart, output,
-      ];
+      const sinkArgs = muxCopyArgs({
+        demux: nrNative.demux, frameRate: info.fpsText, audioSource: wantAudio ? options.input : null,
+        container: encode.container, displayAspect: info.displayAspect, size: target, output,
+      });
       const cuts = new SceneCutDetector(target.width, target.height);
       const guide = (rgba: Uint8Array, index: number) => cuts.guide(rgba, index);
       progress(0, `encode: NVENC ${nrNative.codec} (GPU-resident async zero-copy pipeline)`);
@@ -364,19 +357,13 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   const outHeight = engine.outputHeight;
 
   // Decode argv without the binary; both encode paths below spawn it themselves.
-  const decodeArgv = [
-    "-v", "error", "-nostdin", "-i", options.input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba",
-    ...(renderWidth !== info.width || renderHeight !== info.height ? ["-vf", `scale=${renderWidth}:${renderHeight}:flags=lanczos`] : []),
-    "pipe:1",
-  ];
+  const decodeArgs = decodeArgv({ input: options.input, source: info, output: { width: renderWidth, height: renderHeight } });
 
   // Only open the source as a second input when its audio is actually copied:
   // otherwise the encoder demuxes and decodes the whole source a second time,
   // which cost more per frame than the raw video pipe it was competing with.
-  const wantAudio = info.hasAudio && encode.copyAudio;
   // Video is always input 0 (the pipe); audio, when copied, is input 1 (source).
-  const audioArgs = wantAudio ? ["-map", "1:a:0", ...(encode.container === "mkv" ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"])] : ["-an"];
-  const faststart = encode.container === "mp4" || encode.container === "mov" ? ["-movflags", "+faststart"] : [];
+  const wantAudio = info.hasAudio && encode.copyAudio;
 
   // Scene-cut / motion guide. Both backends keep a one-frame history, so `guide`
   // must be called exactly once per frame and in decode order.
@@ -415,24 +402,13 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   try {
     if (useThreaded && nativeTarget) {
       const { num, den } = rateParts(info.fpsText);
-      const sinkArgs = [
-        "-v", "error", "-y",
-        // Annex-B elementary stream from NVENC on stdin: it carries no timing at
-        // all, so -framerate is the only thing that lets the muxer stamp
-        // timestamps. (mp4/mov converts Annex-B to length-prefixed internally.)
-        "-f", nativeTarget.demux, "-framerate", info.fpsText, "-i", "pipe:0",
-        ...(wantAudio ? ["-i", options.input] : []),
-        "-map", "0:v:0", "-c:v", "copy",
-        ...aspectArgs(info.displayAspect, outWidth, outHeight, nativeTarget.demux),
-        ...audioArgs, ...faststart,
-        // No -shortest here: with -c:v copy from a raw elementary stream it
-        // drops the audio track outright. Safe to omit, because this path emits
-        // one frame per source frame, so audio and video share the duration.
-        output,
-      ];
+      const sinkArgs = muxCopyArgs({
+        demux: nativeTarget.demux, frameRate: info.fpsText, audioSource: wantAudio ? options.input : null,
+        container: encode.container, displayAspect: info.displayAspect, size: { width: outWidth, height: outHeight }, output,
+      });
       progress(0, `encode: NVENC ${nativeTarget.codec} (threaded GPU pipeline, mux-only)`);
       const result = await runThreadedEncode({
-        engine, ffmpeg, decodeArgs: decodeArgv, frameBytes, sinkArgs,
+        engine, ffmpeg, decodeArgs, frameBytes, sinkArgs,
         enc: { width: outWidth, height: outHeight, fpsNum: num, fpsDen: den, codec: nativeTarget.codec, cq: encode.quality, ordinal: cudaOrdinal },
         totalFrames: info.frames, guide, onProgress: progress, signal: options.signal, onFinishing: options.onFinishing,
       });
@@ -440,13 +416,13 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
       sceneCuts = result.sceneCuts;
     } else {
       // Fallback: raw RGBA out to ffmpeg, which does the encode.
-      const decoder = Bun.spawn([ffmpeg, ...decodeArgv], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+      const decoder = Bun.spawn([ffmpeg, ...decodeArgs], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
       const encoder = Bun.spawn(
         [
           ffmpeg, "-v", "error", "-y",
           "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${outWidth}x${outHeight}`, "-r", info.fpsText, "-i", "pipe:0",
           ...(wantAudio ? ["-i", options.input] : []),
-          "-map", "0:v:0", ...audioArgs, ...encoderArgs(encode, cudaOrdinal), ...aspectArgs(info.displayAspect, outWidth, outHeight, null), ...faststart,
+          "-map", "0:v:0", ...audioArgs(wantAudio, encode.container), ...encoderArgs(encode, cudaOrdinal), ...aspectArgs(info.displayAspect, outWidth, outHeight, null), ...faststartArgs(encode.container),
           ...(wantAudio ? ["-shortest"] : []),
           output,
         ],

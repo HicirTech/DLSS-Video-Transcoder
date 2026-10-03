@@ -25,6 +25,7 @@ import { throwIfAborted } from "./cancel.ts";
 import { DlssgSession, probeDlssg } from "./dlssg.ts";
 import { motionFieldBytes } from "./dlssg-protocol.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
+import { decodeArgv } from "./ffmpeg-args.ts";
 import { EncodeSink, buildFrameGenEncodeArgs } from "./framegen-encode-sink.ts";
 import { noFramesGeneratedMessage } from "./framegen-host-messages.ts";
 import { FrameReader } from "./frame-reader.ts";
@@ -206,12 +207,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
         : "no synthesis, nearest source frame";
   progress(0, `source ${info.width}x${info.height}${rescaled ? ` -> ${width}x${height} (4:2:0 needs even dimensions)` : ""}${info.displayAspect ? ` (non-square pixels, display ${info.displayAspect.num}:${info.displayAspect.den})` : ""} ${info.codec} ${formatRate(sourceRate)} fps, ${frames} frames${expectedDecoded !== frames ? ` (~${expectedDecoded} after the ${formatRate(sourceRate)} CFR decode)` : ""}; ${plan.path}: -> ${formatRate(targetRate)} fps (${detail}); HAGS ${caps.hagsEnabled ? "on" : "off"}; ~${estimatedOutput} output frames`);
 
-  const decoder = Bun.spawn(
-    [ffmpeg, "-v", "error", "-nostdin", "-i", options.input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba",
-      ...(rescaled ? ["-vf", `scale=${width}:${height}:flags=lanczos`] : []),
-      "pipe:1"],
-    { stdout: "pipe", stderr: "pipe", stdin: "ignore" },
-  );
+  const decoder = Bun.spawn([ffmpeg, ...decodeArgv({ input: options.input, source: info, output: { width, height } })], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   // Only re-open the source as a second input when it actually has audio to carry;
   // otherwise ffmpeg needlessly demuxes/decodes the whole source again.
   const wantAudio = info.hasAudio;
