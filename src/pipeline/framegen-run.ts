@@ -44,126 +44,177 @@ export interface RunParams {
  * blocks on a queue put; the last stage is served first so the pipeline drains.
  */
 export async function runOverlapped(p: RunParams): Promise<RunResult> {
-  const { stages, writer, capacity } = p;
-  const maxGenerated = Math.max(0, ...stages.map((s) => s.generatedCount));
-  const edgeCapacity = Math.max(4, maxGenerated + 1);
-  const edges: TimedFrame[][] = Array.from({ length: stages.length + 1 }, () => []);
-  const analyzed: AnalyzedFrame[][] = stages.map(() => []);
-  const prepared: PreparedFrame[][] = stages.map(() => []);
-  const pending = new Set<string>();
-  const done: Array<{ name: string; value?: unknown; error?: Error }> = [];
-  let wake: (() => void) | null = null;
-  let used = 0;
-  let peak = 0;
-  let decoded = 0;
-  let decodeSeq = 0;
-  let processed = 0;
-  let guideSeq = 0;
-  let ended = false;
+  return new OverlappedRun(p).run();
+}
 
-  const reserve = (credits: number): void => {
-    used += credits;
-    if (used > capacity) throw new Error("Frame generation buffer reservation exceeded its limit.");
-    if (used > peak) peak = used;
-  };
-  const busy: Record<string, number> = {};
-  const start = (name: string, promise: Promise<unknown>): void => {
-    pending.add(name);
-    const t0 = performance.now();
-    const settle = (): void => { busy[name] = (busy[name] ?? 0) + (performance.now() - t0); pending.delete(name); };
-    promise.then(
-      (value) => { settle(); done.push({ name, value }); wake?.(); },
-      (error) => { settle(); done.push({ name, error: error instanceof Error ? error : new Error(String(error)) }); wake?.(); },
-    );
-  };
-  const decodeOne = async (): Promise<TimedFrame | null> => {
-    const index = decodeSeq++;
-    const rgba = await p.reader.next(p.frameBytes);
-    if (!rgba) return null;
-    return { rgba, timestamp: ratDiv(rational(index), p.sourceRate), segment: 0, provenance: "Source", sourceIndex: index };
-  };
-  const consume = async (items: TimedFrame[]): Promise<number> => {
-    for (const item of items) await writer.push(item);
-    return items.length;
-  };
-  // An evaluation blocked on a wedged DLSS-G host never settles, so an abort
-  // wakes the loop itself. Left registered: the signal belongs to this job and
-  // ends with it, and once the loop is done `wake` is null.
-  p.signal?.addEventListener("abort", () => wake?.(), { once: true });
+/** The queues, credit ledger and pending work of one overlapped run; every method is one step of the coordinator loop. */
+class OverlappedRun {
+  private readonly stages: Stage[];
+  private readonly capacity: number;
+  private readonly maxGenerated: number;
+  private readonly edgeCapacity: number;
+  private readonly edges: TimedFrame[][];
+  private readonly analyzed: AnalyzedFrame[][];
+  private readonly prepared: PreparedFrame[][];
+  private readonly pending = new Set<string>();
+  private readonly done: Array<{ name: string; value?: unknown; error?: Error }> = [];
+  private readonly busy: Record<string, number> = {};
+  private wake: (() => void) | null = null;
+  private used = 0;
+  private peak = 0;
+  private decoded = 0;
+  private decodeSeq = 0;
+  private processed = 0;
+  private guideSeq = 0;
+  private ended = false;
 
-  for (;;) {
-    throwIfAborted(p.signal);
-    // Harvest everything that finished. Results own their buffers until consumed.
-    while (done.length) {
-      const d = done.shift()!;
-      if (d.error) throw d.error;
-      if (d.name === "decode") {
-        const frame = d.value as TimedFrame | null;
-        if (frame === null) { ended = true; used -= 1; }
-        else { edges[0]!.push(frame); decoded++; }
-      } else if (d.name.startsWith("guide:")) {
-        analyzed[Number(d.name.slice(6))]!.push(d.value as AnalyzedFrame);
-      } else if (d.name.startsWith("pack:")) {
-        prepared[Number(d.name.slice(5))]!.push(d.value as PreparedFrame);
-      } else if (d.name.startsWith("native:")) {
-        const k = Number(d.name.slice(7));
-        const { items, credits } = d.value as { items: TimedFrame[]; credits: number };
-        if (items.length > credits + 1) throw new Error("DLSSG produced more frames than reserved.");
-        edges[k + 1]!.push(...items);
-        used -= 2 + credits - items.length;
-        if (k === 0) { processed++; p.onProcessed(processed); p.check(); }
-      } else if (d.name === "encode") {
-        used -= d.value as number;
+  constructor(private readonly p: RunParams) {
+    this.stages = p.stages;
+    this.capacity = p.capacity;
+    this.maxGenerated = Math.max(0, ...this.stages.map((s) => s.generatedCount));
+    this.edgeCapacity = Math.max(4, this.maxGenerated + 1);
+    this.edges = Array.from({ length: this.stages.length + 1 }, () => []);
+    this.analyzed = this.stages.map(() => []);
+    this.prepared = this.stages.map(() => []);
+  }
+
+  async run(): Promise<RunResult> {
+    const { p } = this;
+    // An evaluation blocked on a wedged DLSS-G host never settles, so an abort
+    // wakes the loop itself. Left registered: the signal belongs to this job and
+    // ends with it, and once the loop is done `wake` is null.
+    p.signal?.addEventListener("abort", () => this.wake?.(), { once: true });
+
+    for (;;) {
+      throwIfAborted(p.signal);
+      this.harvest();
+      this.startEncode();
+      this.startEvaluations();
+      this.startPacks();
+      this.startGuides();
+      this.startDecode();
+
+      if (this.pending.size === 0) {
+        if (this.ended && this.edges.every((e) => e.length === 0) && this.analyzed.every((q) => q.length === 0) && this.prepared.every((q) => q.length === 0)) break;
+        throw new Error("Frame generation could not drain its bounded pipeline.");
       }
+      if (this.done.length === 0) await new Promise<void>((resolve) => { this.wake = () => { this.wake = null; resolve(); }; });
     }
+    p.writer.endAt(this.decoded, p.sourceRate);
+    await p.writer.finish();
+    return { decoded: this.decoded, peak: this.peak, busy: this.busy };
+  }
 
-    const last = edges[stages.length]!;
-    if (!pending.has("encode") && last.length) {
-      const items = last.splice(0, Math.min(edgeCapacity, last.length));
-      start("encode", consume(items));
+  private reserve(credits: number): void {
+    this.used += credits;
+    if (this.used > this.capacity) throw new Error("Frame generation buffer reservation exceeded its limit.");
+    if (this.used > this.peak) this.peak = this.used;
+  }
+
+  private start(name: string, promise: Promise<unknown>): void {
+    this.pending.add(name);
+    const t0 = performance.now();
+    const settle = (): void => { this.busy[name] = (this.busy[name] ?? 0) + (performance.now() - t0); this.pending.delete(name); };
+    promise.then(
+      (value) => { settle(); this.done.push({ name, value }); this.wake?.(); },
+      (error) => { settle(); this.done.push({ name, error: error instanceof Error ? error : new Error(String(error)) }); this.wake?.(); },
+    );
+  }
+
+  private async decodeOne(): Promise<TimedFrame | null> {
+    const index = this.decodeSeq++;
+    const rgba = await this.p.reader.next(this.p.frameBytes);
+    if (!rgba) return null;
+    return { rgba, timestamp: ratDiv(rational(index), this.p.sourceRate), segment: 0, provenance: "Source", sourceIndex: index };
+  }
+
+  private async consume(items: TimedFrame[]): Promise<number> {
+    for (const item of items) await this.p.writer.push(item);
+    return items.length;
+  }
+
+  /** Takes in everything that finished. Results own their buffers until consumed. */
+  private harvest(): void {
+    while (this.done.length) {
+      const d = this.done.shift()!;
+      if (d.error) throw d.error;
+      this.accept(d);
     }
-    for (let k = stages.length - 1; k >= 0; k--) {
-      const stage = stages[k]!;
+  }
+
+  private accept(d: { name: string; value?: unknown }): void {
+    if (d.name === "decode") {
+      const frame = d.value as TimedFrame | null;
+      if (frame === null) { this.ended = true; this.used -= 1; }
+      else { this.edges[0]!.push(frame); this.decoded++; }
+    } else if (d.name.startsWith("guide:")) {
+      this.analyzed[Number(d.name.slice(6))]!.push(d.value as AnalyzedFrame);
+    } else if (d.name.startsWith("pack:")) {
+      this.prepared[Number(d.name.slice(5))]!.push(d.value as PreparedFrame);
+    } else if (d.name.startsWith("native:")) {
+      const k = Number(d.name.slice(7));
+      const { items, credits } = d.value as { items: TimedFrame[]; credits: number };
+      if (items.length > credits + 1) throw new Error("DLSSG produced more frames than reserved.");
+      this.edges[k + 1]!.push(...items);
+      this.used -= 2 + credits - items.length;
+      if (k === 0) { this.processed++; this.p.onProcessed(this.processed); this.p.check(); }
+    } else if (d.name === "encode") {
+      this.used -= d.value as number;
+    }
+  }
+
+  private startEncode(): void {
+    const last = this.edges[this.stages.length]!;
+    if (!this.pending.has("encode") && last.length) {
+      const items = last.splice(0, Math.min(this.edgeCapacity, last.length));
+      this.start("encode", this.consume(items));
+    }
+  }
+
+  private startEvaluations(): void {
+    for (let k = this.stages.length - 1; k >= 0; k--) {
+      const stage = this.stages[k]!;
       const count = stage.generatedCount;
       const name = `native:${k}`;
-      if (!pending.has(name) && prepared[k]!.length && used + count <= capacity && edges[k + 1]!.length + count + 1 <= edgeCapacity) {
-        reserve(count);
-        const item = prepared[k]!.shift()!;
-        start(name, stage.evaluate(item).then((items) => ({ items, credits: count })));
+      if (!this.pending.has(name) && this.prepared[k]!.length && this.used + count <= this.capacity && this.edges[k + 1]!.length + count + 1 <= this.edgeCapacity) {
+        this.reserve(count);
+        const item = this.prepared[k]!.shift()!;
+        this.start(name, stage.evaluate(item).then((items) => ({ items, credits: count })));
       }
     }
-    for (let k = stages.length - 1; k >= 0; k--) {
+  }
+
+  private startPacks(): void {
+    for (let k = this.stages.length - 1; k >= 0; k--) {
       const name = `pack:${k}`;
       // The analysed item already holds this frame's motion credit; packing just swaps the grid flow for the full field.
-      if (!pending.has(name) && analyzed[k]!.length) {
-        const item = analyzed[k]!.shift()!;
-        start(name, stages[k]!.pack(item, ++guideSeq));
+      if (!this.pending.has(name) && this.analyzed[k]!.length) {
+        const item = this.analyzed[k]!.shift()!;
+        this.start(name, this.stages[k]!.pack(item, ++this.guideSeq));
       }
     }
-    for (let k = stages.length - 1; k >= 0; k--) {
+  }
+
+  private startGuides(): void {
+    for (let k = this.stages.length - 1; k >= 0; k--) {
       const name = `guide:${k}`;
       // Retain native output headroom even if the GPU is idle; let analysis run a little ahead of packing.
-      if (!pending.has(name) && edges[k]!.length && analyzed[k]!.length + prepared[k]!.length < 3 && used + 1 <= capacity - maxGenerated) {
-        reserve(1);
-        const frame = edges[k]!.shift()!;
-        start(name, stages[k]!.prepare(frame, ++guideSeq));
+      if (!this.pending.has(name) && this.edges[k]!.length && this.analyzed[k]!.length + this.prepared[k]!.length < 3 && this.used + 1 <= this.capacity - this.maxGenerated) {
+        this.reserve(1);
+        const frame = this.edges[k]!.shift()!;
+        this.start(name, this.stages[k]!.prepare(frame, ++this.guideSeq));
       }
     }
-    if (!ended && !pending.has("decode") && edges[0]!.length < edgeCapacity && used + 1 <= capacity - maxGenerated - 1) {
-      reserve(1);
-      start("decode", decodeOne());
-    }
-
-    if (pending.size === 0) {
-      if (ended && edges.every((e) => e.length === 0) && analyzed.every((q) => q.length === 0) && prepared.every((q) => q.length === 0)) break;
-      throw new Error("Frame generation could not drain its bounded pipeline.");
-    }
-    if (done.length === 0) await new Promise<void>((resolve) => { wake = () => { wake = null; resolve(); }; });
   }
-  p.writer.endAt(decoded, p.sourceRate);
-  await writer.finish();
-  return { decoded, peak, busy };
+
+  private startDecode(): void {
+    if (!this.ended && !this.pending.has("decode") && this.edges[0]!.length < this.edgeCapacity && this.used + 1 <= this.capacity - this.maxGenerated - 1) {
+      this.reserve(1);
+      this.start("decode", this.decodeOne());
+    }
+  }
 }
+
 
 /** Plain in-order fallback for frames too large for the credit window (still uses the guide threads, one step at a time). */
 export async function runSequential(p: RunParams): Promise<RunResult> {

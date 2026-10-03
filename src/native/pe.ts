@@ -41,6 +41,36 @@ function readAscii(bytes: Uint8Array, offset: number, maxLength: number): string
   return new TextDecoder("latin1").decode(bytes.subarray(offset, end));
 }
 
+/** The export table at the first data directory, or none when the directory is empty. */
+function readExports(bytes: Uint8Array, view: DataView, directoriesOffset: number, rvaToOffset: (rva: number) => number): PeExport[] {
+  const exportRva = view.getUint32(directoriesOffset, true);
+  const exportSize = view.getUint32(directoriesOffset + 4, true);
+  if (exportRva === 0 || exportSize === 0) return [];
+  const exports: PeExport[] = [];
+  const dir = rvaToOffset(exportRva);
+  const ordinalBase = view.getUint32(dir + 16, true);
+  const functionCount = view.getUint32(dir + 20, true);
+  const nameCount = view.getUint32(dir + 24, true);
+  const functionsOffset = rvaToOffset(view.getUint32(dir + 28, true));
+  const namesOffset = rvaToOffset(view.getUint32(dir + 32, true));
+  const ordinalsOffset = rvaToOffset(view.getUint32(dir + 36, true));
+  const named = new Map<number, string>();
+  for (let i = 0; i < nameCount; i++) {
+    const nameRva = view.getUint32(namesOffset + i * 4, true);
+    const ordinalIndex = view.getUint16(ordinalsOffset + i * 2, true);
+    named.set(ordinalIndex, readAscii(bytes, rvaToOffset(nameRva), 4096));
+  }
+  for (let i = 0; i < functionCount; i++) {
+    const rva = view.getUint32(functionsOffset + i * 4, true);
+    if (rva === 0) continue;
+    // PE spec: an export RVA pointing back inside the export directory is a
+    // forwarder string ("OtherDll.Function"), not the address of code.
+    const forwarder = rva >= exportRva && rva < exportRva + exportSize ? readAscii(bytes, rvaToOffset(rva), 512) : null;
+    exports.push({ name: named.get(i) ?? `#${ordinalBase + i}`, ordinal: ordinalBase + i, rva, forwarder });
+  }
+  return exports;
+}
+
 /** Parse headers and the export directory of a PE file already loaded into memory. */
 export function parsePe(bytes: Uint8Array): PeInfo {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -89,34 +119,7 @@ export function parsePe(bytes: Uint8Array): PeInfo {
     throw new Error(`RVA 0x${rva.toString(16)} is outside every section`);
   };
 
-  const exports: PeExport[] = [];
-  if (directoryCount > 0) {
-    const exportRva = view.getUint32(directoriesOffset, true);
-    const exportSize = view.getUint32(directoriesOffset + 4, true);
-    if (exportRva !== 0 && exportSize !== 0) {
-      const dir = rvaToOffset(exportRva);
-      const ordinalBase = view.getUint32(dir + 16, true);
-      const functionCount = view.getUint32(dir + 20, true);
-      const nameCount = view.getUint32(dir + 24, true);
-      const functionsOffset = rvaToOffset(view.getUint32(dir + 28, true));
-      const namesOffset = rvaToOffset(view.getUint32(dir + 32, true));
-      const ordinalsOffset = rvaToOffset(view.getUint32(dir + 36, true));
-      const named = new Map<number, string>();
-      for (let i = 0; i < nameCount; i++) {
-        const nameRva = view.getUint32(namesOffset + i * 4, true);
-        const ordinalIndex = view.getUint16(ordinalsOffset + i * 2, true);
-        named.set(ordinalIndex, readAscii(bytes, rvaToOffset(nameRva), 4096));
-      }
-      for (let i = 0; i < functionCount; i++) {
-        const rva = view.getUint32(functionsOffset + i * 4, true);
-        if (rva === 0) continue;
-        // PE spec: an export RVA pointing back inside the export directory is a
-        // forwarder string ("OtherDll.Function"), not the address of code.
-        const forwarder = rva >= exportRva && rva < exportRva + exportSize ? readAscii(bytes, rvaToOffset(rva), 512) : null;
-        exports.push({ name: named.get(i) ?? `#${ordinalBase + i}`, ordinal: ordinalBase + i, rva, forwarder });
-      }
-    }
-  }
+  const exports = directoryCount > 0 ? readExports(bytes, view, directoriesOffset, rvaToOffset) : [];
   exports.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
   return {
