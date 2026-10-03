@@ -395,6 +395,7 @@ export const FFMPEG_SUPPLY_HINT = "set FFMPEG_PATH / FFPROBE_PATH in the environ
 export interface ToolsReport {
   ffmpeg: { path: string | null; version: string | null };
   ffprobe: { path: string | null; version: string | null };
+  /** Whether this ffmpeg build lists the h264_nvenc encoder, not whether NVENC runs here: each job probes its own GPU (encode-select.ts). Null when there is no ffmpeg or it could not be asked. */
   nvenc: boolean | null;
 }
 
