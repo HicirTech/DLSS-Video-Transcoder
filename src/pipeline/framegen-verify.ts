@@ -5,7 +5,7 @@
  * muxed file has been read back.
  */
 import { unlinkSync } from "node:fs";
-import { formatRational, parseRational, ratCmp, ratToNumber, type Rational } from "./rational.ts";
+import { formatRational, parseRational, ratCmp, ratToNumber, type Rational, tryParseRate } from "./rational.ts";
 
 /**
  * ffprobe's view of a written file. `frames` counts packets rather than trusting
@@ -18,11 +18,11 @@ function probeOutputVideo(ffprobe: string, path: string): { frames: number; rate
   const data = JSON.parse(new TextDecoder().decode(proc.stdout)) as { streams?: Array<{ nb_read_packets?: string; r_frame_rate?: string; avg_frame_rate?: string; time_base?: string }> };
   const stream = data.streams?.[0];
   if (!stream?.r_frame_rate) throw new Error("ffprobe found no video stream in the output.");
-  const usable = (text?: string) => (text && text !== "0/0" ? text : undefined);
+  const rate = parseRational(stream.r_frame_rate);
   return {
     frames: Number(stream.nb_read_packets ?? 0),
-    rate: parseRational(stream.r_frame_rate),
-    avgRate: parseRational(usable(stream.avg_frame_rate) ?? stream.r_frame_rate),
+    rate,
+    avgRate: tryParseRate(stream.avg_frame_rate) ?? rate,
     timeBase: stream.time_base ?? "?",
   };
 }

@@ -13,7 +13,7 @@ import { createEngine, type Engine } from "./engine.ts";
 import { nvencGpuArgs, resolveEncodeCodec } from "./encode-select.ts";
 import { defaultOutputPath } from "./output-path.ts";
 import { framesWrittenOf, removePartialOutput } from "./partial-output.ts";
-import { ratMul, type Rational, rational } from "./rational.ts";
+import { ratMul, type Rational, ratToNumber, rational, tryParseRate } from "./rational.ts";
 import { createMotionEstimator } from "./flow.ts";
 import { FrameReader } from "./frame-reader.ts";
 import { probeNvencCaps, type NvencSdkCodec } from "./nvenc.ts";
@@ -96,20 +96,11 @@ export interface VideoInfo {
  * of defaulting, so an unusable rate has to fall through to the numeric one.
  */
 function rateText(text: string | undefined): string | null {
-  return parseRate(text) > 0 ? (text ?? null) : null;
+  return tryParseRate(text) ? (text ?? null) : null;
 }
 
-function parseRate(text: string | undefined): number {
-  if (!text) return 0;
-  const [n, d] = text.split("/");
-  const num = Number(n);
-  if (!Number.isFinite(num) || num <= 0) return 0;
-  if (d === undefined) return num;
-  const den = Number(d);
-  // "1/0" is not 1: ffprobe emits it for a stream whose duration is zero, and
-  // ffmpeg rejects it as argv, so it has to fall through to the numeric default.
-  return Number.isFinite(den) && den > 0 ? num / den : 0;
-}
+/** The rate assumed when ffprobe reports neither rate field as usable. */
+const FALLBACK_FPS = 30;
 
 /**
  * What the decode pipe will actually emit, read from the decoder rather than
@@ -209,7 +200,8 @@ function displayAspectOf(text: string | undefined, width: number, height: number
 export function videoInfoFrom(data: ProbeJson, input: string): VideoInfo {
   const video = data.streams?.find((s) => s.codec_type === "video");
   if (!video || !video.width || !video.height) throw new Error(`${input}: no video stream found in this file.`);
-  const fps = parseRate(video.avg_frame_rate) || parseRate(video.r_frame_rate) || 30;
+  const measured = tryParseRate(video.avg_frame_rate) ?? tryParseRate(video.r_frame_rate);
+  const fps = measured ? ratToNumber(measured) : FALLBACK_FPS;
   const duration = data.format?.duration ? Number(data.format.duration) : null;
   const declared = video.nb_frames && video.nb_frames !== "N/A" ? Number(video.nb_frames) : null;
   // ffprobe reports the CODED size, but ffmpeg autorotates on decode, so a
@@ -299,13 +291,11 @@ export function aspectArgs(displayAspect: Rational | null, width: number, height
   return [...args, "-bsf:v", `${demux}_metadata=sample_aspect_ratio=${sar.num}/${sar.den}`];
 }
 
-/** Parse an ffmpeg rate string ("30000/1001", "25") into integer num/den; 30/1 if unparseable. */
+/** Integer num/den of an ffmpeg rate string ("30000/1001", "25") that videoInfoFrom has already proven usable, for NVENC's rate fields. */
 function rateParts(text: string): { num: number; den: number } {
-  const [n, d] = text.split("/");
-  const num = Number(n);
-  const den = d ? Number(d) : 1;
-  if (!Number.isFinite(num) || num <= 0 || !Number.isFinite(den) || den <= 0) return { num: 30, den: 1 };
-  return { num: Math.round(num), den: Math.round(den) };
+  const rate = tryParseRate(text);
+  if (!rate) throw new Error(`No usable frame rate in ${JSON.stringify(text)}.`);
+  return { num: Number(rate.num), den: Number(rate.den) };
 }
 
 /**
