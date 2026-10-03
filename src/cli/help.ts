@@ -1,6 +1,6 @@
 /** Renders the CLI overview and the per-command help pages from the command table. */
 import { ADAPTER_OPT, COMMANDS, RUNTIME_OPT, type CommandSpec } from "./commands.ts";
-import { usageError } from "./usage-error.ts";
+import { EXIT_FAILED, EXIT_USAGE, usageError } from "./usage-error.ts";
 
 function pad(text: string, width: number): string {
   return text.length >= width ? text : text + " ".repeat(width - text.length);
@@ -23,6 +23,11 @@ function printOverview(): void {
   lines.push(`  ${pad(ADAPTER_OPT.flag, 20)} ${ADAPTER_OPT.desc} (default ${ADAPTER_OPT.def})`);
   lines.push(`  ${pad(RUNTIME_OPT.flag, 20)} ${RUNTIME_OPT.desc} (default ${RUNTIME_OPT.def})`);
   lines.push(`  ${pad("--help, -h", 20)} show help for the CLI or the given command`);
+  lines.push("");
+  lines.push("exit status:");
+  lines.push("  0  the command succeeded (probe: neural rendering is ready)");
+  lines.push(`  ${EXIT_FAILED}  the run failed (probe: neural rendering is not ready)`);
+  lines.push(`  ${EXIT_USAGE}  the command line is wrong: an unknown command or option, a value an option does not accept, or a missing argument`);
   console.log(lines.join("\n"));
 }
 
