@@ -1,16 +1,6 @@
 import { expect, test } from "bun:test";
-import {
-  DUPLICATE_SCENE_SCORE,
-  RESET_SCENE_SCORE,
-  buildSampleOffsets,
-  createMotionEstimator,
-  encodeMotionR16G16,
-  flowGridSize,
-  meanAbsLumaDiff,
-  resizeFlowBilinear,
-  smallGray,
-  sparseLuma,
-} from "../src/pipeline/flow.ts";
+import { createMotionEstimator, encodeMotionR16G16, flowGridSize, resizeFlowBilinear, smallGray } from "../src/pipeline/flow.ts";
+import { DUPLICATE_SCENE_SCORE, RESET_SCENE_SCORE } from "../src/pipeline/scene-score.ts";
 import { floatToHalf, halfToFloat } from "./half-float.ts";
 
 // -- float16 encoder ----------------------------------------------------------
@@ -51,22 +41,6 @@ function solid(width: number, height: number, r: number, g: number, b: number): 
   }
   return buf;
 }
-
-/** The scene score the estimator computes: sparse-grid mean abs luma diff, normalized to [0,1]. */
-function sceneScore(current: Uint8Array, previous: Uint8Array, width: number, height: number): number {
-  const offsets = buildSampleOffsets(width, height);
-  return meanAbsLumaDiff(sparseLuma(current, offsets), sparseLuma(previous, offsets)) / 255;
-}
-
-test("scene score: identical frames ~0, black->white ~1", () => {
-  const w = 96;
-  const h = 64;
-  const black = solid(w, h, 0, 0, 0);
-  const white = solid(w, h, 255, 255, 255);
-  expect(sceneScore(black, black, w, h)).toBe(0);
-  expect(sceneScore(black, white, w, h)).toBeCloseTo(1, 5);
-  expect(sceneScore(black, white, w, h)).toBeGreaterThan(RESET_SCENE_SCORE);
-});
 
 // -- grid + resize helpers ----------------------------------------------------
 

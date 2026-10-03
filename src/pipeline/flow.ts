@@ -12,13 +12,10 @@
  * downscaled gray grid (guides.py:24-55). Everything here is GPU-free, so it is
  * unit-testable without a GPU.
  */
+import { buildSampleOffsets, DUPLICATE_SCENE_SCORE, luma, meanAbsLumaDiff, RESET_SCENE_SCORE, sparseLuma } from "./scene-score.ts";
 
-// -- Reference reset/duplicate thresholds (guides.py DLSSGGuideGenerator) ------
+// -- Reference reset threshold and flow grid (guides.py DLSSGGuideGenerator) ---
 
-/** Scene score above this forces a temporal reset (guides.py:45). */
-export const RESET_SCENE_SCORE = 0.24;
-/** Scene score below this is a duplicate frame: emit zero motion (guides.py:44). */
-export const DUPLICATE_SCENE_SCORE = 0.0005;
 /** Finite-vector fraction below this forces a reset (guides.py:63). */
 export const RESET_CONFIDENCE = 0.98;
 /** Default long-side resolution the flow is computed at (guides.py:21). */
@@ -165,45 +162,6 @@ export function packFlowResizedR16G16(flow: Float32Array, inW: number, inH: numb
 export function allFinite(values: Float32Array): boolean {
   for (let i = 0; i < values.length; i++) if (!Number.isFinite(values[i]!)) return false;
   return true;
-}
-
-// -- Scene-cut score (sparse-grid mean abs luma diff) --------------------------
-
-/** OpenCV RGBA2GRAY luma weights, matching guides.py and video.ts. */
-function luma(r: number, g: number, b: number): number {
-  return 0.299 * r + 0.587 * g + 0.114 * b;
-}
-
-/**
- * Byte offsets of a sparse ~48x27 sample grid over an RGBA8 frame. Kept
- * identical to SceneCutDetector's sampling in video.ts so both produce the same
- * scene score for a frame.
- */
-export function buildSampleOffsets(width: number, height: number): Int32Array {
-  const stepX = Math.max(1, Math.floor(width / 48));
-  const stepY = Math.max(1, Math.floor(height / 27));
-  const offsets: number[] = [];
-  for (let y = stepY >> 1; y < height; y += stepY) {
-    for (let x = stepX >> 1; x < width; x += stepX) offsets.push((y * width + x) * 4);
-  }
-  return Int32Array.from(offsets);
-}
-
-/** Sample sparse-grid luma (0..255) from an RGBA8 frame at the given offsets. */
-export function sparseLuma(rgba: Uint8Array, offsets: Int32Array): Float32Array {
-  const out = new Float32Array(offsets.length);
-  for (let i = 0; i < offsets.length; i++) {
-    const o = offsets[i]!;
-    out[i] = luma(rgba[o]!, rgba[o + 1]!, rgba[o + 2]!);
-  }
-  return out;
-}
-
-/** Mean absolute difference of two equal-length buffers (0..255 luma domain). */
-export function meanAbsLumaDiff(a: Float32Array, b: Float32Array): number {
-  let sum = 0;
-  for (let i = 0; i < a.length; i++) sum += Math.abs(a[i]! - b[i]!);
-  return a.length ? sum / a.length : 0;
 }
 
 // -- Grayscale box-average downscale ------------------------------------------
