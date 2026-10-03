@@ -59,8 +59,6 @@ function ToolsBanner({ tools, toolsError }: { tools: ToolsReport | null; toolsEr
 }
 
 export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
-  // useId, not a constant: every tab stays mounted, so two panels can render
-  // this component at once and a fixed id would appear twice in one document.
   const fpsLabelId = useId();
   const pathLabelId = useId();
   const { settings, setNr, setScale, setEncode } = useSettings();
