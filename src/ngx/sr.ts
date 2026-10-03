@@ -13,7 +13,6 @@
  * jobs, or run one job per short-lived process.
  */
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
 import {
   D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
   DXGI_FORMAT_R8G8B8A8_UNORM,
@@ -21,7 +20,7 @@ import {
   DXGI_FORMAT_R32_FLOAT,
   type D3D12Resource,
 } from "../native/d3d12.ts";
-import { callerDir, featureDir } from "../paths.ts";
+import { APP_DATA_DIR, callerDir, featureDir } from "../paths.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
 import { FeatureCommonInfo, NgxCore } from "./core.ts";
 import { prepareForwarderSync } from "./forwarder-runtime.ts";
@@ -67,7 +66,7 @@ export class DlssSrSession {
   ) {}
 
   static open(session: GpuSession, opts: SrOptions): DlssSrSession {
-    const appData = opts.appDataPath ?? join(opts.runtimeDir, "..", "logs");
+    const appData = opts.appDataPath ?? APP_DATA_DIR;
     mkdirSync(appData, { recursive: true });
 
     const core = NgxCore.load(); // driver core

@@ -23,7 +23,7 @@ import {
 } from "../native/d3d12.ts";
 import { viewNative } from "../native/memory.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
-import { callerDir, featureDir } from "../paths.ts";
+import { APP_DATA_DIR, callerDir, featureDir } from "../paths.ts";
 import type { NrSettings } from "../server/api-types.ts";
 import { FeatureCommonInfo, NgxCore } from "./core.ts";
 import { prepareForwarderSync } from "./forwarder-runtime.ts";
@@ -60,7 +60,7 @@ export class DlssNrSession {
   ) {}
 
   static open(session: GpuSession, opts: NrRenderOptions): DlssNrSession {
-    const appData = opts.appDataPath ?? join(opts.runtimeDir, "..", "logs");
+    const appData = opts.appDataPath ?? APP_DATA_DIR;
     mkdirSync(appData, { recursive: true });
     const dllDir = opts.dllDir ?? featureDir(opts.runtimeDir, "nr");
     const dll = join(dllDir, featureByKey("nr").dllName);
