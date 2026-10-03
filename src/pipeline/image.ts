@@ -1,7 +1,10 @@
 /**
  * Single-image job: PNG in, engine, PNG out.
  */
-import { decodePng, encodePng, isPng, type RgbaImage } from "../codec/png.ts";
+import { isPng } from "../codec/png/chunks.ts";
+import { decodePng } from "../codec/png/decode.ts";
+import { encodePng } from "../codec/png/encode.ts";
+import type { RgbaImage } from "../codec/png/types.ts";
 import type { EngineKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine } from "./engine.ts";

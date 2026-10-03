@@ -4,7 +4,9 @@
  * COMMANDS below is the single source of truth: it renders the help *and* tells the
  * positional-argument parser which flags consume a following value token.
  */
-import { decodePng, encodePng, isPng } from "./codec/png.ts";
+import { isPng } from "./codec/png/chunks.ts";
+import { decodePng } from "./codec/png/decode.ts";
+import { encodePng } from "./codec/png/encode.ts";
 import { buildForwarderDll } from "./ngx/forwarder.ts";
 import { shimPath } from "./ngx/forwarder-runtime.ts";
 import { PROBE_ENTRIES, PROBE_INITS, runProbe } from "./ngx/probe.ts";
