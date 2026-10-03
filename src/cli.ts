@@ -40,9 +40,9 @@ async function main(): Promise<void> {
   await handler(args);
 }
 
-// A wrong command line ends with EXIT_USAGE and the command's help page; any other failure ends
-// with EXIT_FAILED. Either should tell the user what to do, not print a stack trace through them.
-// NR_DEBUG=1 keeps the stack of a failed run for diagnosing the tool itself.
+// A wrong command line ends with EXIT_USAGE, after the help page of the command it names; any other
+// failure ends with EXIT_FAILED. Either should tell the user what to do, not print a stack trace
+// through them. NR_DEBUG=1 keeps the stack of a failed run for diagnosing the tool itself.
 try {
   await main();
 } catch (error) {
