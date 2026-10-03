@@ -130,12 +130,3 @@ export function parsePe(bytes: Uint8Array): PeInfo {
     exports,
   };
 }
-
-export async function readPeFile(path: string): Promise<PeInfo> {
-  const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
-  return parsePe(bytes);
-}
-
-export async function listExports(path: string): Promise<string[]> {
-  return (await readPeFile(path)).exports.map((entry) => entry.name);
-}

@@ -17,7 +17,6 @@ const cuda = dlopen("nvcuda.dll", {
   cuExternalMemoryGetMappedBuffer: { args: [FFIType.ptr, FFIType.u64, FFIType.ptr], returns: FFIType.i32 },
   cuDestroyExternalMemory: { args: [FFIType.u64], returns: FFIType.i32 },
   cuImportExternalSemaphore: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
-  cuSignalExternalSemaphoresAsync: { args: [FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.u64], returns: FFIType.i32 },
   cuWaitExternalSemaphoresAsync: { args: [FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.u64], returns: FFIType.i32 },
   cuDestroyExternalSemaphore: { args: [FFIType.u64], returns: FFIType.i32 },
 });
@@ -100,16 +99,6 @@ export function waitExternalSemaphore(extSem: bigint, value: bigint, stream = 0n
   const params = new Uint8Array(144);
   new DataView(params.buffer).setBigUint64(0, value, true);
   ck(cuda.symbols.cuWaitExternalSemaphoresAsync(ptr(semArray), ptr(params), 1, stream) as number, "cuWaitExternalSemaphoresAsync");
-}
-
-/** Signal the shared D3D12 fence to `value` from the CUDA stream. */
-export function signalExternalSemaphore(extSem: bigint, value: bigint, stream = 0n): void {
-  const semArray = new Uint8Array(8);
-  new DataView(semArray.buffer).setBigUint64(0, extSem, true);
-  // CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS (x64, 144 bytes): params.fence.value u64 @0; flags u32 @72.
-  const params = new Uint8Array(144);
-  new DataView(params.buffer).setBigUint64(0, value, true);
-  ck(cuda.symbols.cuSignalExternalSemaphoresAsync(ptr(semArray), ptr(params), 1, stream) as number, "cuSignalExternalSemaphoresAsync");
 }
 
 export function destroyExternalSemaphore(extSem: bigint): void {

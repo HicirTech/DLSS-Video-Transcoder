@@ -4,9 +4,7 @@
  * argument list keeps alive until the call returns; a ptr() or `.ptr` number keeps nothing alive after its
  * owner's last use, so it is only for addresses stored where the owner outlives every reader.
  */
-import { ptr, read, toArrayBuffer, type Pointer } from "bun:ffi";
-
-export type Ptr = Pointer;
+import { ptr, toArrayBuffer, type Pointer } from "bun:ffi";
 
 /** Bun represents NULL as 0 or null depending on the call; normalise to a number. */
 export function asPtr(value: Pointer | number | bigint | null | undefined): number {
@@ -14,18 +12,10 @@ export function asPtr(value: Pointer | number | bigint | null | undefined): numb
   return typeof value === "bigint" ? Number(value) : Number(value);
 }
 
-export function isNull(value: Pointer | number | bigint | null | undefined): boolean {
-  return asPtr(value) === 0;
-}
-
 /** Format a 32-bit value the way Windows tools print HRESULTs and NGX results. */
 export function hex32(value: number | bigint): string {
   const n = typeof value === "bigint" ? Number(value & 0xffffffffn) : value >>> 0;
   return "0x" + n.toString(16).toUpperCase().padStart(8, "0");
-}
-
-export function hexPtr(value: Pointer | number | bigint | null | undefined): string {
-  return "0x" + asPtr(value).toString(16).toUpperCase().padStart(16, "0");
 }
 
 /** A byte buffer with typed accessors at fixed offsets, used to build C structs by hand. */
@@ -139,16 +129,6 @@ export function wstring(text: string): Uint8Array {
   return out;
 }
 
-/** Read a NUL-terminated UTF-16LE string from native memory. */
-export function readWString(address: Pointer | number, maxChars = 1024): string {
-  const p = asPtr(address);
-  if (p === 0) return "";
-  const view = new Uint16Array(toArrayBuffer(p as Pointer, 0, maxChars * 2));
-  let end = 0;
-  while (end < view.length && view[end] !== 0) end++;
-  return String.fromCharCode(...view.subarray(0, end));
-}
-
 /** Read a NUL-terminated UTF-8 string from native memory. */
 export function readCString(address: Pointer | number, maxBytes = 4096): string {
   const p = asPtr(address);
@@ -171,10 +151,6 @@ export function viewNative(address: Pointer | number, length: number): Uint8Arra
   const p = asPtr(address);
   if (p === 0) throw new Error("viewNative: null pointer");
   return new Uint8Array(toArrayBuffer(p as Pointer, 0, length));
-}
-
-export function readPointer(address: Pointer | number, offset = 0): number {
-  return asPtr(read.ptr(asPtr(address) as Pointer, offset));
 }
 
 /** Parse "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}" into the 16-byte little-endian GUID layout. */

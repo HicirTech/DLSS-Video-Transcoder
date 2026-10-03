@@ -14,7 +14,6 @@ const dxgi = dlopen("dxgi.dll", {
 });
 
 export const IID_IDXGIFactory1 = guid("{770aae78-f26f-4dba-a829-253c83d1b387}");
-export const IID_IDXGIAdapter1 = guid("{29038f61-3839-4626-91fd-086879011a05}");
 
 const DXGI_ERROR_NOT_FOUND = 0x887a0002 | 0;
 const DXGI_ADAPTER_FLAG_SOFTWARE = 2;
