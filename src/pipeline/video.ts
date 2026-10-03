@@ -6,12 +6,12 @@
  * ffmpeg / ffprobe are external tools found via tools.ts.
  */
 import { existsSync } from "node:fs";
-import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings, EngineKind, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { DEFAULT_ENCODE_SETTINGS, ENCODE_CODECS } from "../server/api-types.ts";
 import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine, type Engine } from "./engine.ts";
 import { nvencGpuArgs, resolveEncodeCodec } from "./encode-select.ts";
+import { defaultOutputPath } from "./output-path.ts";
 import { framesWrittenOf, removePartialOutput } from "./partial-output.ts";
 import { ratMul, type Rational, rational } from "./rational.ts";
 import { createMotionEstimator } from "./flow.ts";
@@ -342,11 +342,6 @@ class SceneCutDetector {
   }
 }
 
-export function defaultVideoOutput(input: string, engine: EngineKind, container: EncodeSettings["container"]): string {
-  const ext = extname(input);
-  return join(dirname(input), `${basename(input, ext)}.${engine}.${container}`);
-}
-
 export async function processVideo(options: VideoJobOptions): Promise<VideoJobResult> {
   const started = performance.now();
   const progress = options.onProgress ?? (() => {});
@@ -362,7 +357,7 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   // raw source size, so an odd-sized source would only fail at encode time.
   const rawTarget = resolveTargetSize(info.width, info.height, options.scale);
   const target = { width: evenSize(rawTarget.width), height: evenSize(rawTarget.height) };
-  const output = options.output ?? defaultVideoOutput(options.input, options.engine, requestedEncode.container);
+  const output = options.output ?? defaultOutputPath(options.input, options.engine, `.${requestedEncode.container}`);
   // Whether the destination is ours to delete after an abnormal end: see partial-output.ts.
   const outputExisted = existsSync(output);
   // SR upscales inside DLSS: decode at source size and let the engine write the

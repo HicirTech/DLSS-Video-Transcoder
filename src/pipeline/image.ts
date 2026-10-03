@@ -1,12 +1,12 @@
 /**
  * Single-image job: PNG in, engine, PNG out.
  */
-import { basename, dirname, extname, join } from "node:path";
 import { decodePng, encodePng, isPng, type RgbaImage } from "../codec/png.ts";
 import type { EngineKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine } from "./engine.ts";
 import { describeGpu, openGpu } from "./gpu.ts";
+import { defaultOutputPath } from "./output-path.ts";
 import { attachAlpha, evenSize, resizePlane, resizeRgba, splitAlpha } from "./resize.ts";
 
 export interface ImageJobOptions {
@@ -50,12 +50,6 @@ export function resolveTargetSize(width: number, height: number, scale: ScaleSet
     default:
       return { width, height };
   }
-}
-
-export function defaultOutputPath(input: string, engine: EngineKind, extension = ".png"): string {
-  const ext = extname(input);
-  const stem = basename(input, ext);
-  return join(dirname(input), `${stem}.${engine}${extension}`);
 }
 
 /**
@@ -132,7 +126,7 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
 
   options.onFinishing?.();
   progress(0.92, "encoding PNG");
-  const output = options.output ?? defaultOutputPath(options.input, options.engine);
+  const output = options.output ?? defaultOutputPath(options.input, options.engine, ".png");
   await Bun.write(output, encodePng(result, { level: 6 }));
   progress(1, "done");
   return {
