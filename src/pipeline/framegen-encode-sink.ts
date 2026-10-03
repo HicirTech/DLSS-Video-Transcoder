@@ -140,13 +140,20 @@ export class EncodeSink {
     for (const wake of this.waiters.splice(0)) wake();
   }
 
-  static open(message: FramegenEncodeOpen): Promise<EncodeSink> {
-    const worker = new Worker(new URL("./workers/framegen-encode-worker.ts", import.meta.url).href);
+  /** `createWorker` starts the encode worker's thread; tests hand in a stand-in. */
+  static async open(message: FramegenEncodeOpen, createWorker: (script: URL) => Worker = (script) => new Worker(script.href)): Promise<EncodeSink> {
+    const worker = createWorker(new URL("./workers/framegen-encode-worker.ts", import.meta.url));
     const sink = new EncodeSink(worker);
-    return new Promise<EncodeSink>((resolve, reject) => {
-      sink.openSettle = { resolve, reject };
-      worker.postMessage(message);
-    });
+    try {
+      return await new Promise<EncodeSink>((resolve, reject) => {
+        sink.openSettle = { resolve, reject };
+        worker.postMessage(message);
+      });
+    } catch (error) {
+      // No sink reaches the caller, so nobody else can end this thread.
+      sink.close();
+      throw error;
+    }
   }
 
   async write(rgba: Uint8Array): Promise<void> {

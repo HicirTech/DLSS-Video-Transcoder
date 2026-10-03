@@ -62,3 +62,10 @@ export class FakeWorker {
     return this as unknown as Worker;
   }
 }
+
+/** A stand-in whose thread cannot take a message: postMessage throws, as it does for a message that cannot be cloned. */
+export class RefusingWorker extends FakeWorker {
+  override postMessage(): void {
+    throw new Error("DataCloneError: the message could not be cloned");
+  }
+}
