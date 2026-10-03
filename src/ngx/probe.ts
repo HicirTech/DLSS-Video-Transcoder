@@ -5,7 +5,7 @@
  * Set NR_TRACE=1 to print each native call to stderr before it happens; a
  * crash inside NVIDIA code then leaves the last trace line as the culprit.
  */
-import { mkdirSync, statSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { D3D12Device } from "../native/d3d12.ts";
 import { DxgiFactory, type DxgiAdapter } from "../native/dxgi.ts";
@@ -16,12 +16,12 @@ import { callerDir } from "../paths.ts";
 import { MAX_FLOW_LONG_SIDE, MIN_FLOW_SIDE } from "../pipeline/flow-grid.ts";
 import { chooseGpu, gpuCandidates, isEligibleGpu } from "../pipeline/gpu.ts";
 import { probeNvof } from "../pipeline/nvof.ts";
-import { featureByKey, runtimeDllCandidates, type FeatureDescriptor } from "./runtime-catalog.ts";
-import type { ProbeAdapter, ProbeFeature, ProbeReport, RuntimeFile } from "../server/api-types.ts";
+import type { ProbeAdapter, ProbeFeature, ProbeReport } from "../server/api-types.ts";
 import { FeatureCommonInfo, NgxCore, locateNgxCores } from "./core.ts";
 import { prepareForwarder, selfTestForwarder } from "./forwarder-runtime.ts";
 import { NgxParam, NgxParameters, NrParam } from "./params.ts";
 import { NGX_APPLICATION_ID, NgxFeature, featureName, ngxName, ngxOk } from "./results.ts";
+import { runtimeReport } from "./runtime-inventory.ts";
 import { SpyParameter } from "./spy.ts";
 
 /** The NGX module `--entry` can enter through; ProbeOptions derives its type so the two cannot drift. */
@@ -51,15 +51,6 @@ export interface ProbeOptions {
   debugLayer?: boolean;
 }
 
-// Only the report's wording lives here. Which file each feature needs, and where
-// it may sit under runtime/, is runtime-catalog.ts's rule — so the report and
-// the version list cannot disagree about what is installed.
-const RUNTIME_FILES: { feature: FeatureDescriptor; role: string }[] = [
-  { feature: featureByKey("nr"), role: "DLSS 5 Neural Rendering (feature 18)" },
-  { feature: featureByKey("sr"), role: "DLSS Super Resolution (feature 1)" },
-  { feature: featureByKey("fg"), role: "DLSS Frame Generation (feature 11)" },
-];
-
 const TRACE = process.env.NR_TRACE === "1";
 
 function trace(line: string): void {
@@ -75,49 +66,6 @@ function driverVersionFromSmi(): string | null {
   } catch {
     return null;
   }
-}
-
-/**
- * Which runtime DLLs the report lists, whether each is installed, and what the
- * installed copy is. Filesystem work only — no GPU, no native load — so it is
- * testable against a temporary runtime/ tree.
- */
-export async function inventoryRuntimeFiles(runtimeDir: string): Promise<RuntimeFile[]> {
-  const files: RuntimeFile[] = [];
-  for (const { feature, role } of RUNTIME_FILES) {
-    const name = feature.dllName;
-    // The first candidate is the flat copy when there is one — the file a job
-    // with no dllDir loads — and otherwise the first version folder holding it.
-    const found = runtimeDllCandidates(runtimeDir, feature)[0] ?? null;
-    if (!found) {
-      files.push({ name, role, present: false, path: null, sizeMB: null, version: null, exports: null });
-      continue;
-    }
-    let version: string | null = null;
-    let exports: string[] | null = null;
-    try {
-      // One read serves both fields: nvngx_dlssnr.dll is 158 MB here, so opening
-      // it again just for the version would double the probe's I/O. Version
-      // first — parseVersionInfo does not throw, parsePe does on a malformed
-      // image, and a DLL whose exports cannot be listed still has a version.
-      const bytes = new Uint8Array(await Bun.file(found.path).arrayBuffer());
-      version = parseVersionInfo(bytes).fileVersion;
-      exports = parsePe(bytes).exports.map((e) => e.name);
-    } catch {
-      // A file that cannot be read still gets a row saying it is there; the
-      // fields it could not supply stay null.
-    }
-    files.push({
-      name,
-      role,
-      present: true,
-      path: found.path,
-      sizeMB: Math.round((statSync(found.path).size / 1048576) * 10) / 10,
-      version,
-      exports,
-    });
-  }
-  return files;
 }
 
 /** What every probe step reads and extends: the report under construction and the facts all steps share. */
@@ -259,7 +207,7 @@ function probeOpticalFlow({ report, say, pipelineGrid }: ProbeContext, { adapter
 
 /** Lists the runtime DLLs; true when nvngx_dlssnr.dll, the one feature 18 needs, is installed. */
 async function inspectRuntimeFolder({ report, reasons, runtimeDir }: ProbeContext): Promise<boolean> {
-  report.runtime.files = await inventoryRuntimeFiles(runtimeDir);
+  report.runtime = await runtimeReport(runtimeDir);
   const dlssnr = report.runtime.files.find((f) => f.name === "nvngx_dlssnr.dll");
   if (!dlssnr?.present) reasons.push(`The DLSS Neural Rendering runtime file nvngx_dlssnr.dll was not found in ${runtimeDir}. Copy it into that folder.`);
   return Boolean(dlssnr?.present);
