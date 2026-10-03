@@ -4,12 +4,11 @@ import {
   bitsToHalf,
   createMotionEstimator,
   encodeMotionR16G16,
-  floatToHalf,
-  halfToFloat,
   packFlowResizedR16G16,
   resizeFlowBilinear,
   type FlowBackend,
 } from "../src/pipeline/flow.ts";
+import { floatToHalf, halfToFloat } from "./half-float.ts";
 
 /** The estimator's original three-pass path: resize -> scale (float32 store) -> pack. */
 function referencePack(flow: Float32Array, inW: number, inH: number, outW: number, outH: number): Uint16Array {
