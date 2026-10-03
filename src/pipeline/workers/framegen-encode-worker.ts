@@ -86,6 +86,11 @@ self.onmessage = (event: MessageEvent<FramegenEncodeIn>) => {
       stderrDrained = new Response(proc.stderr as ReadableStream<Uint8Array>).text().then((t) => { stderrText = t; }).catch(() => {});
       post({ type: "opened", nvenc: Boolean(enc), note });
     } catch (error) {
+      // The main thread terminates this worker once it has the error, and terminate() runs no
+      // JavaScript: an NVENC session opened before the spawn threw would outlive the thread.
+      try { proc?.kill(); } catch {}
+      enc?.close();
+      enc = null;
       fail(`frame-generation encode worker could not start: ${(error as Error).message ?? String(error)}`);
     }
   } else if (m.type === "frame") {
