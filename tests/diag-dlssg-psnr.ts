@@ -65,7 +65,7 @@ const info = probeVideo(ffprobe, input, ffmpeg);
 const { width, height } = info;
 const frameBytes = width * height * 4;
 // The nominal CFR clock, the one framegen.ts stamps source frames in.
-const sourceRate = parseRational(info.nominalFpsText ?? info.fpsText);
+const sourceRate = parseRational(info.nominalFpsText);
 
 const scores: number[] = [];
 const counts = { kept: 0, generatedIntervals: 0, emptyIntervals: 0, mismatchedIntervals: 0, sceneCuts: 0, bestMatchInPlace: 0 };
