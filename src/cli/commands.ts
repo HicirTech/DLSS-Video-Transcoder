@@ -28,6 +28,12 @@ function settingRange(field: keyof typeof SETTING_RANGES): string {
   return `${min}..${max}`;
 }
 
+/** `sr --factor`: the range the option accepts and the factor used when it is absent. */
+export const SR_FACTOR_OPTION = { min: 0.1, max: 8, fallback: 2 } as const;
+
+/** `fg --multiplier`: whole numbers only; 16 is the top of the FPS table's reach from a 30 fps source (480). */
+export const FG_MULTIPLIER_OPTION = { min: 1, max: 16, integer: true, fallback: 2 } as const;
+
 export const RUNTIME_OPT: OptionSpec = { flag: "--runtime DIR", desc: "runtime folder holding the NGX DLLs", def: "<repo>/runtime" };
 export const ADAPTER_OPT: OptionSpec = { flag: "--adapter N", desc: "GPU adapter index as `probe` listed it in this session (DXGI indices can change between runs); the adapter must have a CUDA device. auto = the NVIDIA adapter with the most VRAM that has one", def: "auto" };
 
@@ -68,7 +74,7 @@ export const COMMANDS: readonly CommandSpec[] = [
       { name: "output.png", desc: "destination; defaults to <input>.dlss.png next to the input" },
     ],
     options: [
-      { flag: "--factor N", desc: `upscale factor, snapped to the nearest fixed DLSS mode: ${srModeList()}`, def: "2" },
+      { flag: "--factor N", desc: `upscale factor ${SR_FACTOR_OPTION.min}..${SR_FACTOR_OPTION.max}, snapped to the nearest fixed DLSS mode (${srModeList()}); a value of 1 or less runs DLAA at the source size, and a value above 1 never snaps to DLAA`, def: String(SR_FACTOR_OPTION.fallback) },
       { flag: "--preset NAME", desc: "render preset: Default, A-F or J-O; the installed nvngx_dlss.dll decides which model each selects", def: DEFAULT_SR_PRESET },
       { flag: "--dlss-version VER", desc: "use a specific installed SR DLL version (prefix match ok); list them with `versions`", def: "bundled runtime DLL" },
       RUNTIME_OPT,
@@ -106,7 +112,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     ],
     options: [
       { flag: "--fps RATE", desc: `output frame rate: ${FRAME_GEN_FPS_CHOICES.join(", ")}, or an exact num/den; overrides --multiplier`, def: "source fps x --multiplier" },
-      { flag: "--multiplier N", desc: "output/input frame ratio when --fps is not given, a whole number from 1 to 16 (2 = double fps)", def: "2" },
+      { flag: "--multiplier N", desc: `output/input frame ratio when --fps is not given, a whole number from ${FG_MULTIPLIER_OPTION.min} to ${FG_MULTIPLIER_OPTION.max} (2 = double fps)`, def: String(FG_MULTIPLIER_OPTION.fallback) },
       { flag: "--engine MODE", desc: `auto = one native session when output/source is an exact integer from 2 up to ${FRAME_GEN_NATIVE_MAXIMUM} (3x and above only with HAGS on), else a cascade of 2x stages; when the runtime disables every interval of a native 3x+ session, auto re-runs it as a cascade; native or cascade force that path`, def: "auto" },
       { flag: "--codec NAME", desc: `encoder: ${ENCODE_CODECS.filter((codec) => !isNvenc(codec)).join(", ")}, or ${FFMPEG_NVENC_ENCODERS.join("/")} for GPU`, def: "GPU NVENC when available, else libx264" },
       { flag: "--quality N", desc: `encoder quality (CRF for CPU, CQ for NVENC), ${settingRange("quality")} (lower = better)`, def: "20" },

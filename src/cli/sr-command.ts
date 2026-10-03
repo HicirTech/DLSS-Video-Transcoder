@@ -10,7 +10,7 @@ import { enhanceStill } from "../pipeline/image.ts";
 import { defaultOutputPath } from "../pipeline/output-path.ts";
 import { evenSize } from "../pipeline/resize.ts";
 import { adapterOption, numberOption, option, positionalArgs, runtimeDirOption } from "./args.ts";
-import { commandSpec } from "./commands.ts";
+import { commandSpec, SR_FACTOR_OPTION } from "./commands.ts";
 import { printHelp } from "./help.ts";
 
 export async function srCommand(args: string[]): Promise<void> {
@@ -27,7 +27,7 @@ export async function srCommand(args: string[]): Promise<void> {
     process.exit(1);
   }
   const image = decodePng(bytes);
-  const factor = numberOption(args, "--factor", { min: 0.1, max: 8, fallback: 2 });
+  const factor = numberOption(args, "--factor", SR_FACTOR_OPTION);
   const quality = qualityForFactor(factor);
   const presetKey = presetKeyOption(args);
   const preset = DlssRenderPreset[presetKey];
