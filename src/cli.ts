@@ -498,7 +498,7 @@ async function main(): Promise<void> {
       // The output size must follow the chosen PerfQuality mode's fixed ratio rather than
       // the raw --factor: a render/output ratio that disagrees with the mode risks
       // CreateFeature failure or artifacts.
-      const snappedRatio = DLSS_RATIO[quality] ?? factor;
+      const snappedRatio = DLSS_RATIO[quality];
       const outputWidth = evenSize(image.width * snappedRatio);
       const outputHeight = evenSize(image.height * snappedRatio);
       const output = positional[1] ?? join(dirname(input), `${basename(input, extname(input))}.dlss.png`);

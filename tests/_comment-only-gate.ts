@@ -4,14 +4,14 @@
  * normalises whitespace, so identical output means the executable code is unchanged.
  *
  * Usage: bun tests/_comment-only-gate.ts [base-ref]   (default HEAD)
+ * git runs in the caller's environment, so on the network drive export GIT_DIR and GIT_WORK_TREE first.
  */
 import { Transpiler } from "bun";
 
 const base = process.argv[2] ?? "HEAD";
-const env = { ...process.env, GIT_DIR: "W:/GPUVideoProcessor/RTX-video-processor/.git", GIT_WORK_TREE: "W:/GPUVideoProcessor/RTX-video-processor" };
 
 function git(args: string[]): string {
-  const proc = Bun.spawnSync(["git", ...args], { env, stdout: "pipe", stderr: "pipe" });
+  const proc = Bun.spawnSync(["git", ...args], { stdout: "pipe", stderr: "pipe" });
   if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${new TextDecoder().decode(proc.stderr).trim()}`);
   return new TextDecoder().decode(proc.stdout);
 }

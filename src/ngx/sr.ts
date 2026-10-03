@@ -41,8 +41,6 @@ export interface SrOptions {
   quality?: number;
   /** DlssRenderPreset value; default L. Which model a preset selects belongs to the loaded nvngx_dlss.dll — see DlssRenderPreset in results.ts. */
   preset?: number;
-  /** Feed the network HDR (linear) color instead of SDR. */
-  hdr?: boolean;
   /** Folder that holds `caller/nvngx.dll` and `dlss/nvngx_dlss.dll`. */
   runtimeDir: string;
   /** Folder holding the chosen nvngx_dlss.dll version (defaults to runtimeDir/dlss). Enables version switching. */
@@ -91,7 +89,7 @@ export class DlssSrSession {
     // MV.Scale = 1 (render pixels). Without this flag DLSS treats them as
     // display-resolution and mis-scales temporal reconstruction (ghosting on
     // upscaled video). Correct at DLAA too, where render == output.
-    params.setU32(NgxParam.DlssCreateFlags, DlssCreateFlag.AutoExposure | DlssCreateFlag.MVLowRes | (opts.hdr ? DlssCreateFlag.IsHDR : 0));
+    params.setU32(NgxParam.DlssCreateFlags, DlssCreateFlag.AutoExposure | DlssCreateFlag.MVLowRes);
     params.setU32(DLSS_PRESET_PARAM[quality] ?? DLSS_PRESET_PARAM[0]!, opts.preset ?? DlssRenderPreset.L);
     params.setU32(NgxParam.CreationNodeMask, 1);
     params.setU32(NgxParam.VisibilityNodeMask, 1);
