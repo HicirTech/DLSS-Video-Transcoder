@@ -11,20 +11,36 @@
  */
 import { ffmpegFailedMessage } from "../ffmpeg-failure.ts";
 import { NvencEncoder, type NvencSdkCodec } from "../nvenc.ts";
-import { type AbortRequest, answerAbort } from "../worker-abort.ts";
+import { type AbortedReply, type AbortRequest, answerAbort } from "../worker-abort.ts";
 import { importD3D12Buffer, importD3D12Fence, waitExternalSemaphore, destroyExternalMemory, destroyExternalSemaphore } from "../../native/cuda-interop.ts";
 import { cudaCreateContext, cudaSynchronize } from "../../native/cuda.ts";
 import { closeHandle } from "../../native/win32.ts";
 
-interface OpenMsg {
+/**
+ * Import the main thread's shared buffers (one NT handle per pool slot, all closed here) and fence
+ * into CUDA, open NVENC on them and the mux ffmpeg whose `sinkArgs` read the stream on pipe:0.
+ */
+export interface AsyncEncodeOpen {
   type: "open";
   ffmpeg: string; sinkArgs: string[];
   bufHandles: number[]; fenceHandle: number; size: number;
   width: number; height: number; pitch: number; fpsNum: number; fpsDen: number; codec: NvencSdkCodec; cq: number; ordinal: number;
 }
-type InMsg = OpenMsg | { type: "frame"; slot: number; value: bigint } | { type: "finish" } | AbortRequest;
+/** Encode pool slot `slot` once the fence reaches `value`, then ack the slot as free. */
+export interface AsyncEncodeFrame { type: "frame"; slot: number; value: bigint }
+/** What the main thread sends the async encode worker. */
+export type AsyncEncodeIn = AsyncEncodeOpen | AsyncEncodeFrame | { type: "finish" } | AbortRequest;
+/** What it answers. */
+export type AsyncEncodeOut =
+  | { type: "opened" }
+  | { type: "encoded"; slot: number }
+  | { type: "done" }
+  | { type: "error"; message: string }
+  | AbortedReply;
 
 declare const self: Worker;
+
+const post = (message: AsyncEncodeOut): void => self.postMessage(message);
 let enc: NvencEncoder | null = null;
 let sink: ReturnType<typeof Bun.spawn> | null = null;
 let extSem = 0n;
@@ -33,7 +49,7 @@ let chain: Promise<void> = Promise.resolve();
 /** No more work: set by a failure or an abort. */
 let stopped = false;
 
-const fail = (message: string): void => { if (!stopped) { stopped = true; self.postMessage({ type: "error", message }); } };
+const fail = (message: string): void => { if (!stopped) { stopped = true; post({ type: "error", message }); } };
 
 /**
  * Close NVENC, then the CUDA imports its inputs alias. Both finish and abort
@@ -52,7 +68,7 @@ function releaseEncoder(): void {
   }
 }
 
-self.onmessage = (e: MessageEvent<InMsg>) => {
+self.onmessage = (e: MessageEvent<AsyncEncodeIn>) => {
   const m = e.data;
   if (m.type === "open") {
     try {
@@ -65,7 +81,7 @@ self.onmessage = (e: MessageEvent<InMsg>) => {
       extSem = importD3D12Fence(m.fenceHandle);
       enc = NvencEncoder.open({ width: m.width, height: m.height, fpsNum: m.fpsNum, fpsDen: m.fpsDen, codec: m.codec, cq: m.cq, ordinal: m.ordinal, inputs });
       sink = Bun.spawn([m.ffmpeg, ...m.sinkArgs], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
-      self.postMessage({ type: "opened" });
+      post({ type: "opened" });
     } catch (err) {
       fail((err as Error).message ?? String(err));
     } finally {
@@ -83,7 +99,7 @@ self.onmessage = (e: MessageEvent<InMsg>) => {
       const pkt = enc.encodeGpuResident(m.slot);
       const w = (sink.stdin as { write(b: Uint8Array): unknown }).write(pkt);
       if (w instanceof Promise) await w;
-      self.postMessage({ type: "encoded", slot: m.slot });
+      post({ type: "encoded", slot: m.slot });
     }).catch((err) => fail((err as Error).message ?? String(err)));
   } else if (m.type === "abort") {
     // Immediate, not chained: queued frames are dropped; the encoder's own
@@ -99,7 +115,7 @@ self.onmessage = (e: MessageEvent<InMsg>) => {
       const code = await sink.exited;
       releaseEncoder();
       if (code !== 0) { fail(ffmpegFailedMessage("mux", code, err)); return; }
-      self.postMessage({ type: "done" });
+      post({ type: "done" });
     }).catch((err) => fail((err as Error).message ?? String(err)));
   }
 };

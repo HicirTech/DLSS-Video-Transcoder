@@ -5,12 +5,12 @@
  * throughput with unbounded memory.
  */
 import type { EncodeSettings } from "../server/api-types.ts";
-import type { NvencSdkCodec } from "./nvenc.ts";
 import { aspectArgs, audioArgs, encoderArgs, faststartArgs, muxCopyArgs } from "./ffmpeg-args.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "./framegen-plan.ts";
 import { formatRational, type Rational } from "./rational.ts";
 import { nvencNativeTarget } from "./video.ts";
 import { abortWorkers } from "./worker-abort.ts";
+import type { FramegenEncodeOpen, FramegenEncodeOut } from "./workers/framegen-encode-worker.ts";
 
 export interface FrameGenEncodeArgs {
   ffmpeg: string;
@@ -37,7 +37,7 @@ export interface FrameGenEncodeArgs {
  * `-c:v copy` before the second `-i` would attach it to that input instead of
  * the output.
  */
-export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): OpenEncode {
+export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): FramegenEncodeOpen {
   const { ffmpeg, input, output, width, height, targetRate, codec, quality, hasAudio, displayAspect } = spec;
   const outputRate = formatRational(targetRate);
   // Null for CPU and AV1 codecs, and for dimensions NVENC will not take.
@@ -74,13 +74,6 @@ export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): OpenEncode {
       : null,
   };
 }
-export interface OpenEncode {
-  type: "open";
-  ffmpeg: string;
-  nvencArgs: string[];
-  rawArgs: string[];
-  nvenc: { width: number; height: number; fpsNum: number; fpsDen: number; codec: NvencSdkCodec; cq: number } | null;
-}
 
 /** Frames the sink accepts ahead of the encoder; the bound on the memory a fast producer can buy. */
 const MAX_FRAMES_IN_FLIGHT = 8;
@@ -105,10 +98,10 @@ export class EncodeSink {
 
   private constructor(private readonly worker: Worker) {
     worker.onmessage = (event: MessageEvent) => {
-      const m = event.data as { type: string; nvenc?: boolean; note?: string; message?: string };
+      const m = event.data as FramegenEncodeOut;
       if (m.type === "opened") {
-        this.usesNvenc = Boolean(m.nvenc);
-        this.note = m.note ?? "";
+        this.usesNvenc = m.nvenc;
+        this.note = m.note;
         const settle = this.openSettle;
         this.openSettle = null;
         settle?.resolve(this);
@@ -121,7 +114,7 @@ export class EncodeSink {
         this.finishSettle = null;
         settle?.resolve();
       } else if (m.type === "error") {
-        this.fail(new Error(m.message ?? "frame-generation encode worker failed"));
+        this.fail(new Error(m.message));
       }
     };
     worker.addEventListener("error", (e) => {
@@ -147,7 +140,7 @@ export class EncodeSink {
     for (const wake of this.waiters.splice(0)) wake();
   }
 
-  static open(message: OpenEncode): Promise<EncodeSink> {
+  static open(message: FramegenEncodeOpen): Promise<EncodeSink> {
     const worker = new Worker(new URL("./workers/framegen-encode-worker.ts", import.meta.url).href);
     const sink = new EncodeSink(worker);
     return new Promise<EncodeSink>((resolve, reject) => {

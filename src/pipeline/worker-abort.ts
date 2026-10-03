@@ -9,7 +9,7 @@ export interface AbortRequest {
 }
 
 /** A worker's answer once its child has exited and the rest of what it holds is released. */
-interface AbortedReply {
+export interface AbortedReply {
   type: "aborted";
 }
 
