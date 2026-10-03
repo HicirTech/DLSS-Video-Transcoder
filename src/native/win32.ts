@@ -8,8 +8,6 @@ const kernel32 = dlopen("kernel32.dll", {
   LoadLibraryExW: { args: [FFIType.ptr, FFIType.ptr, FFIType.u32], returns: FFIType.ptr },
   FreeLibrary: { args: [FFIType.ptr], returns: FFIType.i32 },
   GetProcAddress: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
-  GetModuleHandleW: { args: [FFIType.ptr], returns: FFIType.ptr },
-  GetModuleFileNameW: { args: [FFIType.ptr, FFIType.ptr, FFIType.u32], returns: FFIType.u32 },
   GetLastError: { args: [], returns: FFIType.u32 },
   CreateEventW: { args: [FFIType.ptr, FFIType.i32, FFIType.i32, FFIType.ptr], returns: FFIType.ptr },
   WaitForSingleObject: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.u32 },
@@ -18,12 +16,6 @@ const kernel32 = dlopen("kernel32.dll", {
   OpenFileMappingW: { args: [FFIType.u32, FFIType.i32, FFIType.ptr], returns: FFIType.ptr },
   MapViewOfFile: { args: [FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.u64], returns: FFIType.ptr },
   UnmapViewOfFile: { args: [FFIType.ptr], returns: FFIType.i32 },
-  GetCurrentProcessId: { args: [], returns: FFIType.u32 },
-  GetTickCount64: { args: [], returns: FFIType.u64 },
-  MultiByteToWideChar: {
-    args: [FFIType.u32, FFIType.u32, FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.i32],
-    returns: FFIType.i32,
-  },
 });
 
 export const LOAD_WITH_ALTERED_SEARCH_PATH = 0x00000008;
@@ -47,12 +39,6 @@ export class NativeModule {
       throw new Error(`LoadLibraryExW failed for ${path}: Win32 error ${code} (${hex32(code)})`);
     }
     return new NativeModule(path, handle);
-  }
-
-  /** Handle of a module that is already loaded in this process, or null. */
-  static loaded(name: string): NativeModule | null {
-    const handle = asPtr(kernel32.symbols.GetModuleHandleW(wstring(name)));
-    return handle === 0 ? null : new NativeModule(name, handle);
   }
 
   /** Address of an exported function, or 0 when the export does not exist. */
@@ -96,14 +82,5 @@ export class Win32Event {
   }
 }
 
-export function currentProcessId(): number {
-  return kernel32.symbols.GetCurrentProcessId();
-}
-
-export function tickCount64(): bigint {
-  return BigInt(kernel32.symbols.GetTickCount64());
-}
-
 /** The bound kernel32 calls, for modules that wrap one of them themselves (shared-memory.ts). */
 export const kernel32Symbols = kernel32.symbols;
-export const kernel32Module = NativeModule.loaded("kernel32.dll");

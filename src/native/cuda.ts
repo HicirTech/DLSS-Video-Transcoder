@@ -27,7 +27,6 @@ const SYMBOLS = {
   cuCtxPopCurrent_v2: { args: [FFIType.ptr], returns: FFIType.i32 },
   cuCtxSynchronize: { args: [], returns: FFIType.i32 },
   cuMemcpyHtoD_v2: { args: [FFIType.u64, FFIType.ptr, FFIType.u64], returns: FFIType.i32 },
-  cuMemcpyDtoH_v2: { args: [FFIType.ptr, FFIType.u64, FFIType.u64], returns: FFIType.i32 },
   cuMemcpy2D_v2: { args: [FFIType.ptr], returns: FFIType.i32 },
   cuMemAlloc_v2: { args: [FFIType.ptr, FFIType.u64], returns: FFIType.i32 },
   cuMemFree_v2: { args: [FFIType.u64], returns: FFIType.i32 },
@@ -174,11 +173,6 @@ export function cudaFree(device: bigint): void {
 /** Copy `bytes` from a host buffer into a device pointer (tightly packed). */
 export function cudaMemcpyHtoD(dst: bigint, src: Uint8Array, bytes: number): void {
   ck(cu().cuMemcpyHtoD_v2(dst, src, BigInt(bytes)) as number, "cuMemcpyHtoD");
-}
-
-/** Copy `bytes` from a device pointer into a host buffer (tightly packed). */
-export function cudaMemcpyDtoH(dst: Uint8Array, src: bigint, bytes: number): void {
-  ck(cu().cuMemcpyDtoH_v2(ptr(dst), src, BigInt(bytes)) as number, "cuMemcpyDtoH");
 }
 
 /**

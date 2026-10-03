@@ -8,7 +8,7 @@
 import { dlopen, FFIType } from "bun:ffi";
 import { ComObject, checkHresult, isFailure } from "./com.ts";
 import type { DxgiAdapter } from "./dxgi.ts";
-import { NativeStruct, OutPointer, align, asPtr, guid } from "./memory.ts";
+import { NativeStruct, OutPointer, align, guid } from "./memory.ts";
 import { Win32Event } from "./win32.ts";
 
 const d3d12 = dlopen("d3d12.dll", {
@@ -25,20 +25,15 @@ export const IID_ID3D12Resource = guid("{696442be-a72e-4059-bc79-5b5c98040fad}")
 export const IID_ID3D12Debug = guid("{344488b7-6846-474b-b989-f027448245e0}");
 
 export const D3D_FEATURE_LEVEL_11_0 = 0xb000;
-export const D3D_FEATURE_LEVEL_12_0 = 0xc000;
 
 export const D3D12_COMMAND_LIST_TYPE_DIRECT = 0;
-export const D3D12_COMMAND_LIST_TYPE_COMPUTE = 2;
-export const D3D12_COMMAND_LIST_TYPE_COPY = 3;
 
 export const D3D12_HEAP_TYPE_DEFAULT = 1;
 export const D3D12_HEAP_TYPE_UPLOAD = 2;
 export const D3D12_HEAP_TYPE_READBACK = 3;
 
 // Sharing flags for CUDA (or cross-process) interop.
-export const D3D12_HEAP_FLAG_NONE = 0;
 export const D3D12_HEAP_FLAG_SHARED = 0x1;
-export const D3D12_FENCE_FLAG_NONE = 0;
 export const D3D12_FENCE_FLAG_SHARED = 0x1; // 0x2 is SHARED_CROSS_ADAPTER — not what we want
 // Access mask for ID3D12Device::CreateSharedHandle (currently unused by the API; GENERIC_ALL recommended).
 export const GENERIC_ALL = 0x10000000;
@@ -53,7 +48,6 @@ export const D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS = 0x4;
 export const D3D12_RESOURCE_STATE_COMMON = 0;
 export const D3D12_RESOURCE_STATE_UNORDERED_ACCESS = 0x8;
 export const D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE = 0x40;
-export const D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE = 0x80;
 export const D3D12_RESOURCE_STATE_COPY_DEST = 0x400;
 export const D3D12_RESOURCE_STATE_COPY_SOURCE = 0x800;
 export const D3D12_RESOURCE_STATE_GENERIC_READ = 0xac3;
@@ -492,5 +486,3 @@ export function linearLayout(width: number, height: number, format: number): { r
   const rowPitch = align(rowBytes, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
   return { rowBytes, rowPitch, totalBytes: align(rowPitch * height, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT) };
 }
-
-export { asPtr };
