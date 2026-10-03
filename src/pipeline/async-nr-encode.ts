@@ -17,6 +17,7 @@ import { closeHandle } from "../native/win32.ts";
 import type { DlssNrSession } from "../ngx/nr-render.ts";
 import { throwIfAborted } from "./cancel.ts";
 import { connectFrameFlow, type FrameCounts } from "./frame-flow.ts";
+import type { ProgressReporter } from "./frame-progress.ts";
 import type { GpuSession } from "./gpu.ts";
 import { WorkerPairRun } from "./worker-pair-run.ts";
 import type { AsyncEncodeFrame, AsyncEncodeOpen, AsyncEncodeOut } from "./workers/async-encode-worker.ts";
@@ -38,7 +39,7 @@ export interface AsyncNrEncodeParams {
   totalFrames: number | null;
   /** Per-frame guide (main thread), NR takes no motion. */
   guide: (rgba: Uint8Array, index: number) => { reset: boolean; sceneCut: boolean };
-  onProgress?: (fraction: number, message: string, frames?: number) => void;
+  onProgress?: ProgressReporter;
   /** Cooperative cancellation: until the encode is finishing, the run stops at the next frame and rejects with JobCancelledError. */
   signal?: AbortSignal;
   /** Called once as the run starts finishing; see VideoJobOptions.onFinishing. */

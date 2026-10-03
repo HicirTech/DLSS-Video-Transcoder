@@ -16,6 +16,7 @@
 import { throwIfAborted } from "./cancel.ts";
 import type { Engine } from "./engine.ts";
 import { connectFrameFlow, type FrameCounts } from "./frame-flow.ts";
+import type { ProgressReporter } from "./frame-progress.ts";
 import { WorkerPairRun } from "./worker-pair-run.ts";
 import type { EncodeFrame, EncodeOpen } from "./workers/encode-worker.ts";
 
@@ -36,7 +37,7 @@ export interface ThreadedEncodeParams {
   totalFrames: number | null;
   /** Per-frame guide computed on the main thread (scene cut / motion). */
   guide: (rgba: Uint8Array, frameIndex: number) => { reset: boolean; motion: Float32Array | null; sceneCut: boolean };
-  onProgress?: (fraction: number, message: string, frames?: number) => void;
+  onProgress?: ProgressReporter;
   /** Cooperative cancellation: until the encode is finishing, the run stops at the next frame and rejects with JobCancelledError. */
   signal?: AbortSignal;
   /** Called once as the run starts finishing; see VideoJobOptions.onFinishing. */
