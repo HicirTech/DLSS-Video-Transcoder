@@ -4,7 +4,7 @@
  * COMMANDS below is the single source of truth: it renders the help *and* tells the
  * positional-argument parser which flags consume a following value token.
  */
-import { basename, dirname, extname, join } from "node:path";
+import { join } from "node:path";
 import { decodePng, encodePng, isPng } from "./codec/png.ts";
 import { buildForwarderDll } from "./ngx/forwarder.ts";
 import { PROBE_ENTRIES, PROBE_INITS, runProbe } from "./ngx/probe.ts";
@@ -17,6 +17,7 @@ import { processFrameGen } from "./pipeline/framegen.ts";
 import { FFMPEG_NVENC_ENCODERS, isNvenc } from "./pipeline/encode-select.ts";
 import { describeGpu, openGpu } from "./pipeline/gpu.ts";
 import { enhanceStill } from "./pipeline/image.ts";
+import { defaultOutputPath } from "./pipeline/output-path.ts";
 import { evenSize } from "./pipeline/resize.ts";
 
 const ROOT = join(import.meta.dir, "..");
@@ -501,7 +502,7 @@ async function main(): Promise<void> {
       const snappedRatio = DLSS_RATIO[quality];
       const outputWidth = evenSize(image.width * snappedRatio);
       const outputHeight = evenSize(image.height * snappedRatio);
-      const output = positional[1] ?? join(dirname(input), `${basename(input, extname(input))}.dlss.png`);
+      const output = positional[1] ?? defaultOutputPath(input, "dlss", ".png");
 
       const runtimeDir = option(args, "--runtime") ?? join(ROOT, "runtime");
       let dllDir: string | undefined;
@@ -555,7 +556,7 @@ async function main(): Promise<void> {
         process.exit(1);
       }
       const image = decodePng(bytes);
-      const output = positional[1] ?? join(dirname(input), `${basename(input, extname(input))}.nr.png`);
+      const output = positional[1] ?? defaultOutputPath(input, "nr", ".png");
       const settings = {
         ...DEFAULT_NR_SETTINGS,
         intensity: numberOption(args, "--intensity", { ...SETTING_RANGES.intensity, fallback: DEFAULT_NR_SETTINGS.intensity }),

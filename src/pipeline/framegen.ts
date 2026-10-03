@@ -20,7 +20,6 @@
  * Ported from the reference project's frame_interpolation package.
  */
 import { existsSync } from "node:fs";
-import { basename, dirname, extname, join } from "node:path";
 import type { EncodeSettings, FrameGenEngine } from "../server/api-types.ts";
 import { throwIfAborted } from "./cancel.ts";
 import { DlssgSession, probeDlssg } from "./dlssg.ts";
@@ -30,6 +29,7 @@ import { EncodeSink, buildFrameGenEncodeArgs } from "./framegen-encode-sink.ts";
 import { noFramesGeneratedMessage } from "./framegen-host-messages.ts";
 import { FrameReader } from "./frame-reader.ts";
 import { type RunParams, runOverlapped, runSequential } from "./framegen-run.ts";
+import { defaultOutputPath } from "./output-path.ts";
 import { removePartialOutput } from "./partial-output.ts";
 import { Stage, openGuideWorker } from "./framegen-stage.ts";
 import { verifyOutputVideo } from "./framegen-verify.ts";
@@ -105,11 +105,6 @@ export interface FrameGenResult {
   /** Peak bytes of frames in flight, or null when the run used the sequential fallback, which keeps no credit ledger. */
   peakBufferBytes: number | null;
   ms: number;
-}
-
-function defaultFrameGenOutput(input: string): string {
-  const ext = extname(input);
-  return join(dirname(input), `${basename(input, ext)}.dlssg.mp4`);
 }
 
 /** Real inter-frame intervals to tolerate with zero synthesised frames before concluding generation is disabled. */
@@ -200,7 +195,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   const expectedDecoded = Math.max(1, Math.round(sourceSeconds * ratToNumber(sourceRate)));
   const estimatedOutput = Math.ceil(sourceSeconds * ratToNumber(targetRate));
   const expectsGeneration = plan.generatedPerInterval > 0;
-  const output = options.output ?? defaultFrameGenOutput(options.input);
+  const output = options.output ?? defaultOutputPath(options.input, "dlssg", ".mp4");
   // Read before anything can write there: it decides what the failure path may delete.
   const outputExisted = existsSync(output);
   const detail =
