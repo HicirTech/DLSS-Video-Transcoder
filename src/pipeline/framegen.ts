@@ -47,7 +47,7 @@ import {
 import { type Rational, parseRational, ratDiv, ratMul, ratToNumber, rational } from "./rational.ts";
 import { evenSize } from "./resize.ts";
 import { requireFfmpegTools } from "./tools.ts";
-import { type VideoInfo, probeVideo } from "./video.ts";
+import { type VideoInfo, probeVideo } from "./video-probe.ts";
 import { ABORT_TIMEOUT_MS } from "./worker-abort.ts";
 
 export interface FrameGenOptions {

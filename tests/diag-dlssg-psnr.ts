@@ -22,7 +22,7 @@ import { FRAMEGEN_CUDA_DEVICE } from "../src/pipeline/framegen-plan.ts";
 import { tryCreateNvofBackend } from "../src/pipeline/nvof.ts";
 import { parseRational, ratDiv, rational } from "../src/pipeline/rational.ts";
 import { findTool } from "../src/pipeline/tools.ts";
-import { probeVideo } from "../src/pipeline/video.ts";
+import { probeVideo } from "../src/pipeline/video-probe.ts";
 
 /** Median PSNR of 2x cascade stages on 2.mp4 decimated x4 (issue #93), the bar native 4x must reach. */
 const CASCADE_MEDIAN_DB = 38.73;

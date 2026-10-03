@@ -1,6 +1,6 @@
 /** ffprobe's JSON -> VideoInfo: the rate fields are argv for ffmpeg, so they must never be unusable. */
 import { describe, expect, test } from "bun:test";
-import { videoInfoFrom, type ProbeJson } from "../src/pipeline/video.ts";
+import { videoInfoFrom, type ProbeJson } from "../src/pipeline/video-probe.ts";
 
 const stream = (rates: { r?: string; avg?: string }, rotation?: number, geometry?: { width: number; height: number; sar?: string }): ProbeJson => ({
   streams: [{
