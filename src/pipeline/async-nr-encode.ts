@@ -16,9 +16,10 @@ import { D3D12_HEAP_TYPE_UPLOAD, type D3D12Fence, type D3D12Resource } from "../
 import { closeHandle } from "../native/win32.ts";
 import type { DlssNrSession } from "../ngx/nr-render.ts";
 import { throwIfAborted } from "./cancel.ts";
+import { connectFrameFlow, type FrameCounts } from "./frame-flow.ts";
 import type { GpuSession } from "./gpu.ts";
-import type { NvencSdkCodec } from "./nvenc.ts";
 import { WorkerPairRun } from "./worker-pair-run.ts";
+import type { AsyncEncodeFrame, AsyncEncodeOpen, AsyncEncodeOut } from "./workers/async-encode-worker.ts";
 
 /** Shared buffer slots, and so the most frames in flight between DLSS and NVENC. */
 const POOL_SLOTS = 4;
@@ -33,7 +34,7 @@ export interface AsyncNrEncodeParams {
   height: number;
   rowPitch: number; // row pitch of the shared buffers: >= width*4, aligned to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256)
   totalBytes: number; // size of each shared buffer
-  enc: { fpsNum: number; fpsDen: number; codec: NvencSdkCodec; cq: number; ordinal: number };
+  enc: Pick<AsyncEncodeOpen, "fpsNum" | "fpsDen" | "codec" | "cq" | "ordinal">;
   totalFrames: number | null;
   /** Per-frame guide (main thread), NR takes no motion. */
   guide: (rgba: Uint8Array, index: number) => { reset: boolean; sceneCut: boolean };
@@ -111,7 +112,7 @@ function startWorkers(): { encodeWorker: Worker; decodeWorker: Worker } {
   }
 }
 
-export function runAsyncNrEncode(p: AsyncNrEncodeParams): Promise<{ frames: number; sceneCuts: number }> {
+export function runAsyncNrEncode(p: AsyncNrEncodeParams): Promise<FrameCounts> {
   // Before anything below is allocated or spawned.
   throwIfAborted(p.signal);
   const progress = p.onProgress ?? (() => {});
@@ -129,75 +130,49 @@ export function runAsyncNrEncode(p: AsyncNrEncodeParams): Promise<{ frames: numb
   const { encodeWorker, decodeWorker } = workers;
 
   return new Promise((resolve, reject) => {
-    const freeSlots: number[] = []; for (let i = 0; i < POOL_SLOTS; i++) freeSlots.push(i);
-    let frames = 0, sceneCuts = 0, decodeEnded = false;
+    const freeSlots: number[] = [];
+    for (let i = 0; i < POOL_SLOTS; i++) freeSlots.push(i);
     // Any reply from the encode worker means it handled "open", which closes
     // the NT handles; one that died before that leaves them to this side.
     let handlesClosedByWorker = false;
 
     // The pool goes only after the encode worker has closed NVENC and dropped
     // its CUDA imports of it, whichever way the run ends.
-    const run = new WorkerPairRun<{ frames: number; sceneCuts: number }>({
+    const run = new WorkerPairRun<FrameCounts>({
       decodeWorker, encodeWorker, signal: p.signal, onFinishing: p.onFinishing, resolve, reject,
       release: () => {
         if (!handlesClosedByWorker) closeSharedHandles(pool.bufferHandles, pool.fenceHandle);
         releaseSharedPool(pool);
       },
     });
-    const maybeFinish = (): void => {
-      if (run.running && decodeEnded && run.framesWritten === frames) run.finish();
-    };
+    connectFrameFlow<Extract<AsyncEncodeOut, { type: "encoded" }>>(run, {
+      decodeWorker,
+      encodeWorker,
+      decodeStart: { ffmpeg: p.ffmpeg, args: p.decodeArgs, frameBytes },
+      creditWindow: POOL_SLOTS,
+      totalFrames: p.totalFrames,
+      onProgress: progress,
+      processFrame: (decoded, frameNumber) => {
+        const rgba = new Uint8Array(decoded.buf);
+        const g = p.guide(rgba, frameNumber);
+        const slot = freeSlots.shift()!;
+        const list = pool.submit.begin(slot);
+        p.nr.recordEvaluateInto(list, pool.stagings[slot]!, rgba, g.reset, pool.buffers[slot]!, p.rowPitch);
+        const value = pool.submit.submit(slot);
+        const frame: AsyncEncodeFrame = { type: "frame", slot, value };
+        encodeWorker.postMessage(frame);
+        return g.sceneCut;
+      },
+      onEncodeReply: () => { handlesClosedByWorker = true; },
+      onEncoded: (ack) => { freeSlots.push(ack.slot); },
+    });
 
-    encodeWorker.onmessage = (e: MessageEvent) => {
-      const m = e.data as { type: string; slot?: number; message?: string };
-      handlesClosedByWorker = true;
-      if (m.type === "encoded") run.recordEncoded();
-      // After a stop the encoder may still answer "opened" or "encoded": neither may start the decoder or report progress.
-      if (!run.active) return;
-      if (m.type === "opened") {
-        decodeWorker.postMessage({ type: "start", ffmpeg: p.ffmpeg, args: p.decodeArgs, frameBytes });
-        decodeWorker.postMessage({ type: "credit", n: POOL_SLOTS });
-      } else if (m.type === "encoded") {
-        freeSlots.push(m.slot!);
-        if (!decodeEnded) decodeWorker.postMessage({ type: "credit", n: 1 });
-        const total = p.totalFrames;
-        const written = run.framesWritten;
-        progress(total ? Math.min(0.98, written / total) : 0.5, `frame ${written}/${total ?? "?"}`, written);
-        maybeFinish();
-      } else if (m.type === "done") {
-        run.succeed({ frames, sceneCuts });
-      } else if (m.type === "error") {
-        run.fail(`encode: ${m.message}`);
-      }
-    };
-
-    decodeWorker.onmessage = (e: MessageEvent) => {
-      const m = e.data as { type: string; buf?: ArrayBuffer; message?: string };
-      if (!run.active) return;
-      if (m.type === "frame") {
-        try {
-          const rgba = new Uint8Array(m.buf!);
-          const g = p.guide(rgba, frames);
-          if (g.sceneCut) sceneCuts++;
-          const slot = freeSlots.shift()!;
-          const list = pool.submit.begin(slot);
-          p.nr.recordEvaluateInto(list, pool.stagings[slot]!, rgba, g.reset, pool.buffers[slot]!, p.rowPitch);
-          const value = pool.submit.submit(slot);
-          frames++;
-          encodeWorker.postMessage({ type: "frame", slot, value });
-        } catch (err) { run.fail(`engine: ${(err as Error).message}`); }
-      } else if (m.type === "end") {
-        decodeEnded = true; maybeFinish();
-      } else if (m.type === "error") {
-        run.fail(`decode: ${m.message}`);
-      }
-    };
-
-    encodeWorker.postMessage({
+    const open: AsyncEncodeOpen = {
       type: "open", ffmpeg: p.ffmpeg, sinkArgs: p.sinkArgs,
       bufHandles: pool.bufferHandles, fenceHandle: pool.fenceHandle, size: p.totalBytes,
       width: p.width, height: p.height, pitch: p.rowPitch,
       fpsNum: p.enc.fpsNum, fpsDen: p.enc.fpsDen, codec: p.enc.codec, cq: p.enc.cq, ordinal: p.enc.ordinal,
-    });
+    };
+    encodeWorker.postMessage(open);
   });
 }
