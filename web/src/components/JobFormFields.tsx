@@ -94,8 +94,6 @@ interface EngineSelectProps {
 }
 
 export function EngineSelect({ value, disabled, onChange }: EngineSelectProps) {
-  // useId, not a constant: every tab stays mounted, so two panels can render
-  // this component at once and a fixed id would appear twice in one document.
   const engineLabelId = useId();
   return (
     <FormControl sx={{ minWidth: 260 }} disabled={disabled}>
@@ -127,8 +125,6 @@ interface MotionSelectProps {
 }
 
 export function MotionSelect({ value, disabled, onChange }: MotionSelectProps) {
-  // useId, not a constant: every tab stays mounted, so two panels can render
-  // this component at once and a fixed id would appear twice in one document.
   const motionLabelId = useId();
   return (
     <FormControl sx={{ minWidth: 220 }} disabled={disabled}>
