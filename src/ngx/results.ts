@@ -135,6 +135,9 @@ export const DlssRenderPreset = {
   Default: 0, A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, J: 10, K: 11, L: 12, M: 13, N: 14, O: 15,
 } as const;
 
+/** The DlssRenderPreset an SR session renders with unless asked otherwise: the CLI's --preset, the sr engine and DlssSrSession.open. */
+export const DEFAULT_SR_PRESET = "L" satisfies keyof typeof DlssRenderPreset;
+
 /**
  * The per-quality-mode preset parameter name, keyed by PerfQuality value. DLSS SR
  * exposes six per-mode preset params, not one bare hint; MaxPerf(0) uses the

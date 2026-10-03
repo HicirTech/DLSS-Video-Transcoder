@@ -26,7 +26,7 @@ import { FeatureCommonInfo, NgxCore } from "./core.ts";
 import { prepareForwarderSync } from "./forwarder-runtime.ts";
 import { encodeMotionR16G16 } from "../pipeline/flow.ts";
 import { NgxParam, NgxParameters } from "./params.ts";
-import { DLSS_PRESET_PARAM, DlssCreateFlag, DlssRenderPreset, NGX_APPLICATION_ID, ngxCheck } from "./results.ts";
+import { DEFAULT_SR_PRESET, DLSS_PRESET_PARAM, DlssCreateFlag, DlssRenderPreset, NGX_APPLICATION_ID, ngxCheck } from "./results.ts";
 
 const UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
@@ -39,7 +39,7 @@ export interface SrOptions {
   outputHeight: number;
   /** PerfQuality value (0 MaxPerf .. 5 DLAA); default 0 (Performance, 2x). */
   quality?: number;
-  /** DlssRenderPreset value; default L. Which model a preset selects belongs to the loaded nvngx_dlss.dll — see DlssRenderPreset in results.ts. */
+  /** DlssRenderPreset value; default DEFAULT_SR_PRESET. Which model a preset selects belongs to the loaded nvngx_dlss.dll — see DlssRenderPreset in results.ts. */
   preset?: number;
   /** Folder that holds `caller/nvngx.dll` and `dlss/nvngx_dlss.dll`. */
   runtimeDir: string;
@@ -90,7 +90,7 @@ export class DlssSrSession {
     // display-resolution and mis-scales temporal reconstruction (ghosting on
     // upscaled video). Correct at DLAA too, where render == output.
     params.setU32(NgxParam.DlssCreateFlags, DlssCreateFlag.AutoExposure | DlssCreateFlag.MVLowRes);
-    params.setU32(DLSS_PRESET_PARAM[quality] ?? DLSS_PRESET_PARAM[0]!, opts.preset ?? DlssRenderPreset.L);
+    params.setU32(DLSS_PRESET_PARAM[quality] ?? DLSS_PRESET_PARAM[0]!, opts.preset ?? DlssRenderPreset[DEFAULT_SR_PRESET]);
     params.setU32(NgxParam.CreationNodeMask, 1);
     params.setU32(NgxParam.VisibilityNodeMask, 1);
 

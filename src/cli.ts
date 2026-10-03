@@ -12,7 +12,7 @@ import { DlssNrSession } from "./ngx/nr-render.ts";
 import { buildRuntimeCatalog } from "./ngx/runtime-catalog.ts";
 import { DlssSrSession } from "./ngx/sr.ts";
 import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, type ProbeAdapter, type ProbeOpticalFlow, SETTING_RANGES } from "./server/api-types.ts";
-import { DlssRenderPreset, DLSS_RATIO, perfQualityName, qualityForFactor } from "./ngx/results.ts";
+import { DEFAULT_SR_PRESET, DlssRenderPreset, DLSS_RATIO, perfQualityName, qualityForFactor } from "./ngx/results.ts";
 import { processFrameGen } from "./pipeline/framegen.ts";
 import { FFMPEG_NVENC_ENCODERS, isNvenc } from "./pipeline/encode-select.ts";
 import { describeGpu, openGpu } from "./pipeline/gpu.ts";
@@ -232,7 +232,7 @@ const COMMANDS: readonly CommandSpec[] = [
     ],
     options: [
       { flag: "--factor N", desc: `upscale factor, snapped to the nearest fixed DLSS mode: ${srModeList()}`, def: "2" },
-      { flag: "--preset NAME", desc: "render preset: Default, A-F or J-O; the installed nvngx_dlss.dll decides which model each selects", def: "L" },
+      { flag: "--preset NAME", desc: "render preset: Default, A-F or J-O; the installed nvngx_dlss.dll decides which model each selects", def: DEFAULT_SR_PRESET },
       { flag: "--dlss-version VER", desc: "use a specific installed SR DLL version (prefix match ok); list them with `versions`", def: "bundled runtime DLL" },
       RUNTIME_OPT,
       ADAPTER_OPT,
@@ -489,7 +489,7 @@ async function main(): Promise<void> {
       const quality = qualityForFactor(factor);
       // DlssRenderPreset keys are mixed case ("Default", not "DEFAULT"), so match
       // case-insensitively; an unknown name is an error, not a silent fallback to L.
-      const presetInput = option(args, "--preset") ?? "L";
+      const presetInput = option(args, "--preset") ?? DEFAULT_SR_PRESET;
       const presetKey = (Object.keys(DlssRenderPreset) as (keyof typeof DlssRenderPreset)[]).find((k) => k.toLowerCase() === presetInput.toLowerCase());
       if (!presetKey) {
         console.error(`error: unknown --preset '${presetInput}'. Valid: ${Object.keys(DlssRenderPreset).join(", ")}`);
