@@ -8,6 +8,7 @@ import { dirname, extname, isAbsolute, join, resolve } from "node:path";
 import index from "../../web/index.html";
 import { runProbe } from "../ngx/probe.ts";
 import { buildRuntimeCatalog } from "../ngx/runtime-catalog.ts";
+import { APP_DATA_DIR, RUNTIME_DIR } from "../paths.ts";
 import { toolsReport } from "../pipeline/tools.ts";
 import {
   DEFAULT_ENCODE_SETTINGS,
@@ -21,10 +22,7 @@ import { JobManager } from "./jobs.ts";
 import { isWithin } from "./path-scope.ts";
 import { asJobRequest, validateJobRequest } from "./validate.ts";
 
-const ROOT = join(import.meta.dir, "..", "..");
-const RUNTIME_DIR = process.env.NR_RUNTIME_DIR ?? join(ROOT, "runtime");
-const APP_DATA = process.env.NR_APPDATA ?? join(ROOT, "logs");
-const UPLOADS_DIR = join(APP_DATA, "uploads");
+const UPLOADS_DIR = join(APP_DATA_DIR, "uploads");
 mkdirSync(UPLOADS_DIR, { recursive: true });
 const PORT = Number(process.env.PORT ?? 4080);
 const SETTINGS_DEFAULTS: SettingsDefaults = { settings: DEFAULT_NR_SETTINGS, scale: DEFAULT_SCALE_SETTINGS, encode: DEFAULT_ENCODE_SETTINGS };
@@ -56,8 +54,8 @@ const server = Bun.serve({
   development: process.env.NODE_ENV !== "production",
   routes: {
     "/": index,
-    "/api/probe": async () => json(await runProbe({ runtimeDir: RUNTIME_DIR, appDataPath: APP_DATA })),
-    "/api/runtime": async () => json((await runProbe({ runtimeDir: RUNTIME_DIR, appDataPath: APP_DATA, requirements: false })).runtime),
+    "/api/probe": async () => json(await runProbe({ runtimeDir: RUNTIME_DIR, appDataPath: APP_DATA_DIR })),
+    "/api/runtime": async () => json((await runProbe({ runtimeDir: RUNTIME_DIR, appDataPath: APP_DATA_DIR, requirements: false })).runtime),
     "/api/tools": () => json(toolsReport()),
     "/api/catalog": () => json(buildRuntimeCatalog(RUNTIME_DIR)),
     "/api/settings/defaults": () => json(SETTINGS_DEFAULTS),
@@ -77,7 +75,7 @@ const server = Bun.serve({
           return fail(`Input file not found: ${request.input}. Provide an absolute path to a file that exists.`);
         // Confine the output path so a request cannot write anywhere on the host.
         if (request.output !== undefined) {
-          const roots = [APP_DATA, RUNTIME_DIR, dirname(resolve(request.input))];
+          const roots = [APP_DATA_DIR, RUNTIME_DIR, dirname(resolve(request.input))];
           if (!isAbsolute(request.output) || !roots.some((r) => isWithin(request.output!, r)))
             return fail("The output path must be absolute and inside the app-data folder or the input's own directory.");
         }
@@ -150,7 +148,7 @@ const server = Bun.serve({
 
 const jobs = new JobManager({
   runtimeDir: RUNTIME_DIR,
-  appDataPath: APP_DATA,
+  appDataPath: APP_DATA_DIR,
   broadcast: (event) => {
     server.publish("jobs", JSON.stringify(event));
   },

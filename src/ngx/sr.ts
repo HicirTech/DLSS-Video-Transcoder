@@ -21,6 +21,7 @@ import {
   DXGI_FORMAT_R32_FLOAT,
   type D3D12Resource,
 } from "../native/d3d12.ts";
+import { callerDir, featureDir } from "../paths.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
 import { FeatureCommonInfo, NgxCore } from "./core.ts";
 import { prepareForwarderSync } from "./forwarder-runtime.ts";
@@ -70,10 +71,10 @@ export class DlssSrSession {
     mkdirSync(appData, { recursive: true });
 
     const core = NgxCore.load(); // driver core
-    const { forwarder } = prepareForwarderSync(join(opts.runtimeDir, "caller"));
+    const { forwarder } = prepareForwarderSync(callerDir(opts.runtimeDir));
     core.useForwarder(forwarder);
     ngxCheck(
-      core.initExt(session.device.ptr, NGX_APPLICATION_ID, appData, new FeatureCommonInfo([opts.dllDir ?? join(opts.runtimeDir, "dlss")])),
+      core.initExt(session.device.ptr, NGX_APPLICATION_ID, appData, new FeatureCommonInfo([opts.dllDir ?? featureDir(opts.runtimeDir, "sr")])),
       "DLSS SR Init_Ext",
     );
 
