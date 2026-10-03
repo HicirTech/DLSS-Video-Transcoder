@@ -12,8 +12,8 @@
  * bounds memory to POOL_SLOTS frames.
  */
 import { AsyncSubmit } from "../native/async-submit.ts";
-import { closeHandle } from "../native/cuda-interop.ts";
 import { D3D12_HEAP_TYPE_UPLOAD, type D3D12Fence, type D3D12Resource } from "../native/d3d12.ts";
+import { closeHandle } from "../native/win32.ts";
 import type { DlssNrSession } from "../ngx/nr-render.ts";
 import { throwIfAborted } from "./cancel.ts";
 import type { GpuSession } from "./gpu.ts";

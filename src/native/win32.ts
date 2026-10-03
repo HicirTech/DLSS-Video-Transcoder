@@ -61,6 +61,11 @@ export function lastError(): number {
   return kernel32.symbols.GetLastError();
 }
 
+/** Close a Win32 handle that is held as a plain number, such as an NT handle once CUDA has duplicated it on import. */
+export function closeHandle(handle: number): void {
+  kernel32.symbols.CloseHandle(handle as Pointer);
+}
+
 export class Win32Event {
   readonly handle: number;
 
@@ -78,7 +83,7 @@ export class Win32Event {
   }
 
   close(): void {
-    kernel32.symbols.CloseHandle(this.handle as Pointer);
+    closeHandle(this.handle);
   }
 }
 
