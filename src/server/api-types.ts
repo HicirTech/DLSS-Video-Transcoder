@@ -43,9 +43,10 @@ type EncodeContainer = (typeof ENCODE_CONTAINERS)[number];
 
 /**
  * DLSS 5 Neural Rendering controls (NGX feature 18). Feature 18 enhances an image at the same
- * size (no upscale). These parameters are community-established (not in any public NVIDIA header);
- * the strength ranges below are the typical ranges community tools expose and our sliders allow,
- * not hard limits enforced by the DLL.
+ * size (no upscale). These parameters are community-established (not in any public NVIDIA header).
+ * SETTING_RANGES holds the strength ranges community tools expose. The DLL does not enforce them;
+ * this program does: the CLI and validateJobRequest reject a value outside its range, and the UI
+ * clamps to it.
  */
 export interface NrSettings {
   /**
@@ -56,13 +57,13 @@ export interface NrSettings {
   preset: NrPreset;
   /** Look style: 0 = Default, 1 = Natural, 2 = Cinematic. (Strong, visible effect.) */
   style: NrStyle;
-  /** Overall neural-rendering strength, 0..2 (1 = default); the installed runtime stops responding at NR_INTENSITY_EFFECTIVE_MAX. */
+  /** Overall neural-rendering strength, within SETTING_RANGES.intensity (default DEFAULT_NR_SETTINGS.intensity); the installed runtime stops responding at NR_INTENSITY_EFFECTIVE_MAX. */
   intensity: number;
-  /** Local tone-mapping strength (float). Typical 0..2, 1 = neutral. */
+  /** Local tone-mapping strength (float), within SETTING_RANGES.localTone; 1 = neutral. */
   localTone: number;
-  /** Local detail / micro-structure strength (float). Typical 0..2, 1 = neutral. */
+  /** Local detail / micro-structure strength (float), within SETTING_RANGES.localStructure; 1 = neutral. */
   localStructure: number;
-  /** Skin detail strength (float). Typical -1..2; -1 = runtime default. Skin regions only. Ignored by the installed runtime: see NR_SETTINGS_IGNORED_BY_RUNTIME. */
+  /** Skin detail strength (float), within SETTING_RANGES.skinStructure; -1 = runtime default. Skin regions only. Ignored by the installed runtime: see NR_SETTINGS_IGNORED_BY_RUNTIME. */
   skinStructure: number;
   /** Let the runtime derive the processed-region mask instead of processing the whole frame. */
   autoMask: boolean;
