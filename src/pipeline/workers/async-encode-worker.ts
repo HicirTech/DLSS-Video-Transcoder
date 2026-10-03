@@ -9,6 +9,7 @@
  * to the mux ffmpeg. The CPU wait is on THIS thread, so the DLSS thread never
  * blocks and DLSS frame i+1 overlaps NVENC frame i on the GPU.
  */
+import { ffmpegFailedMessage } from "../ffmpeg-failure.ts";
 import { NvencEncoder, type NvencSdkCodec } from "../nvenc.ts";
 import { type AbortRequest, answerAbort } from "../worker-abort.ts";
 import { importD3D12Buffer, importD3D12Fence, waitExternalSemaphore, destroyExternalMemory, destroyExternalSemaphore } from "../../native/cuda-interop.ts";
@@ -97,7 +98,7 @@ self.onmessage = (e: MessageEvent<InMsg>) => {
       const err = (await new Response(sink.stderr as ReadableStream<Uint8Array>).text()).trim();
       const code = await sink.exited;
       releaseEncoder();
-      if (code !== 0) { fail(`ffmpeg mux failed (${code}): ${err}`); return; }
+      if (code !== 0) { fail(ffmpegFailedMessage("mux", code, err)); return; }
       self.postMessage({ type: "done" });
     }).catch((err) => fail((err as Error).message ?? String(err)));
   }

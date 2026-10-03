@@ -9,6 +9,7 @@
  * can accept and a frame is only read and posted while a credit is held, which
  * bounds how far decode runs ahead and so the memory it ties up.
  */
+import { ffmpegFailedMessage } from "../ffmpeg-failure.ts";
 import { FrameReader } from "../frame-reader.ts";
 import { type AbortRequest, answerAbort } from "../worker-abort.ts";
 
@@ -74,7 +75,7 @@ async function run(msg: StartMsg): Promise<void> {
     const code = await proc.exited;
     if (aborted) return;
     if (code !== 0) {
-      self.postMessage({ type: "error", message: `ffmpeg decode failed (${code}): ${err}` });
+      self.postMessage({ type: "error", message: ffmpegFailedMessage("decode", code, err) });
       return;
     }
     self.postMessage({ type: "end", frames: index });
