@@ -2,16 +2,16 @@ import { expect, test } from "bun:test";
 import {
   DUPLICATE_SCENE_SCORE,
   RESET_SCENE_SCORE,
-  buildMvExtractArgs,
+  buildSampleOffsets,
   createMotionEstimator,
   encodeMotionR16G16,
   flowGridSize,
-  floatToHalf,
-  halfToFloat,
+  meanAbsLumaDiff,
   resizeFlowBilinear,
   smallGray,
-  sparseSceneScore,
+  sparseLuma,
 } from "../src/pipeline/flow.ts";
+import { floatToHalf, halfToFloat } from "./half-float.ts";
 
 // -- float16 encoder ----------------------------------------------------------
 
@@ -52,19 +52,25 @@ function solid(width: number, height: number, r: number, g: number, b: number): 
   return buf;
 }
 
-test("sparseSceneScore: identical frames ~0, black->white ~1", () => {
+/** The scene score the estimator computes: sparse-grid mean abs luma diff, normalized to [0,1]. */
+function sceneScore(current: Uint8Array, previous: Uint8Array, width: number, height: number): number {
+  const offsets = buildSampleOffsets(width, height);
+  return meanAbsLumaDiff(sparseLuma(current, offsets), sparseLuma(previous, offsets)) / 255;
+}
+
+test("scene score: identical frames ~0, black->white ~1", () => {
   const w = 96;
   const h = 64;
   const black = solid(w, h, 0, 0, 0);
   const white = solid(w, h, 255, 255, 255);
-  expect(sparseSceneScore(black, black, w, h)).toBe(0);
-  expect(sparseSceneScore(black, white, w, h)).toBeCloseTo(1, 5);
-  expect(sparseSceneScore(black, white, w, h)).toBeGreaterThan(RESET_SCENE_SCORE);
+  expect(sceneScore(black, black, w, h)).toBe(0);
+  expect(sceneScore(black, white, w, h)).toBeCloseTo(1, 5);
+  expect(sceneScore(black, white, w, h)).toBeGreaterThan(RESET_SCENE_SCORE);
 });
 
 // -- grid + resize helpers ----------------------------------------------------
 
-test("flowGridSize caps the long side near flowWidth, rounds even, clamps to 64", () => {
+test("flowGridSize caps the long side near DEFAULT_FLOW_WIDTH, rounds even, clamps to 64", () => {
   expect(flowGridSize(1920, 1080)).toEqual({ flowW: 640, flowH: 360 });
   expect(flowGridSize(96, 64)).toEqual({ flowW: 96, flowH: 64 }); // below cap: unchanged
   expect(flowGridSize(40, 30)).toEqual({ flowW: 64, flowH: 64 }); // clamped up to 64
@@ -137,7 +143,7 @@ test("estimator resets with null motion across a scene cut", () => {
 test("estimator recovers a +5px x shift as backward MV.x ~ -5, MV.y ~ 0", () => {
   const w = 96;
   const h = 64;
-  const est = createMotionEstimator(w, h, { blockMatch: { block: 8, search: 8 } });
+  const est = createMotionEstimator(w, h);
   est.process(textured(w, h, 0)); // previous
   const res = est.process(textured(w, h, 5)); // content shifted +5 in x
   expect(res.reset).toBe(false);
@@ -161,22 +167,5 @@ test("estimator recovers a +5px x shift as backward MV.x ~ -5, MV.y ~ 0", () => 
   }
   expect(sx / n).toBeCloseTo(-5, 0); // backward flow: current -> previous is -shift
   expect(Math.abs(sy / n)).toBeLessThan(1);
-  est.close();
-});
-
-// -- ffmpeg boundary ----------------------------------------------------------
-
-test("buildMvExtractArgs constructs export_mvs + mestimate args around the input", () => {
-  const args = buildMvExtractArgs("ffmpeg", "in.mp4");
-  expect(args[0]).toBe("ffmpeg");
-  expect(args).toContain("+export_mvs");
-  expect(args[args.indexOf("-i") + 1]).toBe("in.mp4");
-  expect(args.some((a) => a.startsWith("mestimate"))).toBe(true);
-});
-
-test("selecting the ffmpeg backend yields a non-producing calc boundary", () => {
-  const est = createMotionEstimator(96, 64, { backend: "ffmpeg" });
-  est.process(textured(96, 64, 0)); // first frame: no calc yet
-  expect(() => est.process(textured(96, 64, 3))).toThrow(/dense optical flow/);
   est.close();
 });

@@ -9,9 +9,8 @@
  * `calc(current, previous)` maps current -> previous, `MV[p] = prevPos - curPos`.
  *
  * OpenCV is unavailable in Bun, so the producer is a pure-TS block matcher on a
- * downscaled gray grid (guides.py:24-55). The ffmpeg path is a seam, not a
- * producer: ffmpeg only exposes block-granular codec vectors, never dense flow.
- * Everything here is GPU-free, so it is unit-testable without a GPU.
+ * downscaled gray grid (guides.py:24-55). Everything here is GPU-free, so it is
+ * unit-testable without a GPU.
  */
 
 // -- Reference reset/duplicate thresholds (guides.py DLSSGGuideGenerator) ------
@@ -29,9 +28,6 @@ export const MIN_FLOW_SIDE = 64;
 
 // -- float32 -> float16 (IEEE-754 half) ---------------------------------------
 
-const f32 = new Float32Array(1);
-const u32 = new Uint32Array(f32.buffer);
-
 /** Float16Array when the runtime provides it — Bun 1.4 does — otherwise null. */
 interface HalfArray {
   set(values: ArrayLike<number>, offset?: number): void;
@@ -39,19 +35,11 @@ interface HalfArray {
 const HALF_ARRAY = (globalThis as unknown as { Float16Array?: new (buffer: ArrayBufferLike) => HalfArray }).Float16Array ?? null;
 
 /**
- * Encode one float32 as an IEEE-754 half (Uint16): normals, subnormals, signed
- * zero, overflow -> Inf and NaN, rounding the mantissa to nearest-even as
- * R16G16_FLOAT does.
- */
-export function floatToHalf(value: number): number {
-  f32[0] = value;
-  return bitsToHalf(u32[0]!);
-}
-
-/**
- * floatToHalf on the raw IEEE-754 bits of a float32, so a whole buffer can be
- * converted through a Uint32Array view with integer ops only instead of one
- * scalar store/load per element.
+ * Encode the raw IEEE-754 bits of a float32 as an IEEE-754 half (Uint16):
+ * normals, subnormals, signed zero, overflow -> Inf and NaN, rounding the
+ * mantissa to nearest-even as R16G16_FLOAT does. Taking the bits lets a whole
+ * buffer convert through a Uint32Array view with integer ops only instead of
+ * one scalar store/load per element.
  */
 export function bitsToHalf(x: number): number {
   const sign = (x >>> 16) & 0x8000;
@@ -81,16 +69,6 @@ export function bitsToHalf(x: number): number {
   const rem = mant & 0x1fff;
   if (rem > 0x1000 || (rem === 0x1000 && (half & 1))) half++; // carry into exp is fine
   return sign | half;
-}
-
-/** Decode an IEEE-754 half (Uint16) back to a JS number; for tests and GPU-readback debugging only. */
-export function halfToFloat(half: number): number {
-  const sign = half & 0x8000 ? -1 : 1;
-  const exp = (half >>> 10) & 0x1f;
-  const mant = half & 0x3ff;
-  if (exp === 0) return sign * mant * 2 ** -24; // subnormal: 2^-14 * mant/1024
-  if (exp === 0x1f) return mant ? NaN : sign * Infinity;
-  return sign * 2 ** (exp - 15) * (1 + mant / 1024);
 }
 
 /**
@@ -228,26 +206,16 @@ export function meanAbsLumaDiff(a: Float32Array, b: Float32Array): number {
   return a.length ? sum / a.length : 0;
 }
 
-/**
- * Normalized [0,1] scene score between two RGBA8 frames: sparse-grid mean abs
- * luma diff / 255. RESET_SCENE_SCORE and DUPLICATE_SCENE_SCORE are thresholds
- * on this value.
- */
-export function sparseSceneScore(current: Uint8Array, previous: Uint8Array, width: number, height: number): number {
-  const offsets = buildSampleOffsets(width, height);
-  return meanAbsLumaDiff(sparseLuma(current, offsets), sparseLuma(previous, offsets)) / 255;
-}
-
 // -- Grayscale box-average downscale ------------------------------------------
 
 /**
- * Flow-grid dimensions for a render size: the LONG side becomes ~flowWidth, both
- * dims even and >= MIN_FLOW_SIDE. Scaling by the long side rather than the
+ * Flow-grid dimensions for a render size: the LONG side becomes ~DEFAULT_FLOW_WIDTH,
+ * both dims even and >= MIN_FLOW_SIDE. Scaling by the long side rather than the
  * width keeps a portrait frame from running the flow on a far larger grid than
  * intended.
  */
-export function flowGridSize(width: number, height: number, flowWidth = DEFAULT_FLOW_WIDTH): { flowW: number; flowH: number } {
-  const scale = Math.min(1, flowWidth / Math.max(1, width, height));
+export function flowGridSize(width: number, height: number): { flowW: number; flowH: number } {
+  const scale = Math.min(1, DEFAULT_FLOW_WIDTH / Math.max(1, width, height));
   const flowW = Math.max(MIN_FLOW_SIDE, Math.round((width * scale) / 2) * 2);
   const flowH = Math.max(MIN_FLOW_SIDE, Math.round((height * scale) / 2) * 2);
   return { flowW, flowH };
@@ -356,12 +324,10 @@ export interface FlowBackend {
   close?(): void;
 }
 
-export interface BlockMatchOptions {
-  /** Square block edge in grid pixels (default 8). */
-  block?: number;
-  /** Max search displacement in grid pixels, each axis (default 8). */
-  search?: number;
-}
+/** Square block edge of the block matcher, in grid pixels. */
+const BLOCK_EDGE = 8;
+/** Max search displacement of the block matcher, in grid pixels, each axis. */
+const SEARCH_RADIUS = 8;
 
 /**
  * Dependency-free block-matching flow: per block of `current`, the integer
@@ -370,19 +336,17 @@ export interface BlockMatchOptions {
  * at p in current best matches previous at p+d, so prevPos - curPos = d — so it
  * carries the cv2 calc(current, previous) sign with no negation.
  */
-export function blockMatchFlow(current: Float32Array, previous: Float32Array, w: number, h: number, opts: BlockMatchOptions = {}): Float32Array {
-  const block = Math.max(1, opts.block ?? 8);
-  const search = Math.max(1, opts.search ?? 8);
+function blockMatchFlow(current: Float32Array, previous: Float32Array, w: number, h: number): Float32Array {
   const out = new Float32Array(w * h * 2);
-  for (let by = 0; by < h; by += block) {
-    const byEnd = Math.min(by + block, h);
-    for (let bx = 0; bx < w; bx += block) {
-      const bxEnd = Math.min(bx + block, w);
+  for (let by = 0; by < h; by += BLOCK_EDGE) {
+    const byEnd = Math.min(by + BLOCK_EDGE, h);
+    for (let bx = 0; bx < w; bx += BLOCK_EDGE) {
+      const bxEnd = Math.min(bx + BLOCK_EDGE, w);
       let bestDx = 0;
       let bestDy = 0;
       let bestCost = Infinity;
-      for (let dy = -search; dy <= search; dy++) {
-        for (let dx = -search; dx <= search; dx++) {
+      for (let dy = -SEARCH_RADIUS; dy <= SEARCH_RADIUS; dy++) {
+        for (let dx = -SEARCH_RADIUS; dx <= SEARCH_RADIUS; dx++) {
           let cost = 0;
           for (let y = by; y < byEnd; y++) {
             const qy = y + dy;
@@ -417,43 +381,11 @@ export function blockMatchFlow(current: Float32Array, previous: Float32Array, w:
   return out;
 }
 
-/** The pure-TS block-matching backend (default / 'auto' / 'ts'). */
-export function createBlockMatchBackend(opts: BlockMatchOptions = {}): FlowBackend {
+/** The pure-TS block-matching backend, used unless the caller passes its own. */
+function createBlockMatchBackend(): FlowBackend {
   return {
     name: "ts-blockmatch",
-    calc: (current, previous, w, h) => blockMatchFlow(current, previous, w, h, opts),
-  };
-}
-
-/**
- * ffmpeg args that extract per-frame codec motion vectors from `input`. These
- * are block-granular compression vectors (mestimate + export_mvs), NOT the dense
- * optical flow DLSS needs, which is why the ffmpeg backend below never produces.
- */
-export function buildMvExtractArgs(ffmpeg: string, input: string): string[] {
-  return [
-    ffmpeg,
-    "-v",
-    "error",
-    "-flags2",
-    "+export_mvs",
-    "-i",
-    input,
-    "-vf",
-    "mestimate=epzs,codecview=mv=pf+bf+bb",
-    "-f",
-    "null",
-    "-",
-  ];
-}
-
-/** ffmpeg backend seam; `calc` throws because ffmpeg cannot produce dense flow. */
-export function createFfmpegBackend(): FlowBackend {
-  return {
-    name: "ffmpeg-stub",
-    calc: () => {
-      throw new Error("ffmpeg backend does not produce dense optical flow; use the 'ts' backend (or a native NVOFA/DIS backend)");
-    },
+    calc: blockMatchFlow,
   };
 }
 
@@ -519,32 +451,13 @@ export interface MotionEstimator {
   close(): void;
 }
 
-export type FlowBackendKind = "auto" | "ts" | "ffmpeg" | "nvof" | "dis";
-
 export interface MotionEstimatorOptions {
-  /** Long-side resolution to run flow at (default 640, rounded even, >= 64). */
-  flowWidth?: number;
-  /** Backend kind (default 'auto' -> pure-TS block matching), or a ready-made instance such as the NVOFA backend. */
-  backend?: FlowBackendKind | FlowBackend;
-  /** Override the block-match backend tuning (ts backend only). */
-  blockMatch?: BlockMatchOptions;
-}
-
-function selectBackend(kind: FlowBackendKind, opts: MotionEstimatorOptions): FlowBackend {
-  switch (kind) {
-    case "auto":
-    case "ts":
-      return createBlockMatchBackend(opts.blockMatch);
-    case "ffmpeg":
-      return createFfmpegBackend();
-    case "nvof":
-    case "dis":
-      // Native GPU/DIS backends live behind bun:ffi, which this GPU-free module
-      // cannot pull in; callers pass such a backend in as an instance instead.
-      throw new Error(`optical-flow backend '${kind}' is not available in this build; use 'ts'`);
-    default:
-      throw new Error(`unknown optical-flow backend '${String(kind)}'`);
-  }
+  /**
+   * A ready-made backend such as the NVOFA one (default: pure-TS block matching).
+   * It lives behind bun:ffi, which this GPU-free module cannot pull in, so the
+   * caller builds it.
+   */
+  backend?: FlowBackend;
 }
 
 /**
@@ -569,9 +482,8 @@ class DisMotionEstimator implements MotionEstimator {
     private readonly width: number,
     private readonly height: number,
     private readonly backend: FlowBackend,
-    flowWidth: number,
   ) {
-    const { flowW, flowH } = flowGridSize(width, height, flowWidth);
+    const { flowW, flowH } = flowGridSize(width, height);
     this.flowW = flowW;
     this.flowH = flowH;
     this.offsets = buildSampleOffsets(width, height);
@@ -682,9 +594,8 @@ class DisMotionEstimator implements MotionEstimator {
  */
 export function createMotionEstimator(width: number, height: number, opts: MotionEstimatorOptions = {}): MotionEstimator {
   if (width <= 0 || height <= 0) throw new Error(`flow: invalid size ${width}x${height}`);
-  // A ready-made instance (e.g. the NVOFA GPU backend) is used as given; its
-  // close() then runs through the estimator's close(), not the caller's.
-  const chosen = opts.backend;
-  const backend = chosen && typeof chosen === "object" ? chosen : selectBackend(chosen ?? "auto", opts);
-  return new DisMotionEstimator(width, height, backend, opts.flowWidth ?? DEFAULT_FLOW_WIDTH);
+  // A ready-made backend (e.g. the NVOFA GPU one) is used as given; its close()
+  // then runs through the estimator's close(), not the caller's.
+  const backend = opts.backend ?? createBlockMatchBackend();
+  return new DisMotionEstimator(width, height, backend);
 }

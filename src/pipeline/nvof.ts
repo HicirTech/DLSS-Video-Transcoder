@@ -12,7 +12,7 @@ import { callableAt, type OwnedCallable, type Signature } from "../native/com.ts
 import { cudaCreateContext, cudaMemcpy2DDtoH, cudaMemcpy2DHtoD, cudaReleaseContext, cudaSynchronize } from "../native/cuda.ts";
 import { OutU64 } from "../native/memory.ts";
 import type { OpticalFlowLimits } from "../server/api-types.ts";
-import { DEFAULT_FLOW_WIDTH, flowGridSize, type FlowBackend } from "./flow.ts";
+import { flowGridSize, type FlowBackend } from "./flow.ts";
 
 const NV_OF_API_VERSION = 0x20; // (major 2 << 4) | minor 0
 const OK = 0;
@@ -321,8 +321,8 @@ export interface NvofAttempt {
  * reason is returned rather than swallowed, so someone who asked for hardware
  * flow learns they lost it.
  */
-export function tryCreateNvofBackend(width: number, height: number, ordinal: number, flowWidth = DEFAULT_FLOW_WIDTH): NvofAttempt {
-  const { flowW, flowH } = flowGridSize(width, height, flowWidth);
+export function tryCreateNvofBackend(width: number, height: number, ordinal: number): NvofAttempt {
+  const { flowW, flowH } = flowGridSize(width, height);
   try {
     return { backend: nvofBackend(NvofSession.open(flowW, flowH, ordinal)), reason: null };
   } catch (error) {
