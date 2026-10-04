@@ -15,13 +15,13 @@ import {
   DEFAULT_NR_SETTINGS,
   DEFAULT_SCALE_SETTINGS,
   type SettingsDefaults,
-  type UploadResult,
   type WsEvent,
 } from "./api-types.ts";
 import { checkDllDir } from "./dll-dir.ts";
 import { JobManager } from "./jobs.ts";
 import { isWithin } from "./path-scope.ts";
 import { ProbeRunner } from "./probe-runner.ts";
+import { MAX_REQUEST_BODY_BYTES, storeUpload } from "./upload.ts";
 import { asJobRequest, validateJobRequest } from "./validate.ts";
 
 const UPLOADS_DIR = join(APP_DATA_DIR, "uploads");
@@ -55,6 +55,7 @@ const server = Bun.serve({
   port: PORT,
   hostname: HOST,
   development: process.env.NODE_ENV !== "production",
+  maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
   routes: {
     "/": index,
     "/api/probe": async () => {
@@ -120,23 +121,9 @@ const server = Bun.serve({
     },
     "/api/upload": {
       // Stores a browser upload and returns its absolute path for use as a job input.
-      // The stored name is generated, never taken from the client, so an upload cannot
-      // escape UPLOADS_DIR via a traversing filename.
       POST: async (req) => {
-        let form: FormData;
-        try {
-          form = await req.formData();
-        } catch {
-          return fail("Upload must be multipart/form-data with a 'file' field.");
-        }
-        const file = form.get("file");
-        if (!(file instanceof File)) return fail("Upload is missing the 'file' field.");
-        const ext = extname(file.name).toLowerCase().replace(/[^.a-z0-9]/g, "").slice(0, 12);
-        const name = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}${ext}`;
-        const dest = join(UPLOADS_DIR, name);
-        await Bun.write(dest, file);
-        const uploaded: UploadResult = { path: dest, name: file.name, size: file.size };
-        return json(uploaded, 201);
+        const outcome = await storeUpload(req, UPLOADS_DIR);
+        return outcome.ok ? json(outcome.upload, 201) : fail(outcome.error, outcome.status);
       },
     },
     "/ws": (req, srv) => (srv.upgrade(req) ? undefined : new Response("upgrade required", { status: 400 })),
