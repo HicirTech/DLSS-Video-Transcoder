@@ -248,7 +248,7 @@ export function mockCatalog(): RuntimeManifest {
 }
 
 /** What POST /api/upload answers. The real server renames the file; the mock only has to be shaped like it. */
-export function mockUpload(file: File): UploadResult {
+export function mockUpload(file: Pick<File, "name" | "size">): UploadResult {
   return { path: `C:\\mock\\uploads\\${file.name}`, name: file.name, size: file.size };
 }
 

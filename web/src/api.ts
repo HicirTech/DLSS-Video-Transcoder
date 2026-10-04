@@ -126,11 +126,7 @@ function createHttpClient(): ApiClient {
     getJob: (id) => request<JobStatus>(`/api/jobs/${encodeURIComponent(id)}`),
     createJob: (body) => request<JobStatus>("/api/jobs", postJson(body)),
     cancelJob: (id) => request<JobStatus>(`/api/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
-    uploadFile: (file) => {
-      const form = new FormData();
-      form.append("file", file);
-      return request<UploadResult>("/api/upload", { method: "POST", body: form });
-    },
+    uploadFile: (file) => request<UploadResult>(`/api/upload?name=${encodeURIComponent(file.name)}`, { method: "POST", body: file }),
     fileUrl: (path) => `/api/file?path=${encodeURIComponent(path)}`,
   };
 }

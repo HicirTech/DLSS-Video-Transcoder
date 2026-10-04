@@ -9,6 +9,7 @@
 import index from "./index.html";
 import type { JobRequest, WsEvent } from "../src/server/api-types";
 import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, isActiveState } from "../src/server/api-types";
+import { MAX_REQUEST_BODY_BYTES, uploadFileName } from "../src/server/upload";
 import { asJobRequest, validateJobRequest } from "../src/server/validate";
 import { MOCK_PROBE, MOCK_TOOLS, mockCatalog, mockSettingsDefaults, mockUpload } from "./src/mock/fixtures";
 import { MockJobEngine } from "./src/mock/job-engine";
@@ -36,6 +37,7 @@ function sleep(ms: number): Promise<void> {
 const server = Bun.serve({
   port: PORT,
   development: true,
+  maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
   routes: {
     "/": index,
     "/api/probe": async () => {
@@ -46,10 +48,12 @@ const server = Bun.serve({
     "/api/catalog": () => json(mockCatalog()),
     "/api/upload": {
       POST: async (req) => {
-        const form = await req.formData().catch(() => null);
-        const file = form?.get("file");
-        if (!(file instanceof File)) return failure(400, "Upload is missing the 'file' field.");
-        return json(mockUpload(file), 201);
+        const named = uploadFileName(req);
+        if ("error" in named) return failure(400, named.error);
+        // Counted while it streams, not stored: the mock keeps nothing on disk.
+        let size = 0;
+        for await (const chunk of req.body ?? []) size += chunk.byteLength;
+        return json(mockUpload({ name: named.name, size }), 201);
       },
     },
     "/api/settings/defaults": () => json(mockSettingsDefaults()),
