@@ -139,7 +139,7 @@ All JSON, same-origin base:
 | `POST /api/jobs` | submit a job |
 | `GET /api/jobs/:id` · `POST /api/jobs/:id/cancel` | status / cancel |
 | `GET /api/file?path=<abs>` | raw bytes (previews; absolute path only) |
-| `POST /api/upload` | multipart upload → `{ path, name, size }` |
+| `POST /api/upload?name=<file name>` | the file's bytes as the request body, streamed to disk, any size → `{ path, name, size }` |
 | `WS /ws` | server→client `WsEvent` stream (`hello` / `job` / `log`) |
 
 A job's `state` is `queued`, `running`, `done`, `failed` or `cancelled`. Cancelling a queued job ends it
