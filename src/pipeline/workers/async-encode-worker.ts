@@ -12,7 +12,7 @@
 import { ffmpegFailedMessage } from "../ffmpeg-failure.ts";
 import { NvencEncoder, type NvencSdkCodec } from "../nvenc.ts";
 import { type AbortedReply, type AbortRequest, answerAbort } from "../worker-abort.ts";
-import { importD3D12Buffer, importD3D12Fence, waitExternalSemaphore, destroyExternalMemory, destroyExternalSemaphore } from "../../native/cuda-interop.ts";
+import { importD3D12Buffer, importD3D12Fence, waitExternalSemaphore, releaseD3D12Buffer, destroyExternalSemaphore, type ImportedBuffer } from "../../native/cuda-interop.ts";
 import { cudaCreateContext, cudaSynchronize } from "../../native/cuda.ts";
 import { closeHandle } from "../../native/win32.ts";
 
@@ -44,7 +44,7 @@ const post = (message: AsyncEncodeOut): void => self.postMessage(message);
 let enc: NvencEncoder | null = null;
 let sink: ReturnType<typeof Bun.spawn> | null = null;
 let extSem = 0n;
-let extMems: bigint[] = [];
+let imported: ImportedBuffer[] = [];
 let chain: Promise<void> = Promise.resolve();
 /** No more work: set by a failure or an abort. */
 let stopped = false;
@@ -61,8 +61,8 @@ function releaseEncoder(): void {
     enc?.close();
   } finally {
     enc = null;
-    for (const extMem of extMems) { try { destroyExternalMemory(extMem); } catch { /* keep releasing the rest */ } }
-    extMems = [];
+    for (const buffer of imported) { try { releaseD3D12Buffer(buffer); } catch { /* keep releasing the rest */ } }
+    imported = [];
     if (extSem !== 0n) { try { destroyExternalSemaphore(extSem); } catch { /* */ } }
     extSem = 0n;
   }
@@ -74,9 +74,9 @@ self.onmessage = (e: MessageEvent<AsyncEncodeIn>) => {
     try {
       cudaCreateContext(m.ordinal);
       const inputs = m.bufHandles.map((h) => {
-        const { extMem, devPtr } = importD3D12Buffer(h, m.size);
-        extMems.push(extMem);
-        return { devPtr, pitch: m.pitch };
+        const buffer = importD3D12Buffer(h, m.size);
+        imported.push(buffer);
+        return { devPtr: buffer.devPtr, pitch: m.pitch };
       });
       extSem = importD3D12Fence(m.fenceHandle);
       enc = NvencEncoder.open({ width: m.width, height: m.height, fpsNum: m.fpsNum, fpsDen: m.fpsDen, codec: m.codec, cq: m.cq, ordinal: m.ordinal, inputs });

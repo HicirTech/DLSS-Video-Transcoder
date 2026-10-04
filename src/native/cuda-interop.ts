@@ -10,6 +10,7 @@
  * be CloseHandle'd afterwards.
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";
+import { cudaFree } from "./cuda.ts";
 import { OutU64 } from "./memory.ts";
 
 const cuda = dlopen("nvcuda.dll", {
@@ -61,12 +62,28 @@ export function importD3D12Buffer(sharedHandle: number, size: number): ImportedB
   const bufDesc = new Uint8Array(88);
   new DataView(bufDesc.buffer).setBigUint64(8, BigInt(size), true); // size @8, offset @0 = 0
   const devOut = new OutU64();
-  ck(cuda.symbols.cuExternalMemoryGetMappedBuffer(devOut.ptr, extMem, ptr(bufDesc)) as number, "cuExternalMemoryGetMappedBuffer");
+  try {
+    ck(cuda.symbols.cuExternalMemoryGetMappedBuffer(devOut.ptr, extMem, ptr(bufDesc)) as number, "cuExternalMemoryGetMappedBuffer");
+  } catch (error) {
+    // The caller never receives this import, so it is undone here.
+    cuda.symbols.cuDestroyExternalMemory(extMem);
+    throw error;
+  }
   return { extMem, devPtr: devOut.value };
 }
 
-export function destroyExternalMemory(extMem: bigint): void {
-  ck(cuda.symbols.cuDestroyExternalMemory(extMem) as number, "cuDestroyExternalMemory");
+/**
+ * Undo importD3D12Buffer: free the mapping, then destroy the import. The CUDA
+ * Driver API requires a buffer mapped with cuExternalMemoryGetMappedBuffer to be
+ * freed with cuMemFree; destroying the import alone leaves the mapping, and the
+ * D3D12 allocation behind it, alive until the process exits.
+ */
+export function releaseD3D12Buffer(buffer: ImportedBuffer): void {
+  try {
+    cudaFree(buffer.devPtr);
+  } finally {
+    ck(cuda.symbols.cuDestroyExternalMemory(buffer.extMem) as number, "cuDestroyExternalMemory");
+  }
 }
 
 /** Import a shared D3D12 fence (via its NT handle) as a CUDA external semaphore. */
