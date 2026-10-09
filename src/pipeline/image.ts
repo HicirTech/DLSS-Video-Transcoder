@@ -74,6 +74,19 @@ export async function enhanceStill(source: RgbaImage, enhance: (colour: Uint8Arr
   return out;
 }
 
+/**
+ * A still's passes through an engine: a still has no history, so the first pass
+ * resets it and `warmupFrames` more feed the same frame again until the temporal
+ * state settles; bypass keeps no state and runs once. Image jobs and the sr and nr
+ * commands all go through here. Returns the last pass's output.
+ */
+export async function runStillPasses(engine: EngineKind, warmupFrames: number, pass: (reset: boolean, total: number) => Uint8Array | Promise<Uint8Array>): Promise<Uint8Array> {
+  const total = engine !== "bypass" ? Math.max(1, warmupFrames + 1) : 1;
+  let output = await pass(true, total);
+  for (let index = 1; index < total; index++) output = await pass(false, total);
+  return output;
+}
+
 export async function processImage(options: ImageJobOptions): Promise<ImageJobResult> {
   const started = performance.now();
   const progress = options.onProgress ?? (() => {});
@@ -110,16 +123,14 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
     try {
       result = await enhanceStill(decoded, async (colour) => {
         const working = upscaling ? colour : resizeRgba(colour, decoded.width, decoded.height, target.width, target.height);
-        // A still image has no history; run extra passes so temporal state settles.
-        const total = options.engine !== "bypass" ? Math.max(1, options.settings.warmupFrames + 1) : 1;
-        let rgba = working;
-        for (let i = 0; i < total; i++) {
+        const rgba = await runStillPasses(options.engine, options.settings.warmupFrames, async (reset, total) => {
           // Each pass is synchronous FFI and never yields on its own.
           await throwIfAbortedAfterYield(options.signal);
-          rgba = engine.process({ rgba: working, reset: i === 0, motion: null });
+          const output = engine.process({ rgba: working, reset, motion: null });
           passes++;
           progress(0.1 + (0.8 * passes) / total, `pass ${passes}/${total} on ${engine.name}`, { done: passes, total });
-        }
+          return output;
+        });
         return { rgba, width: engine.outputWidth, height: engine.outputHeight };
       });
     } finally {
