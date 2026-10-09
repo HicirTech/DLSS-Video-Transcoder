@@ -24,6 +24,7 @@ export interface FrameGenEncodeArgs {
   displayAspect: Rational | null;
   codec: EncodeSettings["codec"];
   quality: number;
+  /** Whether the output carries the source's audio: the source has audio and the job keeps it. */
   hasAudio: boolean;
 }
 

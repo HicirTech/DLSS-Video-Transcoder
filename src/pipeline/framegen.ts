@@ -71,6 +71,8 @@ export interface FrameGenOptions {
   quality?: number;
   /** Output codec; default DEFAULT_ENCODE_SETTINGS.codec, which falls back to its CPU sibling when NVENC cannot start. */
   codec?: EncodeSettings["codec"];
+  /** Keep the source's audio track, when it has one; default DEFAULT_ENCODE_SETTINGS.copyAudio. */
+  copyAudio?: boolean;
   onProgress?: ProgressReporter;
   /** Cooperative cancellation (see cancel.ts): checked on every turn of the frame loop until the encode is finishing, which then completes. */
   signal?: AbortSignal;
@@ -282,9 +284,9 @@ async function planFrameGen(options: FrameGenOptions): Promise<FrameGenJob> {
 /** Starts the decoder and opens the encode sink, which owns the audio and the output file. */
 async function openEncodePipeline({ options, progress, ffmpeg, info, width, height, targetRate, output }: FrameGenJob) {
   const decoder = Bun.spawn([ffmpeg, ...decodeArgv({ input: options.input, source: info, output: { width, height } })], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
-  // Only re-open the source as a second input when it actually has audio to carry;
+  // Only re-open the source as a second input when its audio is carried;
   // otherwise ffmpeg needlessly demuxes/decodes the whole source again.
-  const wantAudio = info.hasAudio;
+  const wantAudio = info.hasAudio && (options.copyAudio ?? DEFAULT_ENCODE_SETTINGS.copyAudio);
   // Probed on the device the encode will use, FRAMEGEN_CUDA_DEVICE (framegen-plan.ts says why).
   const resolvedCodec = resolveEncodeCodec(options.codec ?? DEFAULT_ENCODE_SETTINGS.codec, ffmpeg, FRAMEGEN_CUDA_DEVICE);
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
