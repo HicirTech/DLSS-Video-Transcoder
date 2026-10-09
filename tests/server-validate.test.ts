@@ -139,6 +139,17 @@ describe("validateJobRequest", () => {
     expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS, container: "mkv" }, output: join(ROOT, "out.mkv") }))).toBeNull();
   });
 
+  test("Super Resolution takes a factor of at least 1, since DLSS SR only enlarges", () => {
+    const shrink = { ...DEFAULT_SCALE_SETTINGS, mode: "factor", factor: 0.5 };
+    expect(validateJobRequest(request({ engine: "sr", scale: shrink }))).toBe(
+      "Super Resolution only enlarges: scale.factor must be at least 1 for engine sr (got 0.5; 1 runs DLAA at the source size). Use nr or bypass to shrink.",
+    );
+    expect(validateJobRequest(request({ engine: "sr", scale: { ...shrink, factor: 1 } }))).toBeNull();
+    // Other engines shrink through ffmpeg, and frame generation ignores the scale.
+    expect(validateJobRequest(request({ engine: "nr", scale: shrink }))).toBeNull();
+    expect(validateJobRequest(request({ engine: "sr", scale: shrink, frameGen: { targetFps: "120" } }))).toBeNull();
+  });
+
   test("frameGen is rejected on an image job, which has no frames to interpolate", () => {
     expect(validateJobRequest(request({ kind: "image", input: "C:\\in.png", frameGen: { targetFps: "120" } }))).toMatch(/video jobs only/);
   });
