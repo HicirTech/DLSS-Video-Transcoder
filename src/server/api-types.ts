@@ -111,6 +111,12 @@ export const FRAME_GEN_CONTAINER: EncodeContainer = "mp4";
 /** Frame generation's output/source rate when neither a target rate nor a multiplier is given (2 = double the fps). */
 export const DEFAULT_FRAME_GEN_MULTIPLIER = 2;
 
+/**
+ * Whether an engine reads motion vectors: a video job computes optical flow only for one that does, and the
+ * UI offers the motion choice only then. A Record, so a new engine has to say.
+ */
+export const ENGINE_USES_MOTION: Record<EngineKind, boolean> = { sr: true, nr: false, bypass: false };
+
 /** Named frame-generation output rates, ascending; the pipeline's exact-rational FPS table uses the same names. */
 export const FRAME_GEN_FPS_CHOICES = ["23.976", "25", "29.97", "30", "50", "59.94", "60", "90", "119.88", "120", "144", "165", "180", "240", "360", "480"] as const;
 export type FrameGenFps = (typeof FRAME_GEN_FPS_CHOICES)[number];
