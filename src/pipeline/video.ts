@@ -7,7 +7,7 @@
  */
 import { existsSync } from "node:fs";
 import type { EncodeSettings, EngineKind, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
-import { DEFAULT_ENCODE_SETTINGS } from "../server/api-types.ts";
+import { DEFAULT_ENCODE_SETTINGS, ENGINE_USES_MOTION } from "../server/api-types.ts";
 import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine, type Engine } from "./engine.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
@@ -234,7 +234,7 @@ function openEngine({ options, session, upscaling, renderWidth, renderHeight, ta
   }
 }
 
-/** The per-frame guide, and the motion estimator behind it when the job asked for flow. */
+/** The per-frame guide, and the motion estimator behind it when the job asked for flow and its engine reads motion. */
 function createGuide(
   { options, progress, session, cudaOrdinal, renderWidth, renderHeight }: VideoJob,
   engine: Engine,
@@ -243,7 +243,9 @@ function createGuide(
   // must be called exactly once per frame and in decode order.
   const cuts = new SceneCutDetector(renderWidth, renderHeight);
   let estimator: ReturnType<typeof createMotionEstimator> | null = null;
-  if (options.motion === "flow") {
+  if (options.motion === "flow" && !ENGINE_USES_MOTION[options.engine]) {
+    progress(0, `optical flow: skipped, the ${options.engine} engine takes no motion vectors`);
+  } else if (options.motion === "flow") {
     try {
       const nvof = tryCreateNvofBackend(renderWidth, renderHeight, cudaOrdinal);
       estimator = createMotionEstimator(renderWidth, renderHeight, nvof.backend ? { backend: nvof.backend } : {});
