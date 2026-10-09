@@ -26,7 +26,7 @@ import { FeatureCommonInfo, NgxCore } from "./core.ts";
 import { prepareForwarderSync } from "./forwarder-runtime.ts";
 import { encodeMotionR16G16 } from "../pipeline/half-float.ts";
 import { NgxParam, NgxParameters } from "./params.ts";
-import { DEFAULT_SR_PRESET, DLSS_PRESET_PARAM, DlssCreateFlag, DlssRenderPreset, NGX_APPLICATION_ID, ngxCheck } from "./results.ts";
+import { DEFAULT_SR_PRESET, DLSS_PRESET_PARAM, DlssCreateFlag, DlssRenderPreset, NGX_APPLICATION_ID, ngxCheck, srOutputProblem } from "./results.ts";
 
 const UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
@@ -66,6 +66,9 @@ export class DlssSrSession {
   ) {}
 
   static open(session: GpuSession, opts: SrOptions): DlssSrSession {
+    // Named here, before anything is created: CreateFeature only answers InvalidParameter.
+    const sizeProblem = srOutputProblem({ width: opts.renderWidth, height: opts.renderHeight }, { width: opts.outputWidth, height: opts.outputHeight });
+    if (sizeProblem) throw new Error(sizeProblem);
     const appData = opts.appDataPath ?? APP_DATA_DIR;
     mkdirSync(appData, { recursive: true });
 
