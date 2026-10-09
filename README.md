@@ -64,13 +64,14 @@ command alike; the server stores uploads in its `uploads/` subfolder.
 
 ### Key options
 
-- **`sr`** — `--factor N` (2, 0.1–8; the output size snaps to the nearest DLSS mode: 1.00 DLAA,
-  1.50 MaxQuality, 1.72 Balanced, 2.00 MaxPerf, 3.00 UltraPerformance; a value of 1 or less runs DLAA at
-  the source size, and a value above 1 never snaps to DLAA), `--preset NAME` (L; model preset),
-  `--dlss-version VER`
+- **`sr`** — `--factor N` (2, 1–8; the output is the source size × N, each side rounded to even, as in
+  an image job, and at most 8192 pixels per side; DLSS runs in the mode whose ratio is nearest: 1.00 DLAA,
+  1.50 MaxQuality, 1.72 Balanced, 2.00 MaxPerf, 3.00 UltraPerformance), `--warmup N` (4, 0–64; extra passes
+  over the image, as an image job runs them), `--preset NAME` (L; model preset), `--dlss-version VER`;
+  writes `<input>.sr.png` by default
 - **`nr`** — `--intensity F` (1, 0–2; no further effect above 1), `--style N` (0; Default / Natural / Cinematic),
-  `--local-tone F` (1, 0–2), `--local-structure F` (1, 0–2), `--auto-mask`. `--preset`, `--skin-structure` and
-  `--ui-correction` are accepted but ignored by `nvngx_dlssnr.dll` 310.8.2.0.
+  `--local-tone F` (1, 0–2), `--local-structure F` (1, 0–2), `--auto-mask`, `--warmup N` (4, 0–64; as for
+  `sr`). `--preset`, `--skin-structure` and `--ui-correction` are accepted but ignored by `nvngx_dlssnr.dll` 310.8.2.0.
 - **`fg`** — `--fps RATE` (a named rate from 23.976 to 480, or an exact `num/den`; default: source fps
   × `--multiplier`), `--multiplier N` (2, whole number 1–16; used when `--fps` is absent),
   `--engine auto|native|cascade` (auto, see below), `--codec NAME` (NVENC when available, else
@@ -105,8 +106,8 @@ input.
 At **http://localhost:4080/** — no separate build step (Bun serves `web/index.html`).
 For front-end-only work: `bun run web/mock-server.ts` on port 3080, or append `?mock=1`.
 
-**Image tab** — PNG input only; SR upscale / Neural Rendering / bypass engine, DLSS version, output size,
-NR look controls, before/after compare.  
+**Image tab** — PNG input only; SR upscale / Neural Rendering / bypass engine, DLSS version, output size
+(SR only enlarges, to at most 8192 pixels per side), NR look controls, before/after compare.  
 **Video tab** — the same engines on video with output size, optical-flow motion for Super Resolution,
 and NVENC encoding (H.264, CQ 20 by default; the CPU encoder when NVENC cannot start) or CPU encoding;
 or Frame Generation to 23.976–480 fps (auto / native / cascade), which uses the codec, quality and
