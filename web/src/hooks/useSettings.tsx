@@ -28,7 +28,11 @@ export interface StoredSettings {
   adapterUuid: string | null;
 }
 
-export const STORAGE_KEY = "neural-render.settings.v1";
+export const STORAGE_KEY = "neural-render.settings.v2";
+
+/** Where builds with libx264 at quality 18 as the default encode kept these settings; read once, while STORAGE_KEY is empty. */
+const V1_STORAGE_KEY = "neural-render.settings.v1";
+const V1_DEFAULT_ENCODE = { codec: "h264", quality: 18 } as const;
 
 export function defaultSettings(): StoredSettings {
   return {
@@ -110,9 +114,22 @@ export function loadSettings(raw: string | null): StoredSettings {
   };
 }
 
-function readStorage(): string | null {
+/**
+ * The settings this browser saved: STORAGE_KEY's copy, or, the first time, the copy saved under
+ * V1_STORAGE_KEY. Every page load saved the whole set, so a v1 copy holds the old default encode pair
+ * whether or not anyone chose it; that pair moves to the current default, once.
+ */
+export function loadSavedSettings(current: string | null, v1: string | null): StoredSettings {
+  if (current !== null) return loadSettings(current);
+  const settings = loadSettings(v1);
+  const { codec, quality } = settings.encode;
+  if (codec !== V1_DEFAULT_ENCODE.codec || quality !== V1_DEFAULT_ENCODE.quality) return settings;
+  return { ...settings, encode: { ...settings.encode, codec: DEFAULT_ENCODE_SETTINGS.codec, quality: DEFAULT_ENCODE_SETTINGS.quality } };
+}
+
+function readStorage(key: string): string | null {
   try {
-    return localStorage.getItem(STORAGE_KEY);
+    return localStorage.getItem(key);
   } catch {
     return null;
   }
@@ -140,7 +157,7 @@ export interface SettingsStore {
 const SettingsContext = createContext<SettingsStore | null>(null);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<StoredSettings>(() => loadSettings(readStorage()));
+  const [settings, setSettings] = useState<StoredSettings>(() => loadSavedSettings(readStorage(STORAGE_KEY), readStorage(V1_STORAGE_KEY)));
 
   useEffect(() => {
     writeStorage(JSON.stringify(settings));
