@@ -2,14 +2,14 @@
  * DLSS Super Resolution frame engine: importing this module (as the worker does
  * when a job's engine is "sr") wires NGX feature 1 into `createEngine`.
  *
- * This is the one engine whose output size differs from its input. DLSS accepts
- * only a fixed set of render-to-output ratios, so the requested factor is snapped
- * to the nearest quality mode rather than honoured exactly.
+ * This is the one engine whose output size differs from its input. The output
+ * size is the job's own; only the DLSS quality mode is the one whose ratio is
+ * nearest (qualityForSizes), as for the sr command.
  */
 import { RUNTIME_DIR } from "../paths.ts";
 import { registerSrEngine, type Engine, type EngineOptions } from "../pipeline/engine.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
-import { qualityForFactor } from "./results.ts";
+import { qualityForSizes } from "./results.ts";
 import { DlssSrSession } from "./sr.ts";
 
 class SrEngine implements Engine {
@@ -27,13 +27,12 @@ class SrEngine implements Engine {
   ) {
     this.outputWidth = options.outputWidth ?? width;
     this.outputHeight = options.outputHeight ?? height;
-    const factor = this.outputWidth / width;
     this.sr = DlssSrSession.open(session, {
       renderWidth: width,
       renderHeight: height,
       outputWidth: this.outputWidth,
       outputHeight: this.outputHeight,
-      quality: qualityForFactor(factor),
+      quality: qualityForSizes(width, this.outputWidth),
       runtimeDir: options.runtimeDir ?? RUNTIME_DIR,
       dllDir: options.dllDir,
       appDataPath: options.appDataPath,
