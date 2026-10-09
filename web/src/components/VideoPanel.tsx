@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { Alert, Box, Button, Chip, FormControl, FormControlLabel, FormHelperText, InputLabel, Link, MenuItem, Select, Stack, Switch, Tooltip, Typography } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import type { EngineKind, FrameGenEngine, FrameGenFps, JobRequest, JobStatus, MotionKind, ToolsReport } from "../../../src/server/api-types";
-import { ENGINE_USES_MOTION, FFMPEG_SUPPLY_HINT, FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM } from "../../../src/server/api-types";
+import { ENGINE_USES_MOTION, FFMPEG_SUPPLY_HINT, FRAME_GEN_CONTAINER, FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM } from "../../../src/server/api-types";
 import { api } from "../api";
 import { useJobRunner } from "../hooks/useJobRunner";
 import { useSettings } from "../hooks/useSettings";
@@ -94,7 +94,8 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
       motion: ENGINE_USES_MOTION[engine] ? motion : "none",
       settings: settings.nr,
       scale: settings.scale,
-      encode: settings.encode,
+      // Frame generation writes one container; the stored choice comes back when it is switched off.
+      encode: frameGenOn ? { ...settings.encode, container: FRAME_GEN_CONTAINER } : settings.encode,
     };
     if (frameGenOn) request.frameGen = { targetFps, engine: fgEngine };
     // Frame generation picks its GPU in its host process (README, "Shared options"), so the stored GPU choice is left off it.
@@ -158,12 +159,13 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
           </FormControl>
         </Stack>
         <FormHelperText sx={{ mt: 1 }}>
-          DLSS Frame Generation to the chosen output rate; the result keeps the source duration and audio. Path Auto runs
+          DLSS Frame Generation to the chosen output rate; the result keeps the source duration, and its audio when Copy
+          source audio track is on below. Path Auto runs
           one native DLSSG session when output ÷ source is an exact integer the runtime supports ({FRAME_GEN_NATIVE_MAXIMUM})
           and, from 3× up, hardware-accelerated GPU scheduling (HAGS) is on; otherwise it chains 2× stages in memory (1
           stage for 2×, 2 for 4×, else 3 on an 8× grid) and places the nearest frame on each output instant. When the
           runtime generates nothing in a native multi-frame session, Auto falls back to the cascade by itself. Uses the
-          codec/quality below; the engine and output-size settings do not apply.
+          codec, quality and audio settings below and always writes MP4; the engine and output-size settings do not apply.
         </FormHelperText>
       </Section>
 
@@ -186,7 +188,11 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
       </Section>
 
       <Section title="Encoding">
-        <EncodeSettingsEditor value={settings.encode} onChange={setEncode} />
+        <EncodeSettingsEditor
+          value={settings.encode}
+          fixedContainer={frameGenOn ? { container: FRAME_GEN_CONTAINER, reason: "Frame generation always writes MP4" } : undefined}
+          onChange={setEncode}
+        />
       </Section>
 
       <Section
