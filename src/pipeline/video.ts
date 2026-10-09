@@ -7,7 +7,7 @@
  */
 import { existsSync } from "node:fs";
 import type { EncodeSettings, EngineKind, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
-import { DEFAULT_ENCODE_SETTINGS } from "../server/api-types.ts";
+import { DEFAULT_ENCODE_SETTINGS, ENGINE_USES_MOTION } from "../server/api-types.ts";
 import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine, type Engine } from "./engine.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
@@ -234,7 +234,7 @@ function openEngine({ options, session, upscaling, renderWidth, renderHeight, ta
   }
 }
 
-/** The per-frame guide, and the motion estimator behind it when the job asked for flow. */
+/** The per-frame guide, and the motion estimator behind it when the job asked for flow and its engine reads motion. */
 function createGuide(
   { options, progress, session, cudaOrdinal, renderWidth, renderHeight }: VideoJob,
   engine: Engine,
@@ -243,7 +243,9 @@ function createGuide(
   // must be called exactly once per frame and in decode order.
   const cuts = new SceneCutDetector(renderWidth, renderHeight);
   let estimator: ReturnType<typeof createMotionEstimator> | null = null;
-  if (options.motion === "flow") {
+  if (options.motion === "flow" && !ENGINE_USES_MOTION[options.engine]) {
+    progress(0, `optical flow: skipped, the ${options.engine} engine takes no motion vectors`);
+  } else if (options.motion === "flow") {
     try {
       const nvof = tryCreateNvofBackend(renderWidth, renderHeight, cudaOrdinal);
       estimator = createMotionEstimator(renderWidth, renderHeight, nvof.backend ? { backend: nvof.backend } : {});
@@ -293,13 +295,15 @@ async function runRawvideo(
   counts: FrameCounts,
 ): Promise<void> {
   // Fallback: raw RGBA out to ffmpeg, which does the encode.
+  const encoderArgv = encoderArgs(encode, cudaOrdinal);
+  progress(0, `encode: ${encoderArgv[encoderArgv.indexOf("-c:v") + 1]} via ffmpeg (single-thread rawvideo pipeline)`);
   const decoder = Bun.spawn([ffmpeg, ...decodeArgs], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const encoder = Bun.spawn(
     [
       ffmpeg, "-v", "error", "-y",
       "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${outWidth}x${outHeight}`, "-r", info.fpsText, "-i", "pipe:0",
       ...(wantAudio ? ["-i", options.input] : []),
-      "-map", "0:v:0", ...audioArgs(wantAudio, encode.container), ...encoderArgs(encode, cudaOrdinal), ...aspectArgs(info.displayAspect, outWidth, outHeight, null), ...faststartArgs(encode.container),
+      "-map", "0:v:0", ...audioArgs(wantAudio, encode.container), ...encoderArgv, ...aspectArgs(info.displayAspect, outWidth, outHeight, null), ...faststartArgs(encode.container),
       ...(wantAudio ? ["-shortest"] : []),
       output,
     ],

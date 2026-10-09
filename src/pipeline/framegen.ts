@@ -18,7 +18,7 @@
  * Ported from the reference project's frame_interpolation package.
  */
 import { existsSync } from "node:fs";
-import type { EncodeSettings, FrameGenEngine } from "../server/api-types.ts";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, type EncodeSettings, FRAME_GEN_CONTAINER, type FrameGenEngine } from "../server/api-types.ts";
 import { throwIfAborted } from "./cancel.ts";
 import { DlssgSession, probeDlssg } from "./dlssg.ts";
 import { motionFieldBytes } from "./dlssg-protocol.ts";
@@ -58,7 +58,7 @@ export interface FrameGenOptions {
    * `multiplier` when both are given.
    */
   targetFps?: string;
-  /** Convenience when `targetFps` is absent: output = source rate x multiplier (2 = double the fps). Default 2. */
+  /** Convenience when `targetFps` is absent: output = source rate x multiplier, a whole number (2 = double the fps). Default DEFAULT_FRAME_GEN_MULTIPLIER. */
   multiplier?: number;
   /**
    * auto: native multi-frame when the ratio is an exact integer the runtime
@@ -67,9 +67,12 @@ export interface FrameGenOptions {
    */
   engine?: FrameGenEngine;
   runtimeDir: string;
+  /** Default DEFAULT_ENCODE_SETTINGS.quality. */
   quality?: number;
-  /** Output codec; defaults to NVENC H.264 when available, else CPU libx264. */
+  /** Output codec; default DEFAULT_ENCODE_SETTINGS.codec, which falls back to its CPU sibling when NVENC cannot start. */
   codec?: EncodeSettings["codec"];
+  /** Keep the source's audio track, when it has one; default DEFAULT_ENCODE_SETTINGS.copyAudio. */
+  copyAudio?: boolean;
   onProgress?: ProgressReporter;
   /** Cooperative cancellation (see cancel.ts): checked on every turn of the frame loop until the encode is finishing, which then completes. */
   signal?: AbortSignal;
@@ -253,7 +256,7 @@ async function planFrameGen(options: FrameGenOptions): Promise<FrameGenJob> {
   const frames = info.frames;
   // The nominal CFR clock, not the measured average: planning needs exact ratios (30 -> 60 must be 2x).
   const sourceRate = parseRational(info.nominalFpsText);
-  const multiplier = Math.max(1, Math.round(options.multiplier ?? 2));
+  const multiplier = options.multiplier ?? DEFAULT_FRAME_GEN_MULTIPLIER;
   const targetRate = options.targetFps !== undefined ? resolveTargetRate(options.targetFps) : ratMul(sourceRate, rational(multiplier));
   const plan = chooseInterpolationPlan(sourceRate, targetRate, options.engine ?? "auto", nativeMultiplierMax, { cfr: true, hagsEnabled: caps.hagsEnabled });
   // Estimates for the progress report only; the exact output length is set
@@ -265,7 +268,7 @@ async function planFrameGen(options: FrameGenOptions): Promise<FrameGenJob> {
   const expectedDecoded = Math.max(1, Math.round(sourceSeconds * ratToNumber(sourceRate)));
   const estimatedOutput = Math.ceil(sourceSeconds * ratToNumber(targetRate));
   const expectsGeneration = plan.generatedPerInterval > 0;
-  const output = options.output ?? defaultOutputPath(options.input, "dlssg", ".mp4");
+  const output = options.output ?? defaultOutputPath(options.input, "dlssg", `.${FRAME_GEN_CONTAINER}`);
   // Read before anything can write there: it decides what the failure path may delete.
   const outputExisted = existsSync(output);
   const detail =
@@ -281,11 +284,11 @@ async function planFrameGen(options: FrameGenOptions): Promise<FrameGenJob> {
 /** Starts the decoder and opens the encode sink, which owns the audio and the output file. */
 async function openEncodePipeline({ options, progress, ffmpeg, info, width, height, targetRate, output }: FrameGenJob) {
   const decoder = Bun.spawn([ffmpeg, ...decodeArgv({ input: options.input, source: info, output: { width, height } })], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
-  // Only re-open the source as a second input when it actually has audio to carry;
+  // Only re-open the source as a second input when its audio is carried;
   // otherwise ffmpeg needlessly demuxes/decodes the whole source again.
-  const wantAudio = info.hasAudio;
+  const wantAudio = info.hasAudio && (options.copyAudio ?? DEFAULT_ENCODE_SETTINGS.copyAudio);
   // Probed on the device the encode will use, FRAMEGEN_CUDA_DEVICE (framegen-plan.ts says why).
-  const resolvedCodec = resolveEncodeCodec(options.codec ?? "h264_nvenc", ffmpeg, FRAMEGEN_CUDA_DEVICE);
+  const resolvedCodec = resolveEncodeCodec(options.codec ?? DEFAULT_ENCODE_SETTINGS.codec, ffmpeg, FRAMEGEN_CUDA_DEVICE);
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
 
   let sink: EncodeSink;
@@ -302,7 +305,7 @@ async function openEncodePipeline({ options, progress, ffmpeg, info, width, heig
         // DAR -- not its sample aspect -- is what the output must be tagged with.
         displayAspect: info.displayAspect,
         codec: resolvedCodec.codec,
-        quality: options.quality ?? 20,
+        quality: options.quality ?? DEFAULT_ENCODE_SETTINGS.quality,
         hasAudio: wantAudio,
       }),
     );

@@ -102,7 +102,7 @@ describe("validateJobRequest", () => {
 
   test("frameGen needs a rate and takes a known engine", () => {
     expect(validateJobRequest(request({ frameGen: {} }))).toMatch(/needs targetFps or multiplier/);
-    expect(validateJobRequest(request({ frameGen: { multiplier: 0 } }))).toMatch(/frameGen\.multiplier must be a finite number of at least 1/);
+    expect(validateJobRequest(request({ frameGen: { multiplier: 0 } }))).toBe("frameGen.multiplier must be between 1 and 16 (got 0).");
     expect(validateJobRequest(request({ frameGen: { targetFps: 120 } }))).toMatch(/frameGen\.targetFps must be a string/);
     expect(validateJobRequest(request({ frameGen: { targetFps: "120", engine: "warp" } }))).toMatch(/frameGen\.engine must be one of auto, native, cascade/);
     expect(validateJobRequest(request({ frameGen: "fast" }))).toMatch(/frameGen must be an object/);
@@ -117,6 +117,26 @@ describe("validateJobRequest", () => {
     expect(validateJobRequest(request({ frameGen: { targetFps: "toString" } }))).toMatch(/not a rate this build can produce/);
     expect(validateJobRequest(request({ frameGen: { targetFps: "120" } }))).toBeNull();
     expect(validateJobRequest(request({ frameGen: { targetFps: "60000/1001" } }))).toBeNull();
+  });
+
+  test("frameGen.multiplier is a whole number from 1 to 16, the range the CLI takes", () => {
+    expect(validateJobRequest(request({ frameGen: { multiplier: 2.5 } }))).toBe("frameGen.multiplier must be a whole number between 1 and 16.");
+    expect(validateJobRequest(request({ frameGen: { multiplier: 17 } }))).toBe("frameGen.multiplier must be between 1 and 16 (got 17).");
+    expect(validateJobRequest(request({ frameGen: { multiplier: 16 } }))).toBeNull();
+    expect(validateJobRequest(request({ frameGen: { multiplier: 1 } }))).toBeNull();
+  });
+
+  test("frameGen writes mp4 only, so another container or output extension is refused", () => {
+    const frameGen = { targetFps: "120" };
+    expect(validateJobRequest(request({ frameGen, encode: { ...DEFAULT_ENCODE_SETTINGS, container: "mkv" } }))).toBe(
+      'Frame generation writes mp4 only; set encode.container to "mp4" (got "mkv").',
+    );
+    expect(validateJobRequest(request({ frameGen, output: join(ROOT, "out.mov") }))).toBe(
+      "Frame generation writes mp4 only; give the output path a .mp4 extension or omit it.",
+    );
+    expect(validateJobRequest(request({ frameGen, encode: { ...DEFAULT_ENCODE_SETTINGS }, output: join(ROOT, "out.MP4") }))).toBeNull();
+    // Without frame generation the container stays free.
+    expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS, container: "mkv" }, output: join(ROOT, "out.mkv") }))).toBeNull();
   });
 
   test("frameGen is rejected on an image job, which has no frames to interpolate", () => {

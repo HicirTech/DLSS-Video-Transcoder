@@ -1,10 +1,12 @@
 import { useId } from "react";
-import { FormControl, FormControlLabel, InputLabel, MenuItem, Select, Stack, Switch } from "@mui/material";
+import { FormControl, FormControlLabel, FormHelperText, InputLabel, MenuItem, Select, Stack, Switch } from "@mui/material";
 import { DEFAULT_ENCODE_SETTINGS, ENCODE_CODECS, ENCODE_CONTAINERS, SETTING_RANGES, type EncodeSettings } from "../../../src/server/api-types";
 import { NumberField } from "./NumberField";
 
 interface EncodeSettingsEditorProps {
   value: EncodeSettings;
+  /** A container the job is going to write whatever is stored, shown locked with the reason. */
+  fixedContainer?: { container: EncodeSettings["container"]; reason: string };
   onChange: (next: EncodeSettings) => void;
 }
 
@@ -19,7 +21,7 @@ const CODEC_LABELS: Record<EncodeSettings["codec"], string> = {
 };
 const CONTAINER_LABELS: Record<EncodeSettings["container"], string> = { mp4: "MP4", mkv: "MKV", mov: "MOV" };
 
-export function EncodeSettingsEditor({ value, onChange }: EncodeSettingsEditorProps) {
+export function EncodeSettingsEditor({ value, fixedContainer, onChange }: EncodeSettingsEditorProps) {
   const codecLabelId = useId();
   const containerLabelId = useId();
   const update = (patch: Partial<EncodeSettings>): void => onChange({ ...value, ...patch });
@@ -50,12 +52,12 @@ export function EncodeSettingsEditor({ value, onChange }: EncodeSettingsEditorPr
         sx={{ width: 240 }}
         onChange={(quality) => update({ quality })}
       />
-      <FormControl sx={{ minWidth: 120 }}>
+      <FormControl sx={{ minWidth: 120 }} disabled={fixedContainer !== undefined}>
         <InputLabel id={containerLabelId}>Container</InputLabel>
         <Select<EncodeSettings["container"]>
           labelId={containerLabelId}
           label="Container"
-          value={value.container}
+          value={fixedContainer?.container ?? value.container}
           onChange={(event) => update({ container: event.target.value })}
         >
           {ENCODE_CONTAINERS.map((container) => (
@@ -64,6 +66,7 @@ export function EncodeSettingsEditor({ value, onChange }: EncodeSettingsEditorPr
             </MenuItem>
           ))}
         </Select>
+        {fixedContainer ? <FormHelperText>{fixedContainer.reason}</FormHelperText> : null}
       </FormControl>
       <FormControlLabel
         sx={{ ml: 0, mt: 0.5 }}

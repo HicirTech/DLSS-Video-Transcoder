@@ -3,8 +3,8 @@
  * positional-argument parser which flags consume a following value token.
  */
 import { DEFAULT_SR_PRESET, DLSS_RATIO, perfQualityName } from "../ngx/results.ts";
-import { FFMPEG_NVENC_ENCODERS, isNvenc } from "../pipeline/encode-select.ts";
-import { DEFAULT_NR_SETTINGS, ENCODE_CODECS, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, SETTING_RANGES } from "../server/api-types.ts";
+import { cpuSiblingCodec, FFMPEG_NVENC_ENCODERS, isNvenc } from "../pipeline/encode-select.ts";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, ENCODE_CODECS, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, SETTING_RANGES } from "../server/api-types.ts";
 
 interface OptionSpec {
   /** As typed on the command line, e.g. "--factor N" or "--json". */
@@ -31,8 +31,8 @@ function settingRange(field: keyof typeof SETTING_RANGES): string {
 /** `sr --factor`: the range the option accepts and the factor used when it is absent. */
 export const SR_FACTOR_OPTION = { min: 0.1, max: 8, fallback: 2 } as const;
 
-/** `fg --multiplier`: whole numbers only; 16 is the top of the FPS table's reach from a 30 fps source (480). */
-export const FG_MULTIPLIER_OPTION = { min: 1, max: 16, integer: true, fallback: 2 } as const;
+/** `fg --multiplier`: the range the API validates frameGen.multiplier against, and the multiplier used when it is absent. */
+export const FG_MULTIPLIER_OPTION = { ...SETTING_RANGES.multiplier, fallback: DEFAULT_FRAME_GEN_MULTIPLIER } as const;
 
 export const RUNTIME_OPT: OptionSpec = { flag: "--runtime DIR", desc: "runtime folder holding the NGX DLLs", def: "<repo>/runtime" };
 export const ADAPTER_OPT: OptionSpec = { flag: "--adapter N", desc: "GPU adapter index as `probe` listed it in this session (DXGI indices can change between runs); the adapter must have a CUDA device. auto = the NVIDIA adapter with the most VRAM that has one", def: "auto" };
@@ -114,8 +114,8 @@ export const COMMANDS: readonly CommandSpec[] = [
       { flag: "--fps RATE", desc: `output frame rate: ${FRAME_GEN_FPS_CHOICES.join(", ")}, or an exact num/den; overrides --multiplier`, def: "source fps x --multiplier" },
       { flag: "--multiplier N", desc: `output/input frame ratio when --fps is not given, a whole number from ${FG_MULTIPLIER_OPTION.min} to ${FG_MULTIPLIER_OPTION.max} (2 = double fps)`, def: String(FG_MULTIPLIER_OPTION.fallback) },
       { flag: "--engine MODE", desc: `auto = one native session when output/source is an exact integer from 2 up to ${FRAME_GEN_NATIVE_MAXIMUM} (3x and above only with HAGS on), else a cascade of 2x stages; when the runtime disables every interval of a native 3x+ session, auto re-runs it as a cascade; native or cascade force that path`, def: "auto" },
-      { flag: "--codec NAME", desc: `encoder: ${ENCODE_CODECS.filter((codec) => !isNvenc(codec)).join(", ")}, or ${FFMPEG_NVENC_ENCODERS.join("/")} for GPU`, def: "GPU NVENC when available, else libx264" },
-      { flag: "--quality N", desc: `encoder quality (CRF for CPU, CQ for NVENC), ${settingRange("quality")} (lower = better)`, def: "20" },
+      { flag: "--codec NAME", desc: `encoder: ${ENCODE_CODECS.filter((codec) => !isNvenc(codec)).join(", ")}, or ${FFMPEG_NVENC_ENCODERS.join("/")} for GPU`, def: `${DEFAULT_ENCODE_SETTINGS.codec}, or ${cpuSiblingCodec(DEFAULT_ENCODE_SETTINGS.codec)} when NVENC cannot start` },
+      { flag: "--quality N", desc: `encoder quality (CRF for CPU, CQ for NVENC), ${settingRange("quality")} (lower = better)`, def: String(DEFAULT_ENCODE_SETTINGS.quality) },
       RUNTIME_OPT,
     ],
     notes: ["A target at or below the source frame rate (--multiplier 1, or a lower --fps) generates no frames: the video is only resampled to it."],

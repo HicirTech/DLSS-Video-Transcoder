@@ -91,6 +91,7 @@ async function run(message: RunMessage): Promise<void> {
         engine: request.frameGen.engine,
         quality: request.encode?.quality,
         codec: request.encode?.codec,
+        copyAudio: request.encode?.copyAudio,
         runtimeDir: message.runtimeDir,
         signal: jobCancellation.signal,
         onFinishing,

@@ -107,10 +107,10 @@ For front-end-only work: `bun run web/mock-server.ts` on port 3080, or append `?
 
 **Image tab** — PNG input only; SR upscale / Neural Rendering / bypass engine, DLSS version, output size,
 NR look controls, before/after compare.  
-**Video tab** — the same engines on video with optical-flow motion, output size, CPU or NVENC encoding;
-or Frame Generation to 23.976–480 fps (auto / native / cascade), which uses only the codec and quality
-of the encoding settings, always writes an mp4 and ignores the engine, motion, size and
-neural-rendering settings.  
+**Video tab** — the same engines on video with output size, optical-flow motion for Super Resolution,
+and NVENC encoding (H.264, CQ 20 by default; the CPU encoder when NVENC cannot start) or CPU encoding;
+or Frame Generation to 23.976–480 fps (auto / native / cascade), which uses the codec, quality and
+audio settings, always writes an mp4 and ignores the engine, motion, size and neural-rendering settings.  
 **Jobs tab** — live job list with progress, log tail and cancel.  
 **Settings tab** — GPU for image and video jobs (stored by CUDA device UUID; frame generation ignores
 it), temporal warm-up (0–64 frames, default 4), stored settings reset.  
@@ -176,8 +176,8 @@ The driver's NGX core `_nvngx.dll` is loaded from the installed driver, never co
 | DLSS version enumeration / selection | ✅ `versions` + `--dlss-version` | ✅ (picker) |
 | Browser file upload | — | ✅ (POST /api/upload) |
 | NR look controls | ✅ (`nr`) | ✅ |
-| NVENC GPU encode | ✅ (`fg` default when available) | ✅ if selected |
-| GPU optical flow (NVOFA) | ✅ (fg motion) | ✅ |
+| NVENC GPU encode | ✅ (`fg` default when available) | ✅ (default when available) |
+| GPU optical flow (NVOFA) | ✅ (fg motion) | ✅ (SR motion) |
 | RTX Video Super Resolution / TrueHDR | ❌ | ❌ (not implemented) |
 
 ## License
