@@ -4,13 +4,13 @@ import { decodePng } from "../codec/png/decode.ts";
 import { encodePng } from "../codec/png/encode.ts";
 import { buildRuntimeCatalog } from "../ngx/runtime-catalog.ts";
 import { DlssSrSession } from "../ngx/sr.ts";
-import { DEFAULT_SR_PRESET, DlssRenderPreset, DLSS_RATIO, perfQualityName, qualityForFactor } from "../ngx/results.ts";
+import { DEFAULT_SR_PRESET, DlssRenderPreset, perfQualityName, qualityForSizes, srOutputProblem } from "../ngx/results.ts";
 import { describeGpu, openGpu } from "../pipeline/gpu.ts";
-import { enhanceStill } from "../pipeline/image.ts";
+import { enhanceStill, resolveTargetSize, runStillPasses } from "../pipeline/image.ts";
 import { defaultOutputPath } from "../pipeline/output-path.ts";
-import { evenSize } from "../pipeline/resize.ts";
+import { DEFAULT_SCALE_SETTINGS } from "../server/api-types.ts";
 import { adapterOption, numberOption, option, positionalArgs, runtimeDirOption } from "./args.ts";
-import { commandSpec, SR_FACTOR_OPTION } from "./commands.ts";
+import { commandSpec, SR_FACTOR_OPTION, WARMUP_OPTION } from "./commands.ts";
 import { usageError } from "./usage-error.ts";
 
 export async function srCommand(args: string[]): Promise<void> {
@@ -24,16 +24,15 @@ export async function srCommand(args: string[]): Promise<void> {
   }
   const image = decodePng(bytes);
   const factor = numberOption(args, "--factor", SR_FACTOR_OPTION);
-  const quality = qualityForFactor(factor);
+  const warmupFrames = numberOption(args, "--warmup", WARMUP_OPTION);
   const presetKey = presetKeyOption(args);
   const preset = DlssRenderPreset[presetKey];
-  // The output size must follow the chosen PerfQuality mode's fixed ratio rather than
-  // the raw --factor: a render/output ratio that disagrees with the mode risks
-  // CreateFeature failure or artifacts.
-  const snappedRatio = DLSS_RATIO[quality];
-  const outputWidth = evenSize(image.width * snappedRatio);
-  const outputHeight = evenSize(image.height * snappedRatio);
-  const output = positional[1] ?? defaultOutputPath(input, "dlss", ".png");
+  // An image job's size rule, so the command and a job write the same size from the same factor.
+  const target = resolveTargetSize(image.width, image.height, { ...DEFAULT_SCALE_SETTINGS, mode: "factor", factor });
+  const sizeProblem = srOutputProblem(image, target);
+  if (sizeProblem) usageError(sizeProblem, "sr");
+  const quality = qualityForSizes(image.width, target.width);
+  const output = positional[1] ?? defaultOutputPath(input, "sr", ".png");
 
   const runtimeDir = runtimeDirOption(args);
   const dllDir = dllDirOption(args, runtimeDir);
@@ -44,20 +43,23 @@ export async function srCommand(args: string[]): Promise<void> {
   const sr = DlssSrSession.open(session, {
     renderWidth: image.width,
     renderHeight: image.height,
-    outputWidth,
-    outputHeight,
+    outputWidth: target.width,
+    outputHeight: target.height,
     quality,
     preset,
     runtimeDir,
     dllDir,
   });
-  const enhanced = await enhanceStill(image, (colour) => ({ rgba: sr.evaluate(colour, true), width: outputWidth, height: outputHeight }));
+  const enhanced = await enhanceStill(image, async (colour) => ({
+    rgba: await runStillPasses("sr", warmupFrames, (reset) => sr.evaluate(colour, reset)),
+    width: target.width,
+    height: target.height,
+  }));
   await Bun.write(output, encodePng(enhanced, { level: 6 }));
   sr.close();
-  // The mode name and the ratio it snapped to, not the PerfQuality index: the
-  // index is meaningless to a user and its order is counter-intuitive (0 is the
-  // fastest mode, not the best), while the ratio is what --factor became.
-  console.log(`DLSS SR: ${image.width}x${image.height} -> ${outputWidth}x${outputHeight} (${perfQualityName(quality)} ${snappedRatio.toFixed(2)}x, preset ${presetKey}) in ${(performance.now() - started).toFixed(1)} ms`);
+  // The mode name, not the PerfQuality index: the index is meaningless to a user
+  // and its order is counter-intuitive (0 is the fastest mode, not the best).
+  console.log(`DLSS SR: ${image.width}x${image.height} -> ${target.width}x${target.height} (${perfQualityName(quality)} mode, preset ${presetKey}, ${warmupFrames + 1} passes) in ${(performance.now() - started).toFixed(1)} ms`);
   console.log(`wrote ${output}`);
   // The driver core's Shutdown1 is skipped; exit the process to reclaim NGX.
   process.exit(0);
