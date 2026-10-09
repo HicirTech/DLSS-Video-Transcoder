@@ -102,6 +102,16 @@ function checkFrameGen(v: Record<string, unknown>): string | null {
   return null;
 }
 
+/**
+ * DLSS SR only enlarges: an output smaller than the source fails CreateFeature (srOutputProblem), so an sr
+ * factor below 1 is refused before the job queues. Frame generation ignores the engine and scale settings.
+ */
+function checkSrFactor(v: Record<string, unknown>): string | null {
+  if (v.engine !== "sr" || v.frameGen !== undefined || !isObject(v.scale) || v.scale.mode !== "factor") return null;
+  if (typeof v.scale.factor !== "number" || v.scale.factor >= 1) return null;
+  return `Super Resolution only enlarges: scale.factor must be at least 1 for engine sr (got ${v.scale.factor}; 1 runs DLAA at the source size). Use nr or bypass to shrink.`;
+}
+
 /** Frame generation writes FRAME_GEN_CONTAINER only, so a request must not ask for another container or extension. */
 function checkFrameGenOutput(v: Record<string, unknown>): string | null {
   if (isObject(v.encode) && v.encode.container !== FRAME_GEN_CONTAINER) {
@@ -147,6 +157,7 @@ export function validateJobRequest(value: unknown): string | null {
   const problem = first(
     checkNrSettings(v.settings),
     checkScale(v.scale),
+    checkSrFactor(v),
     v.encode === undefined ? null : isObject(v.encode) ? checkEncode(v.encode) : "encode must be an object when present.",
     // A still image has no frames to interpolate between, and the image worker
     // never reads frameGen, so accepting it would silently drop the request.
