@@ -148,7 +148,8 @@ export function MotionSelect({ value, disabled, onChange }: MotionSelectProps) {
       </Select>
       <FormHelperText>
         Optical flow estimates motion between frames for steadier temporal results — using the GPU hardware
-        flow engine (NVOFA) when available, otherwise a slower CPU estimator.
+        flow engine (NVOFA) when available, otherwise a slower CPU estimator. Super Resolution only: Neural
+        Rendering and bypass take no motion vectors.
       </FormHelperText>
     </FormControl>
   );
