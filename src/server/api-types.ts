@@ -105,6 +105,12 @@ export interface EncodeSettings {
 
 export const DEFAULT_ENCODE_SETTINGS: EncodeSettings = { codec: "h264", quality: 18, container: "mp4", copyAudio: true };
 
+/** The one container frame generation writes: its mux sets MP4's track timescale and +faststart (framegen-encode-sink.ts). */
+export const FRAME_GEN_CONTAINER: EncodeContainer = "mp4";
+
+/** Frame generation's output/source rate when neither a target rate nor a multiplier is given (2 = double the fps). */
+export const DEFAULT_FRAME_GEN_MULTIPLIER = 2;
+
 /** Named frame-generation output rates, ascending; the pipeline's exact-rational FPS table uses the same names. */
 export const FRAME_GEN_FPS_CHOICES = ["23.976", "25", "29.97", "30", "50", "59.94", "60", "90", "119.88", "120", "144", "165", "180", "240", "360", "480"] as const;
 export type FrameGenFps = (typeof FRAME_GEN_FPS_CHOICES)[number];
@@ -162,6 +168,8 @@ export const SETTING_RANGES = {
   width: { min: 16, max: 16384, integer: true },
   height: { min: 16, max: 16384, integer: true },
   quality: { min: 0, max: 51, integer: true },
+  // 16 is as far as the frame-generation rate table reaches from a 30 fps source (480 fps).
+  multiplier: { min: 1, max: 16, integer: true },
 } as const;
 
 /** `value` held inside the range of a numeric setting, rounded first when that setting only takes whole numbers. */
@@ -184,13 +192,14 @@ export interface JobRequest {
   /**
    * Video only. When set, the job runs DLSS Frame Generation (interpolate to a
    * higher frame rate) instead of the per-frame engine. The per-frame engine and
-   * scale settings are ignored in this mode. Give either `targetFps` or
-   * `multiplier` (targetFps wins when both are present).
+   * scale settings are ignored in this mode; encode applies except its container,
+   * which has to be FRAME_GEN_CONTAINER, as does an explicit output's extension.
+   * Give either `targetFps` or `multiplier` (targetFps wins when both are present).
    */
   frameGen?: {
     /** One of FRAME_GEN_FPS_CHOICES, or an exact "num/den" rate such as "60000/1001". */
     targetFps?: string;
-    /** Convenience ratio when targetFps is absent: output = source rate x multiplier (2 = double the fps). */
+    /** Convenience ratio when targetFps is absent: output = source rate x multiplier (2 = double the fps), a whole number within SETTING_RANGES.multiplier. */
     multiplier?: number;
     /**
      * auto (default): one native DLSSG session when target/source is an exact integer from 2 up to
