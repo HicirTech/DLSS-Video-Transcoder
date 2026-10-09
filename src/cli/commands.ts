@@ -2,7 +2,7 @@
  * The CLI's command table, the single source of truth: it renders the help *and* tells the
  * positional-argument parser which flags consume a following value token.
  */
-import { DEFAULT_SR_PRESET, DLSS_RATIO, perfQualityName } from "../ngx/results.ts";
+import { DEFAULT_SR_PRESET, DLSS_RATIO, DLSS_SR_MAX_OUTPUT_SIDE, perfQualityName } from "../ngx/results.ts";
 import { cpuSiblingCodec, FFMPEG_NVENC_ENCODERS, isNvenc } from "../pipeline/encode-select.ts";
 import { DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, ENCODE_CODECS, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, SETTING_RANGES } from "../server/api-types.ts";
 
@@ -28,8 +28,12 @@ function settingRange(field: keyof typeof SETTING_RANGES): string {
   return `${min}..${max}`;
 }
 
-/** `sr --factor`: the range the option accepts and the factor used when it is absent. */
-export const SR_FACTOR_OPTION = { min: 0.1, max: 8, fallback: 2 } as const;
+/** `sr --factor`: from 1, since DLSS SR only enlarges, up to the API's SETTING_RANGES.factor; and the factor used when it is absent. */
+export const SR_FACTOR_OPTION = { min: 1, max: SETTING_RANGES.factor.max, fallback: 2 } as const;
+
+/** `sr` / `nr --warmup`: the extra passes an image job runs over a still, with the job's range and default. */
+export const WARMUP_OPTION = { ...SETTING_RANGES.warmupFrames, fallback: DEFAULT_NR_SETTINGS.warmupFrames } as const;
+const WARMUP_OPT: OptionSpec = { flag: "--warmup N", desc: `extra passes over the same image so the temporal state settles, as an image job runs them, ${settingRange("warmupFrames")}`, def: String(WARMUP_OPTION.fallback) };
 
 /** `fg --multiplier`: the range the API validates frameGen.multiplier against, and the multiplier used when it is absent. */
 export const FG_MULTIPLIER_OPTION = { ...SETTING_RANGES.multiplier, fallback: DEFAULT_FRAME_GEN_MULTIPLIER } as const;
@@ -71,10 +75,11 @@ export const COMMANDS: readonly CommandSpec[] = [
     usage: "bun run src/cli.ts sr <input.png> [output.png] [options]",
     args: [
       { name: "input.png", desc: "source image (PNG only)" },
-      { name: "output.png", desc: "destination; defaults to <input>.dlss.png next to the input" },
+      { name: "output.png", desc: "destination; defaults to <input>.sr.png next to the input, the name an image job gives it" },
     ],
     options: [
-      { flag: "--factor N", desc: `upscale factor ${SR_FACTOR_OPTION.min}..${SR_FACTOR_OPTION.max}, snapped to the nearest fixed DLSS mode (${srModeList()}); a value of 1 or less runs DLAA at the source size, and a value above 1 never snaps to DLAA`, def: String(SR_FACTOR_OPTION.fallback) },
+      { flag: "--factor N", desc: `upscale factor ${SR_FACTOR_OPTION.min}..${SR_FACTOR_OPTION.max}: the output is the source size times N, each side rounded to even, as in an image job, and at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side; DLSS runs in the mode whose ratio is nearest (${srModeList()}), and 1 runs DLAA`, def: String(SR_FACTOR_OPTION.fallback) },
+      WARMUP_OPT,
       { flag: "--preset NAME", desc: "render preset: Default, A-F or J-O; the installed nvngx_dlss.dll decides which model each selects", def: DEFAULT_SR_PRESET },
       { flag: "--dlss-version VER", desc: "use a specific installed SR DLL version (prefix match ok); list them with `versions`", def: "bundled runtime DLL" },
       RUNTIME_OPT,
@@ -98,6 +103,7 @@ export const COMMANDS: readonly CommandSpec[] = [
       { flag: "--skin-structure F", desc: `detail strength on skin regions (float), ${settingRange("skinStructure")}; ${DEFAULT_NR_SETTINGS.skinStructure} = runtime default; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.skinStructure) },
       { flag: "--auto-mask", desc: "let the runtime derive the processed-region mask instead of the whole frame", def: "off" },
       { flag: "--ui-correction", desc: `protect overlays / text / sharp UI edges from being re-rendered; ${NR_IGNORED_NOTE}`, def: "off" },
+      WARMUP_OPT,
       RUNTIME_OPT,
       ADAPTER_OPT,
     ],
