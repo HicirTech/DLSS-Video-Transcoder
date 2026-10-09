@@ -2,6 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_ENCODE_SETTINGS,
+  DEFAULT_FRAME_GEN_MULTIPLIER,
   DEFAULT_NR_SETTINGS,
   DEFAULT_SCALE_SETTINGS,
   ENCODE_CODECS,
@@ -30,6 +31,7 @@ describe("defaults", () => {
     width: DEFAULT_SCALE_SETTINGS.width,
     height: DEFAULT_SCALE_SETTINGS.height,
     quality: DEFAULT_ENCODE_SETTINGS.quality,
+    multiplier: DEFAULT_FRAME_GEN_MULTIPLIER,
   } satisfies Record<keyof typeof SETTING_RANGES, number>;
 
   test("every numeric default sits inside the range the API enforces", () => {
