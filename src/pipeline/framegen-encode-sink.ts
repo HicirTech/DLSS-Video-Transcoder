@@ -4,7 +4,7 @@
  * overlaps the rest of the pipeline, bounded so a fast producer cannot buy
  * throughput with unbounded memory.
  */
-import type { EncodeSettings } from "../server/api-types.ts";
+import { type EncodeSettings, FRAME_GEN_CONTAINER } from "../server/api-types.ts";
 import { aspectArgs, audioArgs, encoderArgs, faststartArgs, muxCopyArgs } from "./ffmpeg-args.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "./framegen-plan.ts";
 import { formatRational, type Rational } from "./rational.ts";
@@ -58,16 +58,16 @@ export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): FramegenEncod
     nvencArgs: nativeTarget
       ? muxCopyArgs({
           demux: nativeTarget.demux, frameRate: outputRate, audioSource: hasAudio ? input : null,
-          container: "mp4", displayAspect, size: { width, height }, extra: timescale, output,
+          container: FRAME_GEN_CONTAINER, displayAspect, size: { width, height }, extra: timescale, output,
         })
       : [],
     rawArgs: [
       "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`,
-      "-framerate", outputRate, "-i", "pipe:0", ...inputsAndMap, ...audioArgs(hasAudio, "mp4"),
+      "-framerate", outputRate, "-i", "pipe:0", ...inputsAndMap, ...audioArgs(hasAudio, FRAME_GEN_CONTAINER),
       // The device is fixed for frame generation; FRAMEGEN_CUDA_DEVICE says which and why.
-      ...encoderArgs({ codec, quality, container: "mp4", copyAudio: true }, FRAMEGEN_CUDA_DEVICE),
+      ...encoderArgs({ codec, quality, container: FRAME_GEN_CONTAINER, copyAudio: true }, FRAMEGEN_CUDA_DEVICE),
       ...aspectArgs(displayAspect, width, height, null),
-      ...timescale, ...faststartArgs("mp4"), output,
+      ...timescale, ...faststartArgs(FRAME_GEN_CONTAINER), output,
     ],
     nvenc: nativeTarget
       ? { width, height, fpsNum: Number(targetRate.num), fpsDen: Number(targetRate.den), codec: nativeTarget.codec, cq: quality }
