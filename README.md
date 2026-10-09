@@ -162,6 +162,7 @@ runtime/
   dlss/nvngx_dlss.dll     DLSS Super Resolution   (feature 1)   for sr
   dlssnr/nvngx_dlssnr.dll DLSS Neural Rendering   (feature 18)  for nr; the probe's readiness check
   dlssg/nvngx_dlssg.dll   DLSS Frame Generation   (feature 11)  for fg
+  dlssd/nvngx_dlssd.dll   DLSS Ray Reconstruction (feature 13)  optional: listed by versions, never run
   ffmpeg/bin/{ffmpeg,ffprobe}.exe                               for video, if not on PATH
 ```
 
@@ -180,6 +181,11 @@ The driver's NGX core `_nvngx.dll` is loaded from the installed driver, never co
 | NVENC GPU encode | ✅ (`fg` default when available) | ✅ (default when available) |
 | GPU optical flow (NVOFA) | ✅ (fg motion) | ✅ (SR motion) |
 | RTX Video Super Resolution / TrueHDR | ❌ | ❌ (not implemented) |
+| DLSS Ray Reconstruction (feature 13) | ❌ (listed by `versions`) | ❌ (listed in the version catalog) |
+
+Ray Reconstruction denoises a game's ray-traced frame using what the game renders alongside it (depth,
+normals, albedo, roughness, motion vectors); a video or a PNG carries none of that, so its DLL is listed
+and the probe reports whether the driver supports it, but nothing runs it.
 
 ## License
 
