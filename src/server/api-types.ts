@@ -103,7 +103,11 @@ export interface EncodeSettings {
   copyAudio: boolean;
 }
 
-export const DEFAULT_ENCODE_SETTINGS: EncodeSettings = { codec: "h264", quality: 18, container: "mp4", copyAudio: true };
+/**
+ * NVENC by default, so a job takes a GPU encode path; a job whose GPU cannot run NVENC falls back to the CPU
+ * sibling with a note (resolveEncodeCodec). Quality 20 is CQ 20 for NVENC, CRF 20 after that fallback.
+ */
+export const DEFAULT_ENCODE_SETTINGS: EncodeSettings = { codec: "h264_nvenc", quality: 20, container: "mp4", copyAudio: true };
 
 /** The one container frame generation writes: its mux sets MP4's track timescale and +faststart (framegen-encode-sink.ts). */
 export const FRAME_GEN_CONTAINER: EncodeContainer = "mp4";
