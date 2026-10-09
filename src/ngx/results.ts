@@ -175,7 +175,8 @@ export function perfQualityName(value: number): string {
  * Quality 66%). MaxQuality is NVIDIA's Quality and MaxPerf its Performance; 1.5
  * and 3.0 are the inverses of 2/3 and 1/3, 1.7241379 is 1/0.58, and DLAA
  * renders at the output size. The runtime's own GetOptimalSettings callback is
- * never queried, so these are the only ratios used.
+ * never queried: an output of the source size times the requested factor renders
+ * at the source size, and these ratios only pick the mode (qualityForFactor).
  *
  * PerfQuality 4 (UltraQuality) is deliberately absent: nvngx_dlss.dll 310.7.129.0
  * refuses CreateFeature with UnsupportedParameter for it at every ratio tried
@@ -187,17 +188,43 @@ export const DLSS_RATIO: Record<number, number> = {
 };
 
 /**
- * The PerfQuality whose fixed ratio is nearest `factor`. The one owner of that
- * rule: the CLI and the job engine must agree, or a job and its command line
- * would produce different sizes from the same number.
+ * The PerfQuality whose fixed ratio is nearest `factor`: the mode an SR feature
+ * is created in for an output of the source size times `factor`.
  *
- * A factor above 1 never snaps to DLAA. Its ratio, 1.0, is the nearest to
- * anything under 1.25 (the midpoint to MaxQuality's 1.5), so a request to
- * upscale would come back at the source size. A factor of 1 or less runs DLAA.
+ * A factor above 1 never picks DLAA. Its ratio, 1.0, is the nearest to anything
+ * under 1.25 (the midpoint to MaxQuality's 1.5), but DLAA renders at the output
+ * size. A factor of 1 runs DLAA.
  */
 export function qualityForFactor(factor: number): number {
   const candidates = Object.entries(DLSS_RATIO).filter(([, ratio]) => factor > 1 ? ratio > 1 : true);
   return Number(
     candidates.reduce((best, [quality, ratio]) => (Math.abs(ratio - factor) < Math.abs(DLSS_RATIO[Number(best)]! - factor) ? quality : best), candidates[0]![0]),
   );
+}
+
+/** The PerfQuality for an SR feature that renders `renderWidth` pixels wide and writes `outputWidth`: the sr command and the sr engine both take it. */
+export function qualityForSizes(renderWidth: number, outputWidth: number): number {
+  return qualityForFactor(outputWidth / renderWidth);
+}
+
+/**
+ * The longest output side DLSS SR creates a feature for: nvngx_dlss.dll 310.7.129.0
+ * takes 5600x8192 and refuses 5600x8194 with InvalidParameter (measured on an RTX 5090).
+ */
+export const DLSS_SR_MAX_OUTPUT_SIDE = 8192;
+
+/**
+ * Why DLSS SR cannot write `output` from a `render`-sized source, or null when it can.
+ * It only enlarges: an output side shorter than the source's fails CreateFeature
+ * with InvalidParameter (factors 0.25, 0.5 and 0.75 measured), as does a side
+ * longer than DLSS_SR_MAX_OUTPUT_SIDE.
+ */
+export function srOutputProblem(render: { width: number; height: number }, output: { width: number; height: number }): string | null {
+  if (output.width < render.width || output.height < render.height) {
+    return `DLSS Super Resolution only enlarges: ${output.width}x${output.height} is smaller than the ${render.width}x${render.height} source. Use a factor of at least 1 (1 runs DLAA at the source size).`;
+  }
+  if (Math.max(output.width, output.height) > DLSS_SR_MAX_OUTPUT_SIDE) {
+    return `DLSS Super Resolution writes at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side; ${output.width}x${output.height} is larger. Use a smaller factor or output size.`;
+  }
+  return null;
 }

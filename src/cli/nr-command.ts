@@ -5,10 +5,10 @@ import { encodePng } from "../codec/png/encode.ts";
 import { DlssNrSession } from "../ngx/nr-render.ts";
 import { DEFAULT_NR_SETTINGS, NR_PRESETS, NR_STYLES, SETTING_RANGES } from "../server/api-types.ts";
 import { describeGpu, openGpu } from "../pipeline/gpu.ts";
-import { enhanceStill } from "../pipeline/image.ts";
+import { enhanceStill, runStillPasses } from "../pipeline/image.ts";
 import { defaultOutputPath } from "../pipeline/output-path.ts";
 import { adapterOption, enumOption, flag, numberOption, positionalArgs, runtimeDirOption } from "./args.ts";
-import { commandSpec } from "./commands.ts";
+import { commandSpec, WARMUP_OPTION } from "./commands.ts";
 import { usageError } from "./usage-error.ts";
 
 export async function nrCommand(args: string[]): Promise<void> {
@@ -32,6 +32,7 @@ export async function nrCommand(args: string[]): Promise<void> {
     skinStructure: numberOption(args, "--skin-structure", { ...SETTING_RANGES.skinStructure, fallback: DEFAULT_NR_SETTINGS.skinStructure }),
     autoMask: flag(args, "--auto-mask") || DEFAULT_NR_SETTINGS.autoMask,
     uiCorrection: flag(args, "--ui-correction") || DEFAULT_NR_SETTINGS.uiCorrection,
+    warmupFrames: numberOption(args, "--warmup", WARMUP_OPTION),
   };
   const session = openGpu({ adapterIndex: adapterOption(args) });
   console.log(describeGpu(session));
@@ -42,11 +43,15 @@ export async function nrCommand(args: string[]): Promise<void> {
     settings,
     runtimeDir: runtimeDirOption(args),
   });
-  const enhanced = await enhanceStill(image, (colour) => ({ rgba: nr.evaluate(colour, true), width: image.width, height: image.height }));
+  const enhanced = await enhanceStill(image, async (colour) => ({
+    rgba: await runStillPasses("nr", settings.warmupFrames, (reset) => nr.evaluate(colour, reset)),
+    width: image.width,
+    height: image.height,
+  }));
   await Bun.write(output, encodePng(enhanced, { level: 6 }));
   nr.close();
   // Only settings the runtime acts on are worth reporting; the preset is not one of them.
-  console.log(`DLSS NR: ${image.width}x${image.height} enhanced (style ${settings.style}, intensity ${settings.intensity}) in ${(performance.now() - started).toFixed(1)} ms`);
+  console.log(`DLSS NR: ${image.width}x${image.height} enhanced (style ${settings.style}, intensity ${settings.intensity}, ${settings.warmupFrames + 1} passes) in ${(performance.now() - started).toFixed(1)} ms`);
   console.log(`wrote ${output}`);
   process.exit(0);
 }
