@@ -12,6 +12,7 @@ import {
   ENCODE_CODECS,
   ENCODE_CONTAINERS,
   ENGINE_KINDS,
+  FRAME_GEN_CONTAINER,
   FRAME_GEN_ENGINES,
   FRAME_GEN_GPU_CHOICE,
   JOB_KINDS,
@@ -82,7 +83,10 @@ function checkEncode(v: Record<string, unknown>): string | null {
 
 function checkFrameGen(v: Record<string, unknown>): string | null {
   if (v.multiplier === undefined && v.targetFps === undefined) return "frameGen needs targetFps or multiplier — otherwise the job has no output rate to aim for.";
-  if (v.multiplier !== undefined && (typeof v.multiplier !== "number" || !Number.isFinite(v.multiplier) || v.multiplier < 1)) return "frameGen.multiplier must be a finite number of at least 1.";
+  if (v.multiplier !== undefined) {
+    const wrongMultiplier = checkNumber(v.multiplier, "multiplier", "frameGen.multiplier");
+    if (wrongMultiplier) return wrongMultiplier;
+  }
   if (v.targetFps !== undefined) {
     if (typeof v.targetFps !== "string") return "frameGen.targetFps must be a string, e.g. \"120\" or \"60000/1001\".";
     // Resolved here rather than at typeof: the planner owns which rates exist,
@@ -95,6 +99,17 @@ function checkFrameGen(v: Record<string, unknown>): string | null {
     }
   }
   if (v.engine !== undefined) return checkEnum(v.engine, FRAME_GEN_ENGINES, "frameGen.engine");
+  return null;
+}
+
+/** Frame generation writes FRAME_GEN_CONTAINER only, so a request must not ask for another container or extension. */
+function checkFrameGenOutput(v: Record<string, unknown>): string | null {
+  if (isObject(v.encode) && v.encode.container !== FRAME_GEN_CONTAINER) {
+    return `Frame generation writes ${FRAME_GEN_CONTAINER} only; set encode.container to "${FRAME_GEN_CONTAINER}" (got ${JSON.stringify(v.encode.container)}).`;
+  }
+  if (typeof v.output === "string" && !v.output.toLowerCase().endsWith(`.${FRAME_GEN_CONTAINER}`)) {
+    return `Frame generation writes ${FRAME_GEN_CONTAINER} only; give the output path a .${FRAME_GEN_CONTAINER} extension or omit it.`;
+  }
   return null;
 }
 
@@ -137,6 +152,7 @@ export function validateJobRequest(value: unknown): string | null {
     // never reads frameGen, so accepting it would silently drop the request.
     v.frameGen !== undefined && v.kind !== "video" ? "frameGen applies to video jobs only." : null,
     v.frameGen === undefined ? null : isObject(v.frameGen) ? checkFrameGen(v.frameGen) : "frameGen must be an object when present.",
+    v.frameGen === undefined ? null : checkFrameGenOutput(v),
   );
   return problem;
 }
