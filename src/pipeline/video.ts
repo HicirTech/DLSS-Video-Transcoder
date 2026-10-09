@@ -295,13 +295,15 @@ async function runRawvideo(
   counts: FrameCounts,
 ): Promise<void> {
   // Fallback: raw RGBA out to ffmpeg, which does the encode.
+  const encoderArgv = encoderArgs(encode, cudaOrdinal);
+  progress(0, `encode: ${encoderArgv[encoderArgv.indexOf("-c:v") + 1]} via ffmpeg (single-thread rawvideo pipeline)`);
   const decoder = Bun.spawn([ffmpeg, ...decodeArgs], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const encoder = Bun.spawn(
     [
       ffmpeg, "-v", "error", "-y",
       "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${outWidth}x${outHeight}`, "-r", info.fpsText, "-i", "pipe:0",
       ...(wantAudio ? ["-i", options.input] : []),
-      "-map", "0:v:0", ...audioArgs(wantAudio, encode.container), ...encoderArgs(encode, cudaOrdinal), ...aspectArgs(info.displayAspect, outWidth, outHeight, null), ...faststartArgs(encode.container),
+      "-map", "0:v:0", ...audioArgs(wantAudio, encode.container), ...encoderArgv, ...aspectArgs(info.displayAspect, outWidth, outHeight, null), ...faststartArgs(encode.container),
       ...(wantAudio ? ["-shortest"] : []),
       output,
     ],
