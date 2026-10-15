@@ -4,7 +4,7 @@
  */
 import { DEFAULT_SR_PRESET, DLSS_RATIO, DLSS_SR_MAX_OUTPUT_SIDE, perfQualityName } from "../ngx/results.ts";
 import { cpuSiblingCodec, FFMPEG_NVENC_ENCODERS, isNvenc } from "../pipeline/encode-select.ts";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, ENCODE_CODECS, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, SETTING_RANGES } from "../server/api-types.ts";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, ENCODE_CODECS, ENCODE_CONTAINERS, ENGINE_KINDS, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, MOTION_KINDS, type MotionKind, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, SETTING_RANGES } from "../server/api-types.ts";
 
 interface OptionSpec {
   /** As typed on the command line, e.g. "--factor N" or "--json". */
@@ -45,8 +45,11 @@ export const QUALITY_OPTION = { ...SETTING_RANGES.quality, fallback: DEFAULT_ENC
 const CODEC_OPT: OptionSpec = { flag: "--codec NAME", desc: `encoder: ${ENCODE_CODECS.filter((codec) => !isNvenc(codec)).join(", ")}, or ${FFMPEG_NVENC_ENCODERS.join("/")} for GPU`, def: `${DEFAULT_ENCODE_SETTINGS.codec}, or ${cpuSiblingCodec(DEFAULT_ENCODE_SETTINGS.codec)} when NVENC cannot start` };
 const QUALITY_OPT: OptionSpec = { flag: "--quality N", desc: `encoder quality (CRF for CPU, CQ for NVENC), ${settingRange("quality")} (lower = better)`, def: String(QUALITY_OPTION.fallback) };
 
-/** The Neural Rendering look rows; nrSettingsOption reads them. */
-const NR_SETTING_OPTS: readonly OptionSpec[] = [
+/** `video --motion` when absent: no optical flow. */
+export const VIDEO_MOTION_DEFAULT: MotionKind = "none";
+
+/** The Neural Rendering look rows nr and video share; nrSettingsOption reads them, and video refuses them for another engine. */
+export const NR_SETTING_OPTS: readonly OptionSpec[] = [
   { flag: "--intensity F", desc: `overall strength, ${settingRange("intensity")}; the installed ${NR_RUNTIME_MEASURED} stops responding above ${NR_INTENSITY_EFFECTIVE_MAX}, so every value from there up gives the same image`, def: String(DEFAULT_NR_SETTINGS.intensity) },
   { flag: "--style N", desc: `look style: ${NR_STYLES.map((style) => `${style} = ${NR_STYLE_LABELS[style]}`).join(", ")} (strong, visible effect)`, def: String(DEFAULT_NR_SETTINGS.style) },
   { flag: "--preset ID", desc: `NR model preset hint ${NR_PRESETS[0]}..${NR_PRESETS.at(-1)}; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.preset) },
@@ -116,6 +119,33 @@ export const COMMANDS: readonly CommandSpec[] = [
     options: [...NR_SETTING_OPTS, WARMUP_OPT, RUNTIME_OPT, ADAPTER_OPT],
   },
   {
+    name: "video",
+    summary: "DLSS Super Resolution, DLSS Neural Rendering or a plain GPU copy on every frame of a video, then encode: the video job the web UI runs.",
+    usage: "bun run src/cli.ts video <input> [output] --engine sr|nr|bypass [options]",
+    args: [
+      { name: "input", desc: "source video (any format ffmpeg can decode)" },
+      { name: "output", desc: "destination, ending in the --container's extension; defaults to <input>.<engine>.<container> next to the input, the name a video job gives it" },
+    ],
+    options: [
+      { flag: "--engine NAME", desc: `required, one of ${ENGINE_KINDS.join(", ")}: sr upscales each frame from the source size with DLSS Super Resolution; nr enhances each frame at the output size with DLSS Neural Rendering; bypass runs no DLSS, so only the output size and the encode change the video` },
+      { flag: "--factor N", desc: `output size = the source size times N, each side rounded to even, ${settingRange("factor")}; DLSS Super Resolution only enlarges, so sr takes ${SR_FACTOR_OPTION.min}..${SR_FACTOR_OPTION.max} (1 runs DLAA) and writes at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side`, def: "the source size" },
+      { flag: "--size WxH", desc: `output size in pixels instead of --factor, e.g. 3840x2160: width ${settingRange("width")}, height ${settingRange("height")}, each rounded to even; for sr, each side at least the source's and at most ${DLSS_SR_MAX_OUTPUT_SIDE}`, def: "the source size" },
+      { flag: "--motion MODE", desc: `${MOTION_KINDS.join(" or ")}: flow estimates optical flow between frames and hands sr the motion vectors; nr and bypass read none, so they skip it`, def: VIDEO_MOTION_DEFAULT },
+      CODEC_OPT,
+      QUALITY_OPT,
+      { flag: "--container NAME", desc: `output container: ${ENCODE_CONTAINERS.join(", ")}`, def: DEFAULT_ENCODE_SETTINGS.container },
+      { flag: "--no-audio", desc: "write no audio track; otherwise the source's audio is copied into mkv, or re-encoded to AAC 192 kb/s for mp4 and mov", def: "off" },
+      ...NR_SETTING_OPTS,
+      { flag: "--dlss-version VER", desc: "load a specific installed DLL version of the --engine's feature, DLSS Super Resolution for sr or DLSS Neural Rendering for nr (prefix match ok); list them with `versions`. bypass loads no DLSS DLL and refuses it", def: "bundled runtime DLL" },
+      RUNTIME_OPT,
+      ADAPTER_OPT,
+    ],
+    notes: [
+      `The Neural Rendering look options, --intensity to --ui-correction, apply to --engine nr only; sr and bypass refuse them. --preset is Neural Rendering's model preset hint: an sr video runs Super Resolution render preset ${DEFAULT_SR_PRESET}, as an sr job does.`,
+      "The command line becomes a POST /api/jobs request and passes the same request validation before the GPU opens.",
+    ],
+  },
+  {
     name: "fg",
     summary: "DLSS Frame Generation (NGX feature 11): interpolate a video to a higher frame rate.",
     usage: "bun run src/cli.ts fg <input.mp4> [output.mp4] [options]",
@@ -138,7 +168,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     summary: "List every DLSS runtime DLL found (per feature), with its version, source and folder.",
     usage: "bun run src/cli.ts versions [--runtime DIR]",
     options: [RUNTIME_OPT],
-    notes: ["Use a listed SR version string with `sr --dlss-version`."],
+    notes: ["Use a listed SR version string with `sr --dlss-version`, and an SR or NR one with `video --dlss-version`."],
   },
   {
     name: "help",

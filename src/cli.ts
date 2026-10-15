@@ -11,12 +11,14 @@ import { probeCommand } from "./cli/probe-command.ts";
 import { srCommand } from "./cli/sr-command.ts";
 import { EXIT_FAILED, EXIT_USAGE, UsageError } from "./cli/usage-error.ts";
 import { versionsCommand } from "./cli/versions-command.ts";
+import { videoCommand } from "./cli/video-command.ts";
 
 const COMMAND_HANDLERS = new Map<string, (args: string[]) => Promise<void>>([
   ["probe", probeCommand],
   ["forwarder", forwarderCommand],
   ["sr", srCommand],
   ["nr", nrCommand],
+  ["video", videoCommand],
   ["fg", fgCommand],
   ["versions", versionsCommand],
 ]);
