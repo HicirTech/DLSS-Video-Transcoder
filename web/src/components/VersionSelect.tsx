@@ -5,7 +5,7 @@ import { api } from "../api";
 import { errorMessage } from "../errors";
 
 interface VersionSelectProps {
-  /** NGX feature id: 1 = Super Resolution, 18 = Neural Rendering. */
+  /** NGX feature id: 1 = Super Resolution, 11 = Frame Generation, 18 = Neural Rendering. */
   featureId: number;
   /** Selected DLL folder, or "" for the bundled default. */
   value: string;
