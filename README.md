@@ -3,8 +3,8 @@
 Apply NVIDIA DLSS to **images and video** on Windows — DLSS Super Resolution (upscaling),
 DLSS Frame Generation (higher frame rate) and DLSS Neural Rendering ("DLSS 5", NGX feature 18) —
 driven from **Bun + TypeScript** through `bun:ffi` over Direct3D 12 and NVIDIA NGX, with a
-**React + Material UI** web front end. The Super Resolution and Neural Rendering runtimes are
-version-switchable (DLSS-Swapper style).
+**React + Material UI** web front end. The Super Resolution, Frame Generation and Neural Rendering
+runtimes are version-switchable (DLSS-Swapper style).
 
 ![DLSS Neural Rendering styles — Original vs. Natural vs. Cinematic (100% crop)](docs/images/nr-style.png)
 
@@ -82,7 +82,8 @@ command alike; the server stores uploads in its `uploads/` subfolder.
 - **`fg`** — `--fps RATE` (a named rate from 23.976 to 480, or an exact `num/den`; default: source fps
   × `--multiplier`), `--multiplier N` (2, whole number 1–16; used when `--fps` is absent),
   `--engine auto|native|cascade` (auto, see below), `--codec NAME` (NVENC when available, else
-  libx264), `--quality N` (0–51, lower = better, 20)
+  libx264), `--quality N` (0–51, lower = better, 20), `--dlss-version VER` (an installed Frame Generation
+  version; `310.7.129.0`, `310.7.0.0` and `310.6.0.0` were measured to load and run 2× on an RTX 5090)
 
 Frame generation (`fg` and the Path selector in the web UI): `auto` runs one native DLSS session when
 output ÷ source is an exact integer from 2× up to the runtime's MultiFrameCountMax + 1 (measured: 6×
@@ -117,8 +118,9 @@ For front-end-only work: `bun run web/mock-server.ts` on port 3080, or append `?
 (SR only enlarges, to at most 8192 pixels per side), NR look controls, before/after compare.  
 **Video tab** — the same engines on video with output size, optical-flow motion for Super Resolution,
 and NVENC encoding (H.264, CQ 20 by default; the CPU encoder when NVENC cannot start) or CPU encoding;
-or Frame Generation to 23.976–480 fps (auto / native / cascade), which uses the codec, quality and
-audio settings, always writes an mp4 and ignores the engine, motion, size and neural-rendering settings.  
+or Frame Generation to 23.976–480 fps (auto / native / cascade) with its own DLSS version picker, which
+uses the codec, quality and audio settings, always writes an mp4 and ignores the engine, motion, size and
+neural-rendering settings.  
 **Jobs tab** — live job list with progress, log tail and cancel.  
 **Settings tab** — GPU for image and video jobs (stored by CUDA device UUID; frame generation ignores
 it), temporal warm-up (0–64 frames, default 4), stored settings reset.  
