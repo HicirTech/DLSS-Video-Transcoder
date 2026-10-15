@@ -4,6 +4,7 @@ import { processFrameGen } from "../pipeline/framegen.ts";
 import { resolveTargetRate } from "../pipeline/framegen-plan.ts";
 import { choiceOption, numberOption, option, positionalArgs, runtimeDirOption } from "./args.ts";
 import { commandSpec, FG_MULTIPLIER_OPTION, QUALITY_OPTION } from "./commands.ts";
+import { dlssVersionOption } from "./dlss-version-option.ts";
 import { usageError } from "./usage-error.ts";
 
 /**
@@ -26,6 +27,7 @@ export async function fgCommand(args: string[]): Promise<void> {
   const positional = positionalArgs(args, commandSpec("fg"));
   const input = positional[0];
   if (!input) usageError("missing <input.mp4>", "fg");
+  const runtimeDir = runtimeDirOption(args);
   const result = await processFrameGen({
     input,
     output: positional[1],
@@ -34,7 +36,8 @@ export async function fgCommand(args: string[]): Promise<void> {
     engine: choiceOption(args, "--engine", FRAME_GEN_ENGINES),
     quality: numberOption(args, "--quality", QUALITY_OPTION),
     codec: choiceOption(args, "--codec", ENCODE_CODECS),
-    runtimeDir: runtimeDirOption(args),
+    runtimeDir,
+    dllDir: dlssVersionOption(args, runtimeDir, "fg"),
     onProgress: (f, m, frames) => {
       if (frames === undefined) console.log(`  ${(f * 100).toFixed(0)}%  ${m}`);
     },

@@ -159,6 +159,7 @@ export const COMMANDS: readonly CommandSpec[] = [
       { flag: "--engine MODE", desc: `auto = one native session when output/source is an exact integer from 2 up to ${FRAME_GEN_NATIVE_MAXIMUM} (3x and above only with HAGS on), else a cascade of 2x stages; when the runtime disables every interval of a native 3x+ session, auto re-runs it as a cascade; native or cascade force that path`, def: "auto" },
       CODEC_OPT,
       QUALITY_OPT,
+      { flag: "--dlss-version VER", desc: "use a specific installed DLSS Frame Generation DLL version (prefix match ok); list them with `versions`", def: "bundled runtime DLL" },
       RUNTIME_OPT,
     ],
     notes: ["A target at or below the source frame rate (--multiplier 1, or a lower --fps) generates no frames: the video is only resampled to it."],
@@ -168,7 +169,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     summary: "List every DLSS runtime DLL found (per feature), with its version, source and folder.",
     usage: "bun run src/cli.ts versions [--runtime DIR]",
     options: [RUNTIME_OPT],
-    notes: ["Use a listed SR version string with `sr --dlss-version`, and an SR or NR one with `video --dlss-version`."],
+    notes: ["Use a listed SR version string with `sr --dlss-version`, an SR or NR one with `video --dlss-version`, and a Frame Generation one with `fg --dlss-version`."],
   },
   {
     name: "help",

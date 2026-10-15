@@ -143,6 +143,11 @@ describe("fg", () => {
     expect(error.command).toBe("fg");
   });
 
+  test("a --dlss-version that matches no installed Frame Generation version is a usage error that says how to list them", async () => {
+    const error = await usageErrorOf(() => dlssVersionOption(["--dlss-version", "no-such-version"], DEFAULT_RUNTIME_DIR, "fg"));
+    expect(error.message).toBe("--dlss-version no-such-version matches no installed DLSS Frame Generation version; list them with 'bun run src/cli.ts versions'");
+  });
+
   // The API's check on frameGen.targetFps (validateJobRequest) and this one both ask resolveTargetRate.
   test("--fps accepts exactly the rates the API accepts, and a refusal names the rates that work", async () => {
     const apiAccepts = (targetFps: string): boolean =>
