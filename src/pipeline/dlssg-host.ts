@@ -17,7 +17,7 @@ const FRAME_GENERATION = featureByKey("fg");
 /** The probe's worker_version. probeDlssg keeps only a probe that names one. */
 const HOST_VERSION = "dlssg-host";
 const USAGE =
-  "usage: bun src/pipeline/dlssg-host.ts --probe|--serve [--runtime <absolute folder holding dlssg/ and caller/, default runtime/>] [--shared <name of the shared frame memory the parent created; required by --serve, refused by --probe>]";
+  "usage: bun src/pipeline/dlssg-host.ts --probe|--serve [--runtime <absolute folder holding dlssg/ and caller/, default runtime/>] [--dll-dir <absolute folder whose nvngx_dlssg.dll loads instead of the one in dlssg/>] [--shared <name of the shared frame memory the parent created; required by --serve, refused by --probe>]";
 
 /** The `--name value` pairs of `args`, or null when an argument is not such a pair, is not in `allowed`, or repeats. */
 function optionValues(args: readonly string[], allowed: readonly string[]): Map<string, string> | null {
@@ -34,15 +34,18 @@ function optionValues(args: readonly string[], allowed: readonly string[]): Map<
 function parseArguments(args: readonly string[]): { launch: DlssgLaunch; runtime: DlssgRuntimeOptions } | string {
   const mode = args[0];
   if (mode !== "--probe" && mode !== "--serve") return USAGE;
-  const options = optionValues(args.slice(1), mode === "--serve" ? ["--runtime", "--shared"] : ["--runtime"]);
+  const options = optionValues(args.slice(1), mode === "--serve" ? ["--runtime", "--dll-dir", "--shared"] : ["--runtime", "--dll-dir"]);
   if (!options) return USAGE;
   const runtimeRoot = options.get("--runtime") ?? RUNTIME_DIR;
-  // The parent picks the host's working folder (DlssgSession starts its process in runtime/dlssg),
-  // so a relative root would resolve against a folder the parent never meant.
+  const dllDir = options.get("--dll-dir");
+  // The parent picks the host's working folder (DlssgSession starts its process in the DLL's folder),
+  // so a relative path would resolve against a folder the parent never meant.
   if (!isAbsolute(runtimeRoot)) return `--runtime must be an absolute path, got "${runtimeRoot}". ${USAGE}`;
-  // The same layout sr.ts, nr-render.ts and probe.ts use: the feature's own folder is its NGX
-  // search path, and the caller shim sits beside it, never inside it (DlssgFeature refuses that).
-  const runtime = { runtimeDir: featureDir(runtimeRoot, "fg"), callerDir: callerDir(runtimeRoot) };
+  if (dllDir !== undefined && !isAbsolute(dllDir)) return `--dll-dir must be an absolute path, got "${dllDir}". ${USAGE}`;
+  // The same layout sr.ts, nr-render.ts and probe.ts use: the feature's own folder, or the version
+  // folder chosen instead of it, is its NGX search path, and the caller shim sits beside the
+  // runtime folder, never inside it (DlssgFeature refuses that).
+  const runtime = { runtimeDir: dllDir ?? featureDir(runtimeRoot, "fg"), callerDir: callerDir(runtimeRoot) };
   if (mode === "--probe") return { launch: { mode }, runtime };
   const sharedMemoryName = options.get("--shared");
   if (!sharedMemoryName) return `--serve needs --shared, the name of the shared frame memory the parent created. ${USAGE}`;

@@ -80,7 +80,7 @@ try {
   opticalFlow = nvof.backend ? "NVOFA" : `CPU (${nvof.reason})`;
   estimator = createMotionEstimator(width, height, nvof.backend ? { backend: nvof.backend } : {});
   const zeroMotion = new Uint16Array(width * height * 2);
-  session = await DlssgSession.open(RUNTIME_DIR, { width, height, generatedCount });
+  session = await DlssgSession.open({ root: RUNTIME_DIR }, { width, height, generatedCount });
   let dropped: Uint8Array[] = [];
   for (let sourceIndex = 0; keptFrameLimit === 0 || counts.kept < keptFrameLimit; sourceIndex++) {
     const frame = await reader.next(frameBytes);

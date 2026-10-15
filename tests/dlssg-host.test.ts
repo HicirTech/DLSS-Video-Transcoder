@@ -317,7 +317,7 @@ describe("dlssg-host arguments", () => {
   }
 
   test("the serve command line dlssgHost builds is accepted: with nothing on stdin the host asks for nothing and exits 0", async () => {
-    const run = await runCommand(dlssgHost(import.meta.dir).command({ mode: "--serve", sharedMemoryName: "dlssg-fg-never-opened" }));
+    const run = await runCommand(dlssgHost({ root: import.meta.dir }).command({ mode: "--serve", sharedMemoryName: "dlssg-fg-never-opened" }));
     expect(run.stdout.byteLength).toBe(0);
     expect(run.stderr).toBe("");
     expect(run.exitCode).toBe(0);
@@ -335,6 +335,15 @@ describe("dlssg-host arguments", () => {
     expect(run.stdout.byteLength).toBe(0);
     expect(run.stderr).toContain('--runtime must be an absolute path, got "runtime"');
     expect(run.exitCode).toBe(2);
+  }, TEST_TIMEOUT_MS);
+
+  test("a relative --dll-dir is refused, in either mode, for the same reason", async () => {
+    for (const args of [["--probe", "--runtime", import.meta.dir, "--dll-dir", "310.6"], ["--serve", "--runtime", import.meta.dir, "--dll-dir", "310.6", "--shared", "frames"]]) {
+      const run = await runArguments(args);
+      expect(run.stdout.byteLength, args[0]).toBe(0);
+      expect(run.stderr, args[0]).toContain('--dll-dir must be an absolute path, got "310.6"');
+      expect(run.exitCode, args[0]).toBe(2);
+    }
   }, TEST_TIMEOUT_MS);
 
   test("--serve without --shared is refused, since the frames have nowhere to be", async () => {
