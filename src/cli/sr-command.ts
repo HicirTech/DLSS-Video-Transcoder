@@ -2,7 +2,6 @@
 import { isPng } from "../codec/png/chunks.ts";
 import { decodePng } from "../codec/png/decode.ts";
 import { encodePng } from "../codec/png/encode.ts";
-import { buildRuntimeCatalog } from "../ngx/runtime-catalog.ts";
 import { DlssSrSession } from "../ngx/sr.ts";
 import { DEFAULT_SR_PRESET, DlssRenderPreset, perfQualityName, qualityForSizes, srOutputProblem } from "../ngx/results.ts";
 import { describeGpu, openGpu } from "../pipeline/gpu.ts";
@@ -11,6 +10,7 @@ import { defaultOutputPath } from "../pipeline/output-path.ts";
 import { DEFAULT_SCALE_SETTINGS } from "../server/api-types.ts";
 import { adapterOption, numberOption, option, positionalArgs, runtimeDirOption } from "./args.ts";
 import { commandSpec, SR_FACTOR_OPTION, WARMUP_OPTION } from "./commands.ts";
+import { dlssVersionOption } from "./dlss-version-option.ts";
 import { usageError } from "./usage-error.ts";
 
 export async function srCommand(args: string[]): Promise<void> {
@@ -35,7 +35,7 @@ export async function srCommand(args: string[]): Promise<void> {
   const output = positional[1] ?? defaultOutputPath(input, "sr", ".png");
 
   const runtimeDir = runtimeDirOption(args);
-  const dllDir = dllDirOption(args, runtimeDir);
+  const dllDir = dlssVersionOption(args, runtimeDir, "sr");
 
   const session = openGpu({ adapterIndex: adapterOption(args) });
   console.log(describeGpu(session));
@@ -73,15 +73,4 @@ export function presetKeyOption(args: string[]): keyof typeof DlssRenderPreset {
   const presetKey = (Object.keys(DlssRenderPreset) as (keyof typeof DlssRenderPreset)[]).find((k) => k.toLowerCase() === presetInput.toLowerCase());
   if (!presetKey) usageError(`unknown --preset '${presetInput}'. Valid: ${Object.keys(DlssRenderPreset).join(", ")}`);
   return presetKey;
-}
-
-/** The folder of the installed SR DLL that `--dlss-version` names, or undefined to use the bundled runtime DLL. */
-export function dllDirOption(args: string[], runtimeDir: string): string | undefined {
-  const wantVersion = option(args, "--dlss-version");
-  if (!wantVersion) return undefined;
-  const sr = buildRuntimeCatalog(runtimeDir).features.find((f) => f.id === 1);
-  const match = sr?.versions.find((v) => v.version === wantVersion || v.version.startsWith(wantVersion));
-  if (!match) usageError(`--dlss-version ${wantVersion} matches no installed DLSS SR version; list them with 'bun run src/cli.ts versions'`);
-  console.log(`using DLSS SR ${match.version} (${match.source}) from ${match.dir}`);
-  return match.dir;
 }
