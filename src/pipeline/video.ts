@@ -6,7 +6,7 @@
  * ffmpeg / ffprobe are external tools found via tools.ts.
  */
 import { existsSync } from "node:fs";
-import type { EncodeSettings, EngineKind, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
+import type { EncodeSettings, EngineKind, JobRequest, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { DEFAULT_ENCODE_SETTINGS, ENGINE_USES_MOTION } from "../server/api-types.ts";
 import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine, type Engine } from "./engine.ts";
@@ -57,6 +57,28 @@ export interface VideoJobOptions {
    * or fails. The job manager stops waiting on a cancel then.
    */
   onFinishing?: () => void;
+}
+
+/** What a run adds to a request: its folders, and how it reports and stops. */
+type VideoRun = Pick<VideoJobOptions, "runtimeDir" | "appDataPath" | "onProgress" | "signal" | "onFinishing">;
+
+/**
+ * The options a validated video request runs with. Whatever runs a JobRequest maps it through here, so no
+ * front end reads a request differently from the job worker.
+ */
+export function videoJobOptions(request: JobRequest, run: VideoRun): VideoJobOptions {
+  return {
+    input: request.input,
+    output: request.output,
+    engine: request.engine,
+    motion: request.motion,
+    scale: request.scale,
+    settings: request.settings,
+    encode: request.encode,
+    dllDir: request.dllDir,
+    adapterUuid: request.adapterUuid,
+    ...run,
+  };
 }
 
 export interface VideoJobResult {

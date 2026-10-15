@@ -95,23 +95,10 @@ async function run(message: RunMessage): Promise<void> {
       post({ type: "done", id, output: result.output, detail: { ...result } });
       return;
     }
-    const { processVideo } = await import("./video.ts");
-    const result = await processVideo({
-      input: request.input,
-      output: request.output,
-      engine: request.engine,
-      motion: request.motion,
-      scale: request.scale,
-      settings: request.settings,
-      encode: request.encode,
-      runtimeDir: message.runtimeDir,
-      dllDir: request.dllDir,
-      adapterUuid: request.adapterUuid,
-      appDataPath: message.appDataPath,
-      signal: jobCancellation.signal,
-      onFinishing,
-      onProgress,
-    });
+    const { processVideo, videoJobOptions } = await import("./video.ts");
+    const result = await processVideo(
+      videoJobOptions(request, { runtimeDir: message.runtimeDir, appDataPath: message.appDataPath, signal: jobCancellation.signal, onFinishing, onProgress }),
+    );
     post({ type: "done", id, output: result.output, detail: { ...result } });
   } catch (error) {
     // Thrown and caught on this thread: only the "cancelled" message crosses to the server.
