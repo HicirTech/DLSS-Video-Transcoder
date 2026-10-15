@@ -20,6 +20,19 @@ export interface DlssgHost {
   command(launch: DlssgLaunch): string[];
 }
 
+/** Where a host loads DLSS Frame Generation from. */
+export interface DlssgRuntime {
+  /** The runtime folder holding dlssg/ and caller/. */
+  readonly root: string;
+  /** A DLSS Frame Generation version folder from the runtime catalog (JobRequest.dllDir) to load instead of dlssg/; absent for the bundled DLL. */
+  readonly dllDir?: string;
+}
+
+/** One string per runtime, for the caches that remember what a runtime did: the same root with another version folder is another runtime. */
+export function dlssgRuntimeKey(runtime: DlssgRuntime): string {
+  return `${resolve(runtime.root)}|${runtime.dllDir === undefined ? "" : resolve(runtime.dllDir)}`;
+}
+
 const HOST_ENTRY = join(import.meta.dir, "dlssg-host.ts");
 
 /**
@@ -34,15 +47,20 @@ function withoutNgxLogging(environment: NodeJS.ProcessEnv): Record<string, strin
   return kept;
 }
 
-/** The host process for the runtime folder `runtimeRoot` (the one holding dlssg/ and caller/). */
-export function dlssgHost(runtimeRoot: string): DlssgHost {
-  const cwd = featureDir(runtimeRoot, "fg");
-  // dlssg-host.ts refuses a relative --runtime: the host runs in cwd, not in this process's folder.
-  const absoluteRoot = resolve(runtimeRoot);
+/** The host process that loads DLSS Frame Generation from `runtime`. */
+export function dlssgHost(runtime: DlssgRuntime): DlssgHost {
+  // dlssg-host.ts refuses a relative --runtime or --dll-dir: the host runs in cwd, not in this process's folder.
+  const absoluteRoot = resolve(runtime.root);
+  const dllDir = runtime.dllDir === undefined ? undefined : resolve(runtime.dllDir);
+  const cwd = dllDir ?? featureDir(runtime.root, "fg");
   return {
     cwd,
     env: withoutNgxLogging(process.env),
     hint: `Check that ${cwd} holds nvngx_dlssg.dll, that ${callerDir(absoluteRoot)} can be written, and that your GPU driver is up to date, then run the job again.`,
-    command: (launch) => [process.execPath, HOST_ENTRY, launch.mode, "--runtime", absoluteRoot, ...(launch.mode === "--serve" ? ["--shared", launch.sharedMemoryName] : [])],
+    command: (launch) => [
+      process.execPath, HOST_ENTRY, launch.mode, "--runtime", absoluteRoot,
+      ...(dllDir === undefined ? [] : ["--dll-dir", dllDir]),
+      ...(launch.mode === "--serve" ? ["--shared", launch.sharedMemoryName] : []),
+    ],
   };
 }

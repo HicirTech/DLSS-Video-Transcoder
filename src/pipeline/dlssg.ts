@@ -11,7 +11,7 @@
  */
 import type { Subprocess } from "bun";
 import { SharedMemory } from "../native/shared-memory.ts";
-import { HOST_PROCESS_NAME, dlssgHost, type DlssgHost } from "./dlssg-host-launch.ts";
+import { HOST_PROCESS_NAME, dlssgHost, dlssgRuntimeKey, type DlssgHost, type DlssgRuntime } from "./dlssg-host-launch.ts";
 import {
   FRAME_RESULT_BYTES,
   HostStatus,
@@ -148,25 +148,26 @@ const probeCache = new Map<string, { at: number; probe: Promise<DlssgProbe> }>()
 const PROBE_CACHE_TTL_MS = 60_000;
 
 /**
- * What the host of the runtime folder `runtimeRoot` reports, memoised per folder for
+ * What the host loading from `runtime` reports, memoised per runtime (dlssgRuntimeKey) for
  * PROBE_CACHE_TTL_MS: spawning `--probe` costs roughly a second and capabilities do not change
  * between back-to-back jobs. A probe the host did not answer is not cached.
  */
-export function probeDlssg(runtimeRoot: string): Promise<DlssgProbe> {
+export function probeDlssg(runtime: DlssgRuntime): Promise<DlssgProbe> {
   const now = Date.now();
-  const hit = probeCache.get(runtimeRoot);
+  const key = dlssgRuntimeKey(runtime);
+  const hit = probeCache.get(key);
   if (hit && now - hit.at < PROBE_CACHE_TTL_MS) return hit.probe;
-  const probe = probeDlssgHost(dlssgHost(runtimeRoot));
+  const probe = probeDlssgHost(dlssgHost(runtime));
   // Only a probe the host actually answered is worth keeping: the others
   // describe a machine the user is probably fixing right now, and the TTL would
   // repeat the same message for a minute without re-spawning.
   probe.then(
     (answered) => {
-      if (!answered.workerVersion) probeCache.delete(runtimeRoot);
+      if (!answered.workerVersion) probeCache.delete(key);
     },
-    () => probeCache.delete(runtimeRoot),
+    () => probeCache.delete(key),
   );
-  probeCache.set(runtimeRoot, { at: now, probe });
+  probeCache.set(key, { at: now, probe });
   return probe;
 }
 
@@ -324,9 +325,9 @@ export class DlssgSession {
     readonly maximum: number,
   ) {}
 
-  /** A session on the host process of the runtime folder `runtimeRoot`. */
-  static open(runtimeRoot: string, opts: DlssgOptions): Promise<DlssgSession> {
-    return DlssgSession.openOn(dlssgHost(runtimeRoot), opts);
+  /** A session on a host process that loads DLSS Frame Generation from `runtime`. */
+  static open(runtime: DlssgRuntime, opts: DlssgOptions): Promise<DlssgSession> {
+    return DlssgSession.openOn(dlssgHost(runtime), opts);
   }
 
   /** A session on `host`; open starts dlssg-host.ts, tests script a process. */

@@ -20,6 +20,7 @@
 import { existsSync } from "node:fs";
 import { DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, type EncodeSettings, FRAME_GEN_CONTAINER, type FrameGenEngine } from "../server/api-types.ts";
 import { throwIfAborted } from "./cancel.ts";
+import { dlssgRuntimeKey, type DlssgRuntime } from "./dlssg-host-launch.ts";
 import { DlssgSession, probeDlssg } from "./dlssg.ts";
 import { motionFieldBytes } from "./dlssg-protocol.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
@@ -67,6 +68,8 @@ export interface FrameGenOptions {
    */
   engine?: FrameGenEngine;
   runtimeDir: string;
+  /** A DLSS Frame Generation version folder from the runtime catalog to load instead of runtimeDir/dlssg (JobRequest.dllDir). */
+  dllDir?: string;
   /** Default DEFAULT_ENCODE_SETTINGS.quality. */
   quality?: number;
   /** Output codec; default DEFAULT_ENCODE_SETTINGS.codec, which falls back to its CPU sibling when NVENC cannot start. */
@@ -130,23 +133,29 @@ class FrameGenDisabledError extends Error {
   }
 }
 
-/** Runtime folders whose host has refused a native multi-frame session in this process; "auto" skips the fail-fast probe for those. */
+/** Runtimes (dlssgRuntimeKey) whose host has refused a native multi-frame session in this process; "auto" skips the fail-fast probe for those. */
 const nativeMultiFrameRefused = new Set<string>();
+
+/** Where this job's host loads DLSS Frame Generation from. */
+function dlssgRuntimeOf(options: FrameGenOptions): DlssgRuntime {
+  return { root: options.runtimeDir, dllDir: options.dllDir };
+}
 
 /**
  * Engine "auto" plans one native session when the ratio is an exact integer up to the runtime's
  * maximum, from 3x up only with HAGS on, and a cascade of 2x stages otherwise (framegen-plan.ts). A
  * native multi-frame session that got nothing back is re-run as a cascade, which only needs 2x
- * generation; the runtime folder is remembered, so its later "auto" jobs start as a cascade.
+ * generation; the runtime is remembered, so its later "auto" jobs start as a cascade.
  */
 export async function processFrameGen(options: FrameGenOptions): Promise<FrameGenResult> {
   const engine = options.engine ?? "auto";
-  if (engine === "auto" && nativeMultiFrameRefused.has(options.runtimeDir)) return processFrameGenOnce({ ...options, engine: "cascade" });
+  const runtimeKey = dlssgRuntimeKey(dlssgRuntimeOf(options));
+  if (engine === "auto" && nativeMultiFrameRefused.has(runtimeKey)) return processFrameGenOnce({ ...options, engine: "cascade" });
   try {
     return await processFrameGenOnce(options);
   } catch (error) {
     if (engine === "auto" && error instanceof FrameGenDisabledError && isNativeMultiFramePlan(error.plan)) {
-      nativeMultiFrameRefused.add(options.runtimeDir);
+      nativeMultiFrameRefused.add(runtimeKey);
       options.onProgress?.(0, `native ${error.plan.nativeMultiplier}x refused by the runtime (no frames synthesised); falling back to a cascade of 2x stages`);
       return processFrameGenOnce({ ...options, engine: "cascade" });
     }
@@ -238,7 +247,7 @@ async function planFrameGen(options: FrameGenOptions): Promise<FrameGenJob> {
   throwIfAborted(options.signal);
   const { ffmpeg, ffprobe } = requireFfmpegTools("frame generation");
 
-  const caps = await probeDlssg(options.runtimeDir);
+  const caps = await probeDlssg(dlssgRuntimeOf(options));
   throwIfAborted(options.signal);
   if (!caps.available) throw new Error(`DLSS Frame Generation is not available: ${caps.detail}`);
   const nativeMultiplierMax = caps.multiFrameCountMax + 1;
@@ -332,7 +341,7 @@ async function openStages({ options, progress, width, height, plan }: FrameGenJo
     // is not oversubscribed.
     const packInline = index !== generatedCounts.length - 1;
     const results = await Promise.allSettled([
-      DlssgSession.open(options.runtimeDir, { width, height, generatedCount, sharedFrames: true }),
+      DlssgSession.open(dlssgRuntimeOf(options), { width, height, generatedCount, sharedFrames: true }),
       openGuideWorker({ type: "open", width, height, detectSourceCuts: index === 0, packInline }),
       packInline ? Promise.resolve(null) : openGuideWorker({ type: "open-packer", width, height }),
     ]);
