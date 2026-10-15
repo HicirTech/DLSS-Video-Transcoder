@@ -1,9 +1,9 @@
 /** The `fg` command: DLSS Frame Generation, interpolating a video to a higher frame rate. */
-import { DEFAULT_ENCODE_SETTINGS, ENCODE_CODECS, FRAME_GEN_ENGINES, SETTING_RANGES } from "../server/api-types.ts";
+import { ENCODE_CODECS, FRAME_GEN_ENGINES } from "../server/api-types.ts";
 import { processFrameGen } from "../pipeline/framegen.ts";
 import { resolveTargetRate } from "../pipeline/framegen-plan.ts";
 import { choiceOption, numberOption, option, positionalArgs, runtimeDirOption } from "./args.ts";
-import { commandSpec, FG_MULTIPLIER_OPTION } from "./commands.ts";
+import { commandSpec, FG_MULTIPLIER_OPTION, QUALITY_OPTION } from "./commands.ts";
 import { usageError } from "./usage-error.ts";
 
 /**
@@ -32,8 +32,7 @@ export async function fgCommand(args: string[]): Promise<void> {
     targetFps: targetFpsOption(args),
     multiplier: numberOption(args, "--multiplier", FG_MULTIPLIER_OPTION),
     engine: choiceOption(args, "--engine", FRAME_GEN_ENGINES),
-    // The same range the API validates against and the UI clamps to.
-    quality: numberOption(args, "--quality", { ...SETTING_RANGES.quality, fallback: DEFAULT_ENCODE_SETTINGS.quality }),
+    quality: numberOption(args, "--quality", QUALITY_OPTION),
     codec: choiceOption(args, "--codec", ENCODE_CODECS),
     runtimeDir: runtimeDirOption(args),
     onProgress: (f, m, frames) => {
