@@ -17,8 +17,8 @@ version-switchable (DLSS-Swapper style).
 
 > **Status.** Runs on the project's RTX 5090. The **web UI** covers the whole pipeline — SR
 > upscaling, Neural Rendering, Frame Generation, DLSS version selection and browser upload. The
-> **command line** covers the probe, SR and NR on PNG images, Frame Generation on video and the
-> version list; SR and NR on video are web/API only. See [Feature status](#feature-status) below.
+> **command line** covers the probe, SR and NR on PNG images and on video, Frame Generation on video
+> and the version list. See [Feature status](#feature-status) below.
 
 ---
 
@@ -57,6 +57,7 @@ command alike; the server stores uploads in its `uploads/` subfolder.
 | `probe` | Inspect GPU / driver / NGX core / `runtime/`; exits 0 only when neural rendering is ready. It does not test frame generation. |
 | `sr <in.png> [out.png]` | **DLSS Super Resolution (feature 1)** — real PNG upscaling. |
 | `nr <in.png> [out.png]` | **DLSS Neural Rendering (feature 18)** — enhance a PNG at the same size. |
+| `video <in> [out] --engine sr\|nr\|bypass` | **SR, NR or a plain copy on every frame of a video**, then encode — the web UI's video job. |
 | `fg <in.mp4> [out.mp4]` | **DLSS Frame Generation (feature 11)** — interpolate to higher frame rate. |
 | `versions` | List every installed DLSS runtime DLL per feature. |
 | `forwarder` | (Re)generate the `nvngx.dll` shim NGX requires. |
@@ -72,6 +73,12 @@ command alike; the server stores uploads in its `uploads/` subfolder.
 - **`nr`** — `--intensity F` (1, 0–2; no further effect above 1), `--style N` (0; Default / Natural / Cinematic),
   `--local-tone F` (1, 0–2), `--local-structure F` (1, 0–2), `--auto-mask`, `--warmup N` (4, 0–64; as for
   `sr`). `--preset`, `--skin-structure` and `--ui-correction` are accepted but ignored by `nvngx_dlssnr.dll` 310.8.2.0.
+- **`video`** — `--engine sr|nr|bypass` (required), `--factor N` (0.25–8; `sr` takes 1–8 and writes at most
+  8192 pixels per side) or `--size WxH` (default: the source size), `--motion none|flow` (none; flow gives
+  `sr` motion vectors), `--codec NAME` and `--quality N` (as for `fg`), `--container mp4|mkv|mov` (mp4),
+  `--no-audio`, the `nr` look options (`--engine nr` only), `--dlss-version VER` (a version of the engine's
+  own feature; not with bypass); writes `<input>.<engine>.<container>` by default. The command line goes
+  through the same request validation as `POST /api/jobs`.
 - **`fg`** — `--fps RATE` (a named rate from 23.976 to 480, or an exact `num/den`; default: source fps
   × `--multiplier`), `--multiplier N` (2, whole number 1–16; used when `--fps` is absent),
   `--engine auto|native|cascade` (auto, see below), `--codec NAME` (NVENC when available, else
@@ -87,8 +94,8 @@ way. `native` and `cascade` force a path, and `native` fails, writing no output,
 exact integer in range. A target at or below the source rate generates nothing: the video is only
 resampled. The output keeps the source duration and its first audio track (re-encoded to AAC, 192 kb/s).
 
-**Shared options.** `--adapter N` (GPU index from `probe`) applies to `probe`, `sr` and `nr`;
-`--runtime DIR` to `probe`, `sr`, `nr`, `fg` and `versions`. Every command except `help` rejects
+**Shared options.** `--adapter N` (GPU index from `probe`) applies to `probe`, `sr`, `nr` and `video`;
+`--runtime DIR` to `probe`, `sr`, `nr`, `video`, `fg` and `versions`. Every command except `help` rejects
 unknown flags; per-command `--help` lists all options with defaults. Frame generation has no GPU
 choice, in the CLI or the web UI: it takes the NVIDIA GPU with CUDA and the most VRAM, and its NVENC
 and NVOFA helpers use CUDA device 0, which on a machine with more than one NVIDIA GPU can be another
@@ -172,14 +179,14 @@ The driver's NGX core `_nvngx.dll` is loaded from the installed driver, never co
 
 | Capability | CLI | Web UI |
 | --- | --- | --- |
-| DLSS SR upscaling (feature 1) | ✅ `sr` | ✅ (`sr`) |
-| DLSS Neural Rendering (feature 18) | ✅ `nr` (PNG) | ✅ (`nr`, image & video) |
+| DLSS SR upscaling (feature 1) | ✅ `sr` (PNG), `video --engine sr` | ✅ (`sr`) |
+| DLSS Neural Rendering (feature 18) | ✅ `nr` (PNG), `video --engine nr` | ✅ (`nr`, image & video) |
 | DLSS Frame Generation (feature 11) | ✅ `fg` | ✅ (video tab) |
 | DLSS version enumeration / selection | ✅ `versions` + `--dlss-version` | ✅ (picker) |
 | Browser file upload | — | ✅ (POST /api/upload) |
-| NR look controls | ✅ (`nr`) | ✅ |
-| NVENC GPU encode | ✅ (`fg` default when available) | ✅ (default when available) |
-| GPU optical flow (NVOFA) | ✅ (fg motion) | ✅ (SR motion) |
+| NR look controls | ✅ (`nr`, `video`) | ✅ |
+| NVENC GPU encode | ✅ (`fg` and `video` default when available) | ✅ (default when available) |
+| GPU optical flow (NVOFA) | ✅ (fg motion, SR motion in `video`) | ✅ (SR motion) |
 | RTX Video Super Resolution / TrueHDR | ❌ | ❌ (not implemented) |
 | DLSS Ray Reconstruction (feature 13) | ❌ (listed by `versions`) | ❌ (listed in the version catalog) |
 
