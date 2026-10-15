@@ -4,6 +4,7 @@
  */
 import type { JobRequest } from "../server/api-types.ts";
 import { JobCancelledError } from "./cancel.ts";
+import { loadEngine } from "./engine-loader.ts";
 import type { FrameTally, ProgressReporter } from "./frame-progress.ts";
 import { processImage } from "./image.ts";
 
@@ -53,13 +54,7 @@ async function run(message: RunMessage): Promise<void> {
     if (frames === undefined) log(text);
   };
   try {
-    if (request.engine === "nr") {
-      // Side-effect import: registers the engine with createEngine's factory.
-      // Imported lazily so a missing NVIDIA runtime cannot break a bypass job.
-      await import("../ngx/nr.ts");
-    } else if (request.engine === "sr") {
-      await import("../ngx/sr-engine.ts");
-    }
+    await loadEngine(request.engine);
     if (request.kind === "image") {
       const result = await processImage({
         input: request.input,
