@@ -38,6 +38,25 @@ const WARMUP_OPT: OptionSpec = { flag: "--warmup N", desc: `extra passes over th
 /** `fg --multiplier`: the range the API validates frameGen.multiplier against, and the multiplier used when it is absent. */
 export const FG_MULTIPLIER_OPTION = { ...SETTING_RANGES.multiplier, fallback: DEFAULT_FRAME_GEN_MULTIPLIER } as const;
 
+/** `--quality`: the range the API validates encode.quality against, and the quality a job without encode settings gets. */
+export const QUALITY_OPTION = { ...SETTING_RANGES.quality, fallback: DEFAULT_ENCODE_SETTINGS.quality } as const;
+
+/** The encode rows, printed with the defaults a job without encode settings gets. */
+const CODEC_OPT: OptionSpec = { flag: "--codec NAME", desc: `encoder: ${ENCODE_CODECS.filter((codec) => !isNvenc(codec)).join(", ")}, or ${FFMPEG_NVENC_ENCODERS.join("/")} for GPU`, def: `${DEFAULT_ENCODE_SETTINGS.codec}, or ${cpuSiblingCodec(DEFAULT_ENCODE_SETTINGS.codec)} when NVENC cannot start` };
+const QUALITY_OPT: OptionSpec = { flag: "--quality N", desc: `encoder quality (CRF for CPU, CQ for NVENC), ${settingRange("quality")} (lower = better)`, def: String(QUALITY_OPTION.fallback) };
+
+/** The Neural Rendering look rows; nrSettingsOption reads them. */
+const NR_SETTING_OPTS: readonly OptionSpec[] = [
+  { flag: "--intensity F", desc: `overall strength, ${settingRange("intensity")}; the installed ${NR_RUNTIME_MEASURED} stops responding above ${NR_INTENSITY_EFFECTIVE_MAX}, so every value from there up gives the same image`, def: String(DEFAULT_NR_SETTINGS.intensity) },
+  { flag: "--style N", desc: `look style: ${NR_STYLES.map((style) => `${style} = ${NR_STYLE_LABELS[style]}`).join(", ")} (strong, visible effect)`, def: String(DEFAULT_NR_SETTINGS.style) },
+  { flag: "--preset ID", desc: `NR model preset hint ${NR_PRESETS[0]}..${NR_PRESETS.at(-1)}; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.preset) },
+  { flag: "--local-tone F", desc: `local tone-mapping strength (float), ${settingRange("localTone")}; 1 = neutral`, def: String(DEFAULT_NR_SETTINGS.localTone) },
+  { flag: "--local-structure F", desc: `local detail / structure strength (float), ${settingRange("localStructure")}; 1 = neutral`, def: String(DEFAULT_NR_SETTINGS.localStructure) },
+  { flag: "--skin-structure F", desc: `detail strength on skin regions (float), ${settingRange("skinStructure")}; ${DEFAULT_NR_SETTINGS.skinStructure} = runtime default; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.skinStructure) },
+  { flag: "--auto-mask", desc: "let the runtime derive the processed-region mask instead of the whole frame", def: "off" },
+  { flag: "--ui-correction", desc: `protect overlays / text / sharp UI edges from being re-rendered; ${NR_IGNORED_NOTE}`, def: "off" },
+];
+
 export const RUNTIME_OPT: OptionSpec = { flag: "--runtime DIR", desc: "runtime folder holding the NGX DLLs", def: "<repo>/runtime" };
 export const ADAPTER_OPT: OptionSpec = { flag: "--adapter N", desc: "GPU adapter index as `probe` listed it in this session (DXGI indices can change between runs); the adapter must have a CUDA device. auto = the NVIDIA adapter with the most VRAM that has one", def: "auto" };
 
@@ -94,19 +113,7 @@ export const COMMANDS: readonly CommandSpec[] = [
       { name: "input.png", desc: "source image (PNG only)" },
       { name: "output.png", desc: "destination; defaults to <input>.nr.png next to the input" },
     ],
-    options: [
-      { flag: "--intensity F", desc: `overall strength, ${settingRange("intensity")}; the installed ${NR_RUNTIME_MEASURED} stops responding above ${NR_INTENSITY_EFFECTIVE_MAX}, so every value from there up gives the same image`, def: String(DEFAULT_NR_SETTINGS.intensity) },
-      { flag: "--style N", desc: `look style: ${NR_STYLES.map((style) => `${style} = ${NR_STYLE_LABELS[style]}`).join(", ")} (strong, visible effect)`, def: String(DEFAULT_NR_SETTINGS.style) },
-      { flag: "--preset ID", desc: `NR model preset hint ${NR_PRESETS[0]}..${NR_PRESETS.at(-1)}; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.preset) },
-      { flag: "--local-tone F", desc: `local tone-mapping strength (float), ${settingRange("localTone")}; 1 = neutral`, def: String(DEFAULT_NR_SETTINGS.localTone) },
-      { flag: "--local-structure F", desc: `local detail / structure strength (float), ${settingRange("localStructure")}; 1 = neutral`, def: String(DEFAULT_NR_SETTINGS.localStructure) },
-      { flag: "--skin-structure F", desc: `detail strength on skin regions (float), ${settingRange("skinStructure")}; ${DEFAULT_NR_SETTINGS.skinStructure} = runtime default; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.skinStructure) },
-      { flag: "--auto-mask", desc: "let the runtime derive the processed-region mask instead of the whole frame", def: "off" },
-      { flag: "--ui-correction", desc: `protect overlays / text / sharp UI edges from being re-rendered; ${NR_IGNORED_NOTE}`, def: "off" },
-      WARMUP_OPT,
-      RUNTIME_OPT,
-      ADAPTER_OPT,
-    ],
+    options: [...NR_SETTING_OPTS, WARMUP_OPT, RUNTIME_OPT, ADAPTER_OPT],
   },
   {
     name: "fg",
@@ -120,8 +127,8 @@ export const COMMANDS: readonly CommandSpec[] = [
       { flag: "--fps RATE", desc: `output frame rate: ${FRAME_GEN_FPS_CHOICES.join(", ")}, or an exact num/den; overrides --multiplier`, def: "source fps x --multiplier" },
       { flag: "--multiplier N", desc: `output/input frame ratio when --fps is not given, a whole number from ${FG_MULTIPLIER_OPTION.min} to ${FG_MULTIPLIER_OPTION.max} (2 = double fps)`, def: String(FG_MULTIPLIER_OPTION.fallback) },
       { flag: "--engine MODE", desc: `auto = one native session when output/source is an exact integer from 2 up to ${FRAME_GEN_NATIVE_MAXIMUM} (3x and above only with HAGS on), else a cascade of 2x stages; when the runtime disables every interval of a native 3x+ session, auto re-runs it as a cascade; native or cascade force that path`, def: "auto" },
-      { flag: "--codec NAME", desc: `encoder: ${ENCODE_CODECS.filter((codec) => !isNvenc(codec)).join(", ")}, or ${FFMPEG_NVENC_ENCODERS.join("/")} for GPU`, def: `${DEFAULT_ENCODE_SETTINGS.codec}, or ${cpuSiblingCodec(DEFAULT_ENCODE_SETTINGS.codec)} when NVENC cannot start` },
-      { flag: "--quality N", desc: `encoder quality (CRF for CPU, CQ for NVENC), ${settingRange("quality")} (lower = better)`, def: String(DEFAULT_ENCODE_SETTINGS.quality) },
+      CODEC_OPT,
+      QUALITY_OPT,
       RUNTIME_OPT,
     ],
     notes: ["A target at or below the source frame rate (--multiplier 1, or a lower --fps) generates no frames: the video is only resampled to it."],
