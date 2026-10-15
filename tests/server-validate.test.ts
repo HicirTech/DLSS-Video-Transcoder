@@ -86,13 +86,12 @@ describe("validateJobRequest", () => {
     expect(validateJobRequest(request({ kind: "video", frameGen: { targetFps: "120" } }))).toBeNull();
   });
 
-  test("a DLL folder rides along only with an engine that loads one: not bypass, not frame generation", () => {
+  test("a DLL folder rides along with a job that loads a DLSS DLL: sr, nr or frame generation, not bypass", () => {
     const dllDir = join(ROOT, "dlss", "310.7");
     for (const engine of ["sr", "nr"]) expect(validateJobRequest(request({ engine, dllDir })), engine).toBeNull();
     expect(validateJobRequest(request({ engine: "bypass", dllDir }))).toMatch(/dllDir does not apply to the bypass engine, which loads no DLSS DLL; omit it/);
-    expect(validateJobRequest(request({ frameGen: { targetFps: "120" }, dllDir }))).toMatch(/dllDir does not apply to frame generation.*no version choice; omit it/);
-    // Frame generation ignores the engine, so the folder is refused whatever engine comes with it.
-    expect(validateJobRequest(request({ engine: "bypass", frameGen: { targetFps: "120" }, dllDir }))).toMatch(/dllDir does not apply to frame generation/);
+    // Frame generation ignores the engine and loads DLSS Frame Generation, so the folder is taken whatever engine comes with it.
+    for (const engine of ["sr", "nr", "bypass"]) expect(validateJobRequest(request({ engine, frameGen: { targetFps: "120" }, dllDir })), engine).toBeNull();
     expect(validateJobRequest(request({ engine: "bypass" }))).toBeNull();
   });
 

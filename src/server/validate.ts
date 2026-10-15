@@ -141,9 +141,9 @@ export function validateJobRequest(value: unknown): string | null {
   if (wrongMotion) return wrongMotion;
   if (v.dllDir !== undefined) {
     if (typeof v.dllDir !== "string") return "dllDir must be a string when present.";
-    // Frame generation and the bypass engine load no DLL that a version folder could replace: accepting the field would ignore it without a word.
-    if (v.frameGen !== undefined) return "dllDir does not apply to frame generation, which runs the bundled DLSS Frame Generation runtime and has no version choice; omit it.";
-    if (v.engine === "bypass") return "dllDir does not apply to the bypass engine, which loads no DLSS DLL; omit it.";
+    // The bypass engine loads no DLL that a version folder could replace: accepting the field would ignore it
+    // without a word. A frame generation job ignores its engine and loads DLSS Frame Generation instead.
+    if (v.engine === "bypass" && v.frameGen === undefined) return "dllDir does not apply to the bypass engine, which loads no DLSS DLL; omit it.";
   }
   if (v.adapterUuid !== undefined) {
     if (typeof v.adapterUuid !== "string" || !DEVICE_UUID_PATTERN.test(v.adapterUuid)) {
