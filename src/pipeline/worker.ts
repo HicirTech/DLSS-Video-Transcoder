@@ -88,6 +88,7 @@ async function run(message: RunMessage): Promise<void> {
         codec: request.encode?.codec,
         copyAudio: request.encode?.copyAudio,
         runtimeDir: message.runtimeDir,
+        dllDir: request.dllDir,
         signal: jobCancellation.signal,
         onFinishing,
         onProgress,

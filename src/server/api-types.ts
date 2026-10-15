@@ -221,10 +221,10 @@ export interface JobRequest {
   };
   /**
    * Absolute folder of a specific DLSS DLL version to load (the "dir" of a version in
-   * GET /api/catalog); omit to use the bundled runtime DLL. Applies to the sr and nr
-   * engines, each to the folders of its own feature only (DLSS Super Resolution's for
-   * sr, DLSS Neural Rendering's for nr). The bypass engine and frame generation load no
-   * DLL a version folder could replace, so a job with either rejects it.
+   * GET /api/catalog); omit to use the bundled runtime DLL. Only the folders of the feature
+   * the job loads apply: DLSS Super Resolution's for the sr engine, DLSS Neural Rendering's
+   * for nr, DLSS Frame Generation's for a frameGen job. The bypass engine loads no DLL a
+   * version folder could replace, so a bypass job without frameGen rejects it.
    */
   dllDir?: string;
   /**

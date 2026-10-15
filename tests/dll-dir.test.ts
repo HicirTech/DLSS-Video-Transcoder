@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { FEATURES, type FeatureDescriptor, type FeatureKey, type RuntimeManifest, buildRuntimeCatalog, featureByKey } from "../src/ngx/runtime-catalog.ts";
-import { checkDllDir } from "../src/server/dll-dir.ts";
+import { checkDllDir, dllFeatureOf } from "../src/server/dll-dir.ts";
 
 const RUNTIME = resolve(sep === "\\" ? "C:\\app\\runtime" : "/app/runtime");
 
@@ -29,6 +29,7 @@ describe("checkDllDir", () => {
   test("accepts the version folders of the job's own feature", () => {
     expect(checkDllDir(listedDir("sr"), "sr", CATALOG)).toBeNull();
     expect(checkDllDir(listedDir("nr"), "nr", CATALOG)).toBeNull();
+    expect(checkDllDir(listedDir("fg"), "fg", CATALOG)).toBeNull();
   });
 
   test("accepts any spelling of that folder", () => {
@@ -43,11 +44,14 @@ describe("checkDllDir", () => {
     expect(checkDllDir(listedDir("rr"), "nr", CATALOG)).toBe(
       `dllDir ${listedDir("rr")} holds DLSS Ray Reconstruction (nvngx_dlssd.dll); an nr job needs a DLSS Neural Rendering folder (nvngx_dlssnr.dll) from GET /api/catalog.`,
     );
+    expect(checkDllDir(listedDir("sr"), "fg", CATALOG)).toBe(
+      `dllDir ${listedDir("sr")} holds DLSS Super Resolution (nvngx_dlss.dll); a frame generation job needs a DLSS Frame Generation folder (nvngx_dlssg.dll) from GET /api/catalog.`,
+    );
   });
 
-  test("an sr job is refused every other feature's folder, and so is an nr job", () => {
+  test("an sr, nr or frame generation job is refused every other feature's folder", () => {
     const others = (key: FeatureKey): FeatureKey[] => FEATURES.map((feature) => feature.key).filter((other) => other !== key);
-    for (const engine of ["sr", "nr"] as const) {
+    for (const engine of ["sr", "nr", "fg"] as const) {
       for (const other of others(engine)) {
         expect(checkDllDir(listedDir(other), engine, CATALOG), `${engine} job, ${other} folder`).toContain(`holds ${featureByKey(other).name}`);
       }
@@ -69,6 +73,15 @@ describe("checkDllDir", () => {
   });
 });
 
+describe("dllFeatureOf", () => {
+  test("a frame generation job loads DLSS Frame Generation whatever its engine; otherwise the engine says, and bypass loads nothing", () => {
+    for (const engine of ["sr", "nr", "bypass"] as const) expect(dllFeatureOf({ engine, frameGen: { targetFps: "60" } }), engine).toBe("fg");
+    expect(dllFeatureOf({ engine: "sr" })).toBe("sr");
+    expect(dllFeatureOf({ engine: "nr" })).toBe("nr");
+    expect(dllFeatureOf({ engine: "bypass" })).toBeNull();
+  });
+});
+
 describe("checkDllDir against the catalog of a runtime tree", () => {
   const dirs: string[] = [];
   afterEach(() => {
@@ -85,7 +98,7 @@ describe("checkDllDir against the catalog of a runtime tree", () => {
     }
     // An empty DLSS Swapper cache, so the machine's own installs do not join the catalog.
     const catalog = buildRuntimeCatalog(runtime, join(root, "no-swapper-cache"));
-    for (const engine of ["sr", "nr"] as const) {
+    for (const engine of ["sr", "nr", "fg"] as const) {
       for (const feature of FEATURES) {
         const message = checkDllDir(join(runtime, feature.runtimeSubdir), engine, catalog);
         if (feature.key === engine) expect(message, `${engine} job, own folder`).toBeNull();
