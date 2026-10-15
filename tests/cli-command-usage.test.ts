@@ -1,12 +1,13 @@
 /**
  * Each command ends a command line it cannot use with a UsageError (exit status 2) before it opens a file
- * or the GPU. Only argument checks run here: every call below fails before any input is read. No GPU.
+ * or the GPU. Only argument checks run here: no call below reads an input or opens the GPU.
  */
 import { describe, expect, test } from "bun:test";
 import { DlssRenderPreset, DEFAULT_SR_PRESET } from "../src/ngx/results.ts";
+import { dlssVersionOption } from "../src/cli/dlss-version-option.ts";
 import { fgCommand, targetFpsOption } from "../src/cli/fg-command.ts";
 import { nrCommand } from "../src/cli/nr-command.ts";
-import { dllDirOption, presetKeyOption, srCommand } from "../src/cli/sr-command.ts";
+import { presetKeyOption, srCommand } from "../src/cli/sr-command.ts";
 import { UsageError } from "../src/cli/usage-error.ts";
 import { DEFAULT_RUNTIME_DIR } from "../src/paths.ts";
 import { DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS } from "../src/server/api-types.ts";
@@ -38,9 +39,9 @@ describe("sr", () => {
   });
 
   test("a --dlss-version that matches no installed version is a usage error that says how to list them", async () => {
-    const error = await usageErrorOf(() => dllDirOption(["--dlss-version", "no-such-version"], DEFAULT_RUNTIME_DIR));
-    expect(error.message).toBe("--dlss-version no-such-version matches no installed DLSS SR version; list them with 'bun run src/cli.ts versions'");
-    expect(dllDirOption([], DEFAULT_RUNTIME_DIR)).toBeUndefined();
+    const error = await usageErrorOf(() => dlssVersionOption(["--dlss-version", "no-such-version"], DEFAULT_RUNTIME_DIR, "sr"));
+    expect(error.message).toBe("--dlss-version no-such-version matches no installed DLSS Super Resolution version; list them with 'bun run src/cli.ts versions'");
+    expect(dlssVersionOption([], DEFAULT_RUNTIME_DIR, "sr")).toBeUndefined();
   });
 });
 
