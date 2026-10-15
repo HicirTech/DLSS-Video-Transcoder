@@ -320,13 +320,16 @@ async function runRawvideo(
   const encoderArgv = encoderArgs(encode, cudaOrdinal);
   progress(0, `encode: ${encoderArgv[encoderArgv.indexOf("-c:v") + 1]} via ffmpeg (single-thread rawvideo pipeline)`);
   const decoder = Bun.spawn([ffmpeg, ...decodeArgs], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  // No -shortest: it trims whichever stream runs longer, and when a source's audio ends before its video (a
+  // 30 s stream-copied cut of 2.mp4 ends its audio 23 ms early) that drops video frames the job counted as
+  // written. Every frame written is a source frame, so the output keeps the source's stream lengths, as the
+  // NVENC paths' muxCopyArgs does.
   const encoder = Bun.spawn(
     [
       ffmpeg, "-v", "error", "-y",
       "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${outWidth}x${outHeight}`, "-r", info.fpsText, "-i", "pipe:0",
       ...(wantAudio ? ["-i", options.input] : []),
       "-map", "0:v:0", ...audioArgs(wantAudio, encode.container), ...encoderArgv, ...aspectArgs(info.displayAspect, outWidth, outHeight, null), ...faststartArgs(encode.container),
-      ...(wantAudio ? ["-shortest"] : []),
       output,
     ],
     { stdin: "pipe", stdout: "ignore", stderr: "pipe" },
