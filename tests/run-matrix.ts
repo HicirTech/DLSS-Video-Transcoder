@@ -1,7 +1,8 @@
 /**
- * Manual harness (not part of `bun test`): the server-side job paths the CLI
- * cannot reach — processImage and processVideo across engine x scale x motion x
- * codec x container. Prints one line per combination with the output hash, so a
+ * Manual harness (not part of `bun test`): the server-side job paths across
+ * engine x scale x motion x codec x container — processImage, which no CLI
+ * command runs, and processVideo, which the video command runs one combination
+ * at a time. Prints one line per combination with the output hash, so a
  * refactor can be compared line by line.
  *
  *   bun run tests/run-matrix.ts <outDir> <clip.mp4> <image.png>
@@ -9,8 +10,8 @@
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { join } from "node:path";
-// Both engines must be registered before engine.ts can construct them; the job
-// worker does the same two imports at src/pipeline/worker.ts:36-37.
+// Both engines must be registered before engine.ts can construct them; a job
+// or the video command imports the one it runs through src/pipeline/engine-loader.ts.
 import "../src/ngx/nr.ts";
 import "../src/ngx/sr-engine.ts";
 import { DEFAULT_RUNTIME_DIR } from "../src/paths.ts";
