@@ -77,12 +77,19 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
   const [dllDir, setDllDir] = useState("");
 
   const canRun = input.trim() !== "" && !runner.submitting;
-  const usesDlss = !frameGenOn && (engine === "sr" || engine === "nr");
+  // The NGX feature whose installed versions apply: frame generation's while it is on, else the engine's;
+  // the bypass engine loads no DLSS DLL.
+  const versionFeatureId = frameGenOn ? 11 : engine === "sr" ? 1 : engine === "nr" ? 18 : null;
   const usesMotion = !frameGenOn && ENGINE_USES_MOTION[engine];
 
   const changeEngine = (next: EngineKind): void => {
     setEngine(next);
     setDllDir(""); // a version chosen for one feature does not apply to another
+  };
+
+  const changeFrameGen = (on: boolean): void => {
+    setFrameGenOn(on);
+    setDllDir(""); // frame generation loads another feature's DLL than the engine does
   };
 
   const run = (): void => {
@@ -100,7 +107,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
     if (frameGenOn) request.frameGen = { targetFps, engine: fgEngine };
     // Frame generation picks its GPU in its host process (README, "Shared options"), so the stored GPU choice is left off it.
     else if (settings.adapterUuid) request.adapterUuid = settings.adapterUuid;
-    if (usesDlss && dllDir !== "") request.dllDir = dllDir;
+    if (versionFeatureId !== null && dllDir !== "") request.dllDir = dllDir;
     if (output.trim() !== "") request.output = output.trim();
     void runner.submit(request);
   };
@@ -124,7 +131,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
       <Section title="Frame generation">
         <Stack direction="row" spacing={2} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
           <FormControlLabel
-            control={<Switch checked={frameGenOn} onChange={(_e, checked) => setFrameGenOn(checked)} />}
+            control={<Switch checked={frameGenOn} onChange={(_e, checked) => changeFrameGen(checked)} />}
             label="Interpolate to a higher frame rate"
           />
           <FormControl sx={{ minWidth: 180 }} disabled={!frameGenOn}>
@@ -157,6 +164,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
               ))}
             </Select>
           </FormControl>
+          {frameGenOn ? <VersionSelect featureId={11} value={dllDir} onChange={setDllDir} /> : null}
         </Stack>
         <FormHelperText sx={{ mt: 1 }}>
           DLSS Frame Generation to the chosen output rate; the result keeps the source duration, and its audio when Copy
@@ -182,7 +190,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
         <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
           <EngineSelect value={engine} disabled={frameGenOn} onChange={changeEngine} />
           <MotionSelect value={usesMotion ? motion : "none"} disabled={!usesMotion} onChange={setMotion} />
-          {usesDlss ? <VersionSelect featureId={engine === "sr" ? 1 : 18} value={dllDir} onChange={setDllDir} /> : null}
+          {!frameGenOn && versionFeatureId !== null ? <VersionSelect featureId={versionFeatureId} value={dllDir} onChange={setDllDir} /> : null}
           <ScaleSettingsEditor value={settings.scale} onChange={setScale} />
         </Stack>
       </Section>
