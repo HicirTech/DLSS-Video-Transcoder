@@ -15,6 +15,13 @@ describe("decodeArgv", () => {
     expect(decodeArgv({ input: "in.mp4", source: { width: 1920, height: 1080 }, output: { width: 1280, height: 720 } })).toEqual(scaled);
     expect(decodeArgv({ input: "in.mp4", source: { width: 1280, height: 1080 }, output: { width: 1280, height: 720 } })).toEqual(scaled);
   });
+
+  test("resamples to a given rate, the one a video job stamps its output with, after any scale", () => {
+    expect(decodeArgv({ input: "in.mp4", source: { width: 1920, height: 1080 }, output: { width: 1280, height: 720 }, frameRate: "56114792/1868261" })).toEqual([
+      "-v", "error", "-nostdin", "-i", "in.mp4", "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba",
+      "-vf", "scale=1280:720:flags=lanczos", "-fps_mode", "cfr", "-r", "56114792/1868261", "pipe:1",
+    ]);
+  });
 });
 
 describe("audioArgs and faststartArgs", () => {

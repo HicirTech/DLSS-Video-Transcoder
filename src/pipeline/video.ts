@@ -207,7 +207,7 @@ async function runGpuResidentNr(
   try {
     const { num, den } = rateParts(info.fpsText);
     const layout = linearLayout(target.width, target.height, DXGI_FORMAT_R8G8B8A8_UNORM);
-    const decodeArgs = decodeArgv({ input: options.input, source: info, output: target });
+    const decodeArgs = decodeArgv({ input: options.input, source: info, output: target, frameRate: info.fpsText });
     const wantAudio = info.hasAudio && encode.copyAudio;
     const sinkArgs = muxCopyArgs({
       demux: nrNative.demux, frameRate: info.fpsText, audioSource: wantAudio ? options.input : null,
@@ -376,7 +376,7 @@ async function runEngineJob(job: VideoJob): Promise<VideoJobResult> {
   const outHeight = engine.outputHeight;
 
   // Decode argv without the binary; both encode paths below spawn it themselves.
-  const decodeArgs = decodeArgv({ input: options.input, source: info, output: { width: renderWidth, height: renderHeight } });
+  const decodeArgs = decodeArgv({ input: options.input, source: info, output: { width: renderWidth, height: renderHeight }, frameRate: info.fpsText });
 
   // Only open the source as a second input when its audio is actually copied:
   // otherwise the encoder demuxes and decodes the whole source a second time,

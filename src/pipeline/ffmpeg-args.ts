@@ -61,13 +61,20 @@ interface FrameSize {
 /**
  * ffmpeg argv (after the binary) that decodes the first video stream to raw RGBA frames of `output` size
  * on pipe:1, scaling with lanczos only when that differs from the `source` size.
+ *
+ * rawvideo output is constant-rate. Without `frameRate` ffmpeg resamples to the stream's nominal rate
+ * (r_frame_rate), the clock frame generation plans on. A video job passes the rate it stamps its output
+ * with: where a source's average rate is not its nominal one, a decode at the nominal rate drops frames
+ * (3 of 2.mp4's 3737) and the stamped clock then plays everything after each drop a frame early, ahead of
+ * the audio.
  */
-export function decodeArgv(spec: { input: string; source: FrameSize; output: FrameSize }): string[] {
-  const { input, source, output } = spec;
+export function decodeArgv(spec: { input: string; source: FrameSize; output: FrameSize; frameRate?: string }): string[] {
+  const { input, source, output, frameRate } = spec;
   const rescaled = output.width !== source.width || output.height !== source.height;
   return [
     "-v", "error", "-nostdin", "-i", input, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba",
     ...(rescaled ? ["-vf", `scale=${output.width}:${output.height}:flags=lanczos`] : []),
+    ...(frameRate === undefined ? [] : ["-fps_mode", "cfr", "-r", frameRate]),
     "pipe:1",
   ];
 }
