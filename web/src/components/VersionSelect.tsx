@@ -1,12 +1,13 @@
 import { useEffect, useId, useState } from "react";
 import { FormControl, FormHelperText, InputLabel, MenuItem, Select } from "@mui/material";
 import type { RuntimeManifest } from "../../../src/ngx/runtime-catalog";
+import type { DllFeature } from "../../../src/server/settings-in-use";
 import { api } from "../api";
 import { errorMessage } from "../errors";
 
 interface VersionSelectProps {
-  /** NGX feature id: 1 = Super Resolution, 11 = Frame Generation, 18 = Neural Rendering. */
-  featureId: number;
+  /** The feature of the DLL the job loads (dllFeatureOf), whose installed versions are offered. */
+  feature: DllFeature;
   /** Selected DLL folder, or "" for the bundled default. */
   value: string;
   disabled?: boolean;
@@ -14,7 +15,7 @@ interface VersionSelectProps {
 }
 
 /** Lets the user pick a specific installed DLSS DLL version (or the bundled default) for a feature. */
-export function VersionSelect({ featureId, value, disabled, onChange }: VersionSelectProps) {
+export function VersionSelect({ feature, value, disabled, onChange }: VersionSelectProps) {
   // Per instance, not per feature: the image and video panels both render the
   // version picker for the same feature, so a feature-keyed id appears twice.
   const labelId = useId();
@@ -32,7 +33,7 @@ export function VersionSelect({ featureId, value, disabled, onChange }: VersionS
     };
   }, []);
 
-  const versions = catalog?.features.find((f) => f.id === featureId)?.versions ?? [];
+  const versions = catalog?.features.find((f) => f.key === feature)?.versions ?? [];
 
   return (
     <FormControl sx={{ minWidth: 220 }} disabled={disabled}>

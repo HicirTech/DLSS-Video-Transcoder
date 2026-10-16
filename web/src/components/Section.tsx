@@ -27,6 +27,16 @@ export function Section({ title, action, children, sx }: SectionProps) {
   );
 }
 
+/** A section heading's note that the job ignores the section, with the reason (unusedSettings); nothing when it applies. */
+export function UnusedNote({ reason }: { reason: string | null }) {
+  if (reason === null) return null;
+  return (
+    <Typography variant="caption" color="warning.main" sx={{ ml: 2, textAlign: "right" }}>
+      {reason}
+    </Typography>
+  );
+}
+
 interface KeyValueListProps {
   rows: Array<{ label: string; value: ReactNode }>;
   /** Width of the label column in px. */

@@ -9,13 +9,15 @@ interface NumberFieldProps {
   step?: number;
   integer?: boolean;
   disabled?: boolean;
+  /** Marks a value the field would not accept now, such as one stored under wider limits. */
+  error?: boolean;
   helperText?: string;
   sx?: SxProps<Theme>;
   onChange: (value: number) => void;
 }
 
 /** Numeric TextField that commits a clamped value on blur or Enter, so the field can be cleared while typing. */
-export function NumberField({ label, value, min, max, step, integer, disabled, helperText, sx, onChange }: NumberFieldProps) {
+export function NumberField({ label, value, min, max, step, integer, disabled, error, helperText, sx, onChange }: NumberFieldProps) {
   const [draft, setDraft] = useState<string | null>(null);
 
   const commit = (): void => {
@@ -38,6 +40,7 @@ export function NumberField({ label, value, min, max, step, integer, disabled, h
       type="number"
       value={draft ?? String(value)}
       disabled={disabled}
+      error={error}
       helperText={helperText}
       sx={sx}
       onChange={(event) => setDraft(event.target.value)}

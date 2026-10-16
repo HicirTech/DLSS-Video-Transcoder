@@ -3,6 +3,7 @@ import { Alert, Box, Button, Chip, FormControl, FormControlLabel, FormHelperText
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import type { EngineKind, FrameGenEngine, FrameGenFps, JobRequest, JobStatus, MotionKind, ToolsReport } from "../../../src/server/api-types";
 import { ENGINE_USES_MOTION, FFMPEG_SUPPLY_HINT, FRAME_GEN_CONTAINER, FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM } from "../../../src/server/api-types";
+import { dllFeatureOf, outputSizeLimits, unusedSettings } from "../../../src/server/settings-in-use";
 import { api } from "../api";
 import { useJobRunner } from "../hooks/useJobRunner";
 import { useSettings } from "../hooks/useSettings";
@@ -11,7 +12,7 @@ import { JobCard } from "./JobCard";
 import { EngineSelect, MotionSelect, PathFields } from "./JobFormFields";
 import { NrSettingsEditor } from "./NrSettingsEditor";
 import { ScaleSettingsEditor } from "./ScaleSettingsEditor";
-import { Mono, Section } from "./Section";
+import { Mono, Section, UnusedNote } from "./Section";
 import { VersionSelect } from "./VersionSelect";
 
 interface VideoPanelProps {
@@ -77,10 +78,10 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
   const [dllDir, setDllDir] = useState("");
 
   const canRun = input.trim() !== "" && !runner.submitting;
-  // The NGX feature whose installed versions apply: frame generation's while it is on, else the engine's;
-  // the bypass engine loads no DLSS DLL.
-  const versionFeatureId = frameGenOn ? 11 : engine === "sr" ? 1 : engine === "nr" ? 18 : null;
-  const usesMotion = !frameGenOn && ENGINE_USES_MOTION[engine];
+  const shape = { engine, frameGen: frameGenOn };
+  const unused = unusedSettings(shape);
+  const dllFeature = dllFeatureOf(shape);
+  const usesMotion = unused.motion === null;
 
   const changeEngine = (next: EngineKind): void => {
     setEngine(next);
@@ -107,7 +108,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
     if (frameGenOn) request.frameGen = { targetFps, engine: fgEngine };
     // Frame generation picks its GPU in its host process (README, "Shared options"), so the stored GPU choice is left off it.
     else if (settings.adapterUuid) request.adapterUuid = settings.adapterUuid;
-    if (versionFeatureId !== null && dllDir !== "") request.dllDir = dllDir;
+    if (dllFeature !== null && dllDir !== "") request.dllDir = dllDir;
     if (output.trim() !== "") request.output = output.trim();
     void runner.submit(request);
   };
@@ -164,34 +165,26 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
               ))}
             </Select>
           </FormControl>
-          {frameGenOn ? <VersionSelect featureId={11} value={dllDir} onChange={setDllDir} /> : null}
+          {frameGenOn && dllFeature !== null ? <VersionSelect feature={dllFeature} value={dllDir} onChange={setDllDir} /> : null}
         </Stack>
         <FormHelperText sx={{ mt: 1 }}>
-          DLSS Frame Generation to the chosen output rate; the result keeps the source duration, and its audio when Copy
-          source audio track is on below. Path Auto runs
+          DLSS Frame Generation to the chosen output rate; the result keeps the source duration, and its audio when the
+          audio switch below is on. Path Auto runs
           one native DLSSG session when output ÷ source is an exact integer the runtime supports ({FRAME_GEN_NATIVE_MAXIMUM})
           and, from 3× up, hardware-accelerated GPU scheduling (HAGS) is on; otherwise it chains 2× stages in memory (1
           stage for 2×, 2 for 4×, else 3 on an 8× grid) and places the nearest frame on each output instant. When the
           runtime generates nothing in a native multi-frame session, Auto falls back to the cascade by itself. Uses the
-          codec, quality and audio settings below and always writes MP4; the engine and output-size settings do not apply.
+          codec, quality and audio settings below and always writes MP4.
         </FormHelperText>
+        {unused.gpu !== null ? <FormHelperText>{unused.gpu}</FormHelperText> : null}
       </Section>
 
-      <Section
-        title="Engine, motion and output size"
-        action={
-          frameGenOn ? (
-            <Typography variant="caption" color="warning.main">
-              Ignored while frame generation is on
-            </Typography>
-          ) : undefined
-        }
-      >
+      <Section title="Engine, motion and output size" action={<UnusedNote reason={unused.engine} />}>
         <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
-          <EngineSelect value={engine} disabled={frameGenOn} onChange={changeEngine} />
+          <EngineSelect value={engine} disabled={unused.engine !== null} onChange={changeEngine} />
           <MotionSelect value={usesMotion ? motion : "none"} disabled={!usesMotion} onChange={setMotion} />
-          {!frameGenOn && versionFeatureId !== null ? <VersionSelect featureId={versionFeatureId} value={dllDir} onChange={setDllDir} /> : null}
-          <ScaleSettingsEditor value={settings.scale} onChange={setScale} />
+          {!frameGenOn && dllFeature !== null ? <VersionSelect feature={dllFeature} value={dllDir} onChange={setDllDir} /> : null}
+          <ScaleSettingsEditor value={settings.scale} limits={outputSizeLimits(engine)} disabled={unused.outputSize !== null} onChange={setScale} />
         </Stack>
       </Section>
 
@@ -203,19 +196,8 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
         />
       </Section>
 
-      <Section
-        title="Neural rendering"
-        action={
-          engine !== "nr" ? (
-            <Typography variant="caption" color="warning.main">
-              {engine === "sr"
-                ? "Not used by Super Resolution — it upscales to the output size above"
-                : "Not used by the bypass engine (plain passthrough copy)"}
-            </Typography>
-          ) : undefined
-        }
-      >
-        <NrSettingsEditor value={settings.nr} onChange={setNr} />
+      <Section title="Neural rendering" action={<UnusedNote reason={unused.nrLook} />}>
+        <NrSettingsEditor value={settings.nr} disabled={unused.nrLook !== null} onChange={setNr} />
       </Section>
 
       <Box>

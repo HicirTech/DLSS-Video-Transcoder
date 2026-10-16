@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { FormControl, FormControlLabel, FormHelperText, InputLabel, MenuItem, Select, Stack, Switch } from "@mui/material";
-import { DEFAULT_ENCODE_SETTINGS, ENCODE_CODECS, ENCODE_CONTAINERS, SETTING_RANGES, type EncodeSettings } from "../../../src/server/api-types";
+import { AAC_KBPS, AUDIO_IN_CONTAINER, DEFAULT_ENCODE_SETTINGS, ENCODE_CODECS, ENCODE_CONTAINERS, SETTING_RANGES, type EncodeSettings } from "../../../src/server/api-types";
 import { NumberField } from "./NumberField";
 
 interface EncodeSettingsEditorProps {
@@ -21,10 +21,16 @@ const CODEC_LABELS: Record<EncodeSettings["codec"], string> = {
 };
 const CONTAINER_LABELS: Record<EncodeSettings["container"], string> = { mp4: "MP4", mkv: "MKV", mov: "MOV" };
 
+/** The audio switch's words for what the container in effect does with the track (AUDIO_IN_CONTAINER). */
+function audioSwitchLabel(container: EncodeSettings["container"]): string {
+  return AUDIO_IN_CONTAINER[container] === "copy" ? "Copy the source audio track" : `Keep the source audio, re-encoded to AAC ${AAC_KBPS} kb/s`;
+}
+
 export function EncodeSettingsEditor({ value, fixedContainer, onChange }: EncodeSettingsEditorProps) {
   const codecLabelId = useId();
   const containerLabelId = useId();
   const update = (patch: Partial<EncodeSettings>): void => onChange({ ...value, ...patch });
+  const container = fixedContainer?.container ?? value.container;
 
   return (
     <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
@@ -57,7 +63,7 @@ export function EncodeSettingsEditor({ value, fixedContainer, onChange }: Encode
         <Select<EncodeSettings["container"]>
           labelId={containerLabelId}
           label="Container"
-          value={fixedContainer?.container ?? value.container}
+          value={container}
           onChange={(event) => update({ container: event.target.value })}
         >
           {ENCODE_CONTAINERS.map((container) => (
@@ -71,7 +77,7 @@ export function EncodeSettingsEditor({ value, fixedContainer, onChange }: Encode
       <FormControlLabel
         sx={{ ml: 0, mt: 0.5 }}
         control={<Switch checked={value.copyAudio} onChange={(_event, checked) => update({ copyAudio: checked })} />}
-        label="Copy source audio track"
+        label={audioSwitchLabel(container)}
       />
     </Stack>
   );

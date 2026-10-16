@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Box, Button, Stack, Typography } from "@mui/material";
+import { Box, Button, Stack } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import type { EngineKind, JobRequest, JobStatus } from "../../../src/server/api-types";
+import { dllFeatureOf, outputSizeLimits, unusedSettings } from "../../../src/server/settings-in-use";
 import { api } from "../api";
 import { useJobRunner } from "../hooks/useJobRunner";
 import { useSettings } from "../hooks/useSettings";
@@ -10,7 +11,7 @@ import { JobCard } from "./JobCard";
 import { EngineSelect, PathFields } from "./JobFormFields";
 import { NrSettingsEditor } from "./NrSettingsEditor";
 import { ScaleSettingsEditor } from "./ScaleSettingsEditor";
-import { Section } from "./Section";
+import { Section, UnusedNote } from "./Section";
 import { VersionSelect } from "./VersionSelect";
 
 interface ImagePanelProps {
@@ -27,7 +28,9 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
   const [dllDir, setDllDir] = useState("");
 
   const canRun = input.trim() !== "" && !runner.submitting;
-  const usesDlss = engine === "sr" || engine === "nr";
+  const shape = { engine, frameGen: false };
+  const unused = unusedSettings(shape);
+  const dllFeature = dllFeatureOf(shape);
 
   const changeEngine = (next: EngineKind): void => {
     setEngine(next);
@@ -43,7 +46,7 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
       settings: settings.nr,
       scale: settings.scale,
     };
-    if (usesDlss && dllDir !== "") request.dllDir = dllDir;
+    if (dllFeature !== null && dllDir !== "") request.dllDir = dllDir;
     if (settings.adapterUuid) request.adapterUuid = settings.adapterUuid;
     if (output.trim() !== "") request.output = output.trim();
     void runner.submit(request);
@@ -67,24 +70,13 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
       <Section title="Engine and output size">
         <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
           <EngineSelect value={engine} onChange={changeEngine} />
-          {usesDlss ? <VersionSelect featureId={engine === "sr" ? 1 : 18} value={dllDir} onChange={setDllDir} /> : null}
-          <ScaleSettingsEditor value={settings.scale} onChange={setScale} />
+          {dllFeature !== null ? <VersionSelect feature={dllFeature} value={dllDir} onChange={setDllDir} /> : null}
+          <ScaleSettingsEditor value={settings.scale} limits={outputSizeLimits(engine)} onChange={setScale} />
         </Stack>
       </Section>
 
-      <Section
-        title="Neural rendering"
-        action={
-          engine !== "nr" ? (
-            <Typography variant="caption" color="warning.main">
-              {engine === "sr"
-                ? "Not used by Super Resolution — it upscales to the output size above"
-                : "Not used by the bypass engine (plain passthrough copy)"}
-            </Typography>
-          ) : undefined
-        }
-      >
-        <NrSettingsEditor value={settings.nr} onChange={setNr} />
+      <Section title="Neural rendering" action={<UnusedNote reason={unused.nrLook} />}>
+        <NrSettingsEditor value={settings.nr} disabled={unused.nrLook !== null} onChange={setNr} />
       </Section>
 
       <Box>
