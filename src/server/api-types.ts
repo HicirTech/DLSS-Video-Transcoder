@@ -109,6 +109,15 @@ export interface EncodeSettings {
  */
 export const DEFAULT_ENCODE_SETTINGS: EncodeSettings = { codec: "h264_nvenc", quality: 20, container: "mp4", copyAudio: true };
 
+/**
+ * What a video job does with the source's audio track in each container: mkv takes the track as it is, mp4
+ * and mov get it re-encoded to AAC at AAC_KBPS. audioArgs (ffmpeg-args.ts) builds the ffmpeg side of it.
+ */
+export const AUDIO_IN_CONTAINER: Record<EncodeContainer, "copy" | "aac"> = { mp4: "aac", mkv: "copy", mov: "aac" };
+
+/** The bitrate, in kb/s, of the AAC track an mp4 or mov output carries. */
+export const AAC_KBPS = 192;
+
 /** The one container frame generation writes: its mux sets MP4's track timescale and +faststart (framegen-encode-sink.ts). */
 export const FRAME_GEN_CONTAINER: EncodeContainer = "mp4";
 
@@ -120,6 +129,18 @@ export const DEFAULT_FRAME_GEN_MULTIPLIER = 2;
  * UI offers the motion choice only then. A Record, so a new engine has to say.
  */
 export const ENGINE_USES_MOTION: Record<EngineKind, boolean> = { sr: true, nr: false, bypass: false };
+
+/**
+ * DLSS Super Resolution only enlarges: an output side shorter than the source's fails CreateFeature with
+ * InvalidParameter (factors 0.25, 0.5 and 0.75 measured), so an sr job's factor starts here; 1 runs DLAA.
+ */
+export const SR_FACTOR_MIN = 1;
+
+/**
+ * The longest output side DLSS SR creates a feature for: nvngx_dlss.dll 310.7.129.0
+ * takes 5600x8192 and refuses 5600x8194 with InvalidParameter (measured on an RTX 5090).
+ */
+export const DLSS_SR_MAX_OUTPUT_SIDE = 8192;
 
 /** Named frame-generation output rates, ascending; the pipeline's exact-rational FPS table uses the same names. */
 export const FRAME_GEN_FPS_CHOICES = ["23.976", "25", "29.97", "30", "50", "59.94", "60", "90", "119.88", "120", "144", "165", "180", "240", "360", "480"] as const;

@@ -2,9 +2,9 @@
  * The CLI's command table, the single source of truth: it renders the help *and* tells the
  * positional-argument parser which flags consume a following value token.
  */
-import { DEFAULT_SR_PRESET, DLSS_RATIO, DLSS_SR_MAX_OUTPUT_SIDE, perfQualityName } from "../ngx/results.ts";
+import { DEFAULT_SR_PRESET, DLSS_RATIO, perfQualityName } from "../ngx/results.ts";
 import { cpuSiblingCodec, FFMPEG_NVENC_ENCODERS, isNvenc } from "../pipeline/encode-select.ts";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, ENCODE_CODECS, ENCODE_CONTAINERS, ENGINE_KINDS, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, MOTION_KINDS, type MotionKind, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, SETTING_RANGES } from "../server/api-types.ts";
+import { AAC_KBPS, AUDIO_IN_CONTAINER, DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, DLSS_SR_MAX_OUTPUT_SIDE, ENCODE_CODECS, ENCODE_CONTAINERS, ENGINE_KINDS, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, MOTION_KINDS, type MotionKind, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, SETTING_RANGES, SR_FACTOR_MIN } from "../server/api-types.ts";
 
 interface OptionSpec {
   /** As typed on the command line, e.g. "--factor N" or "--json". */
@@ -28,8 +28,8 @@ function settingRange(field: keyof typeof SETTING_RANGES): string {
   return `${min}..${max}`;
 }
 
-/** `sr --factor`: from 1, since DLSS SR only enlarges, up to the API's SETTING_RANGES.factor; and the factor used when it is absent. */
-export const SR_FACTOR_OPTION = { min: 1, max: SETTING_RANGES.factor.max, fallback: 2 } as const;
+/** `sr --factor`: from SR_FACTOR_MIN, since DLSS SR only enlarges, up to the API's SETTING_RANGES.factor; and the factor used when it is absent. */
+export const SR_FACTOR_OPTION = { min: SR_FACTOR_MIN, max: SETTING_RANGES.factor.max, fallback: 2 } as const;
 
 /** `sr` / `nr --warmup`: the extra passes an image job runs over a still, with the job's range and default. */
 export const WARMUP_OPTION = { ...SETTING_RANGES.warmupFrames, fallback: DEFAULT_NR_SETTINGS.warmupFrames } as const;
@@ -134,7 +134,7 @@ export const COMMANDS: readonly CommandSpec[] = [
       CODEC_OPT,
       QUALITY_OPT,
       { flag: "--container NAME", desc: `output container: ${ENCODE_CONTAINERS.join(", ")}`, def: DEFAULT_ENCODE_SETTINGS.container },
-      { flag: "--no-audio", desc: "write no audio track; otherwise the source's audio is copied into mkv, or re-encoded to AAC 192 kb/s for mp4 and mov", def: "off" },
+      { flag: "--no-audio", desc: `write no audio track; otherwise the source's audio is copied into ${containersThatAudio("copy")}, or re-encoded to AAC ${AAC_KBPS} kb/s for ${containersThatAudio("aac")}`, def: "off" },
       ...NR_SETTING_OPTS,
       { flag: "--dlss-version VER", desc: "load a specific installed DLL version of the --engine's feature, DLSS Super Resolution for sr or DLSS Neural Rendering for nr (prefix match ok); list them with `versions`. bypass loads no DLSS DLL and refuses it", def: "bundled runtime DLL" },
       RUNTIME_OPT,
@@ -188,6 +188,11 @@ function srModeList(): string {
     .sort((a, b) => a[1] - b[1])
     .map(([quality, ratio]) => `${ratio.toFixed(2)}=${perfQualityName(Number(quality))}`)
     .join(", ");
+}
+
+/** "mp4 and mov": the containers whose audio track a video job handles as `handling` (AUDIO_IN_CONTAINER). */
+function containersThatAudio(handling: "copy" | "aac"): string {
+  return ENCODE_CONTAINERS.filter((container) => AUDIO_IN_CONTAINER[container] === handling).join(" and ");
 }
 
 /** The table entry of a command whose name is known to be in COMMANDS. */

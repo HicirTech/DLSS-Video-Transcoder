@@ -2,7 +2,7 @@
  * The ffmpeg argv the video paths build: the output-side encoder for the rawvideo sinks, and the
  * display-aspect flags every output carries.
  */
-import { clampToRange, ENCODE_CODECS, type EncodeSettings } from "../server/api-types.ts";
+import { AAC_KBPS, AUDIO_IN_CONTAINER, clampToRange, ENCODE_CODECS, type EncodeSettings } from "../server/api-types.ts";
 import { nvencGpuArgs } from "./encode-select.ts";
 import { NVENC_PRESET } from "./nvenc.ts";
 import { ratMul, type Rational, rational } from "./rational.ts";
@@ -81,12 +81,12 @@ export function decodeArgv(spec: { input: string; source: FrameSize; output: Fra
 
 /**
  * The output flags for the audio: the first audio track of input 1 (the source file, opened a
- * second time only when its audio is carried over) copied for mkv and re-encoded to AAC 192 kb/s
- * for the other containers, or no audio at all.
+ * second time only when its audio is carried over), copied or re-encoded to AAC as
+ * AUDIO_IN_CONTAINER says for the container, or no audio at all.
  */
 export function audioArgs(carryAudio: boolean, container: EncodeSettings["container"]): string[] {
   if (!carryAudio) return ["-an"];
-  return ["-map", "1:a:0", ...(container === "mkv" ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"])];
+  return ["-map", "1:a:0", ...(AUDIO_IN_CONTAINER[container] === "copy" ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", `${AAC_KBPS}k`])];
 }
 
 /** mp4 and mov take +faststart, which moves the index to the front so the file plays before it has downloaded; mkv has no such flag. */
