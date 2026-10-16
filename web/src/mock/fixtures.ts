@@ -236,11 +236,14 @@ export const MOCK_TOOLS: ToolsReport = {
 export function mockCatalog(): RuntimeManifest {
   return {
     features: [
-      { id: 1, name: "DLSS Super Resolution", dllName: "nvngx_dlss.dll", versions: [
+      { key: "sr", id: 1, name: "DLSS Super Resolution", dllName: "nvngx_dlss.dll", versions: [
         { version: "310.7.0.0", path: "C:\\mock\\dlss\\nvngx_dlss.dll", sizeMB: 70.8, dir: "C:\\mock\\dlss", source: "runtime", sortKey: "0" },
         { version: "310.6.0.0", path: "C:\\mock\\swapper\\nvngx_dlss.dll", sizeMB: 70.1, dir: "C:\\mock\\swapper", source: "swapper", sortKey: "0" },
       ] },
-      { id: 18, name: "DLSS Neural Rendering", dllName: "nvngx_dlssnr.dll", versions: [
+      { key: "fg", id: 11, name: "DLSS Frame Generation", dllName: "nvngx_dlssg.dll", versions: [
+        { version: "310.7.0.0", path: "C:\\mock\\dlssg\\nvngx_dlssg.dll", sizeMB: 7.2, dir: "C:\\mock\\dlssg", source: "runtime", sortKey: "0" },
+      ] },
+      { key: "nr", id: 18, name: "DLSS Neural Rendering", dllName: "nvngx_dlssnr.dll", versions: [
         { version: "1.0.0.0", path: "C:\\mock\\dlssnr\\nvngx_dlssnr.dll", sizeMB: 158, dir: "C:\\mock\\dlssnr", source: "runtime", sortKey: "0" },
       ] },
     ],
