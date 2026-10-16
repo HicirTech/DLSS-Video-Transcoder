@@ -4,8 +4,8 @@
  */
 import { describe, expect, test } from "bun:test";
 import { commandSpec, FG_MULTIPLIER_OPTION, SR_FACTOR_OPTION, WARMUP_OPTION } from "../src/cli/commands.ts";
-import { DLSS_RATIO, DLSS_SR_MAX_OUTPUT_SIDE, PerfQuality, perfQualityName } from "../src/ngx/results.ts";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, SETTING_RANGES } from "../src/server/api-types.ts";
+import { DLSS_RATIO, PerfQuality, perfQualityName } from "../src/ngx/results.ts";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DLSS_SR_MAX_OUTPUT_SIDE, SETTING_RANGES } from "../src/server/api-types.ts";
 
 /** The help row of `flag` ("--intensity") in `command`'s table entry. */
 function optionRow(command: string, flag: string) {
