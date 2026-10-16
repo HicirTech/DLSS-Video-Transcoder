@@ -5,16 +5,7 @@
  */
 import { isAbsolute, resolve } from "node:path";
 import { featureByKey, type FeatureManifest, type RuntimeManifest } from "../ngx/runtime-catalog.ts";
-import type { JobRequest } from "./api-types.ts";
-
-/** The DLSS feature a job loads a DLL of, the one its dllDir has to be a version of. */
-type DllFeature = "sr" | "nr" | "fg";
-
-/** The feature of the DLL `request` loads, or null for a bypass job without frame generation, which loads none. */
-export function dllFeatureOf(request: Pick<JobRequest, "engine" | "frameGen">): DllFeature | null {
-  if (request.frameGen !== undefined) return "fg";
-  return request.engine === "bypass" ? null : request.engine;
-}
+import type { DllFeature } from "./settings-in-use.ts";
 
 /** How a refusal names the job: by its engine, or as frame generation, which ignores the engine. */
 const JOB_NAME: Record<DllFeature, string> = { sr: "an sr job", nr: "an nr job", fg: "a frame generation job" };
