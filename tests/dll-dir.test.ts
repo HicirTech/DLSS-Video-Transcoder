@@ -19,7 +19,7 @@ function listedDir(key: FeatureKey): string {
 
 function manifestEntry(feature: FeatureDescriptor, dirs: string[]): RuntimeManifest["features"][number] {
   const versions = dirs.map((dir) => ({ version: "310.7.0.0", path: join(dir, feature.dllName), sizeMB: 1, dir, source: "runtime" as const, sortKey: "0" }));
-  return { id: feature.id, name: feature.name, dllName: feature.dllName, versions };
+  return { key: feature.key, id: feature.id, name: feature.name, dllName: feature.dllName, versions };
 }
 
 /** All four features, each listing its own version folder, as buildRuntimeCatalog reports them. */

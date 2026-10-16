@@ -54,6 +54,8 @@ export interface VersionEntry {
 }
 
 export interface FeatureManifest {
+  /** FeatureDescriptor.key: how the web finds the versions of the DLL a job loads (settings-in-use.ts dllFeatureOf). */
+  key: FeatureKey;
   id: number;
   name: string;
   dllName: string;
@@ -216,7 +218,7 @@ export function buildRuntimeCatalog(runtimeDir: string, cacheDir = swapperCacheD
       ...enumerateRuntimeFeature(runtimeDir, feature),
       ...enumerateSwapperFeature(feature, cacheDir),
     ]);
-    return { id: feature.id, name: feature.name, dllName: feature.dllName, versions };
+    return { key: feature.key, id: feature.id, name: feature.name, dllName: feature.dllName, versions };
   });
   return { features };
 }
