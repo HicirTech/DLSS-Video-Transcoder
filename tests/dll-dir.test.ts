@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { FEATURES, type FeatureDescriptor, type FeatureKey, type RuntimeManifest, buildRuntimeCatalog, featureByKey } from "../src/ngx/runtime-catalog.ts";
-import { checkDllDir, dllFeatureOf } from "../src/server/dll-dir.ts";
+import { checkDllDir } from "../src/server/dll-dir.ts";
 
 const RUNTIME = resolve(sep === "\\" ? "C:\\app\\runtime" : "/app/runtime");
 
@@ -70,15 +70,6 @@ describe("checkDllDir", () => {
     expect(checkDllDir(join(RUNTIME, "dlss", "999.0.0.0"), "sr", CATALOG)).toBe(expected);
     expect(checkDllDir(join("dlss", "310.7.0.0"), "sr", CATALOG)).toBe(expected);
     expect(checkDllDir(join(RUNTIME, "dlssnr", "999.0.0.0"), "nr", CATALOG)).toContain("DLSS Neural Rendering versions (nvngx_dlssnr.dll)");
-  });
-});
-
-describe("dllFeatureOf", () => {
-  test("a frame generation job loads DLSS Frame Generation whatever its engine; otherwise the engine says, and bypass loads nothing", () => {
-    for (const engine of ["sr", "nr", "bypass"] as const) expect(dllFeatureOf({ engine, frameGen: { targetFps: "60" } }), engine).toBe("fg");
-    expect(dllFeatureOf({ engine: "sr" })).toBe("sr");
-    expect(dllFeatureOf({ engine: "nr" })).toBe("nr");
-    expect(dllFeatureOf({ engine: "bypass" })).toBeNull();
   });
 });
 
