@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Box, Button, Stack, Typography } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import type { JobStatus } from "../../../src/server/api-types";
-import { outputSizeLimits } from "../../../src/server/output-size";
 import { unusedSettings } from "../../../src/server/settings-in-use";
 import { api } from "../api";
 import { useJobRunner } from "../hooks/useJobRunner";
@@ -16,8 +15,8 @@ import { InputPathField, OutputPathField } from "./JobFormFields";
 import { MediaSummary } from "./MediaSummary";
 import { NrSettingsEditor } from "./NrSettingsEditor";
 import { PlanLine } from "./PlanLine";
-import { ScaleSettingsEditor } from "./ScaleSettingsEditor";
-import { Section, UnusedNote } from "./Section";
+import { ResizeField } from "./ResizeField";
+import { Section } from "./Section";
 import { StepCard } from "./StepCard";
 import { SuperResolutionEditor } from "./SuperResolutionEditor";
 import { VersionSelect } from "./VersionSelect";
@@ -103,18 +102,7 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
       <Section title="Output">
         <Stack spacing={2.5}>
           <OutputPathField value={output} defaultName={plan.defaultOutputName} onChange={setOutput} />
-          <Box>
-            <Stack direction="row" spacing={1} sx={{ alignItems: "baseline", mb: 1 }}>
-              <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                Resize
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                bilinear, when Super Resolution is off
-              </Typography>
-              <UnusedNote reason={unused.resize} />
-            </Stack>
-            <ScaleSettingsEditor value={settings.resize} limits={outputSizeLimits("resize")} disabled={unused.resize !== null} onChange={(resize) => update({ resize })} />
-          </Box>
+          <ResizeField value={settings.resize} method="bilinear" unusedReason={unused.resize} outputSize={plan.outputSize} onChange={(resize) => update({ resize })} />
         </Stack>
       </Section>
 

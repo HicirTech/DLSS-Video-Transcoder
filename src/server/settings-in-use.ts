@@ -1,6 +1,6 @@
 /**
  * Which settings of a job take effect, from the steps it runs: the one statement of it for the web forms, which
- * disable what a job ignores and show the reason beside it. It imports no Node module: the web bundles it.
+ * show the reason where a job ignores a setting. It imports no Node module: the web bundles it.
  */
 import { FRAME_GEN_GPU_CHOICE } from "./api-types.ts";
 

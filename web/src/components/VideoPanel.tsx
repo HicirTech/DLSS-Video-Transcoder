@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Alert, Box, Button, FormHelperText, Link, Stack, Typography } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { FRAME_GEN_CONTAINER, type JobStatus, type StepKind, type ToolsReport } from "../../../src/server/api-types";
-import { nvencLimitExceeded, outputSizeLimits } from "../../../src/server/output-size";
+import { nvencLimitExceeded } from "../../../src/server/output-size";
 import { unusedSettings } from "../../../src/server/settings-in-use";
 import { api } from "../api";
 import { formatFps, rateValue } from "../format";
@@ -18,8 +18,8 @@ import { InputPathField, OutputPathField } from "./JobFormFields";
 import { MediaSummary } from "./MediaSummary";
 import { NrSettingsEditor } from "./NrSettingsEditor";
 import { PlanLine } from "./PlanLine";
-import { ScaleSettingsEditor } from "./ScaleSettingsEditor";
-import { Mono, Section, UnusedNote } from "./Section";
+import { ResizeField } from "./ResizeField";
+import { Mono, Section } from "./Section";
 import { StepCard } from "./StepCard";
 import { SuperResolutionEditor } from "./SuperResolutionEditor";
 import { ToolsBanner } from "./ToolsBanner";
@@ -135,18 +135,13 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
       <Section title="Output">
         <Stack spacing={2.5}>
           <OutputPathField value={output} defaultName={plan.defaultOutputName} onChange={setOutput} />
-          <Box>
-            <Stack direction="row" spacing={1} sx={{ alignItems: "baseline", mb: 1 }}>
-              <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                Resize
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                lanczos, in the decode, when Super Resolution is off
-              </Typography>
-              <UnusedNote reason={unused.resize} />
-            </Stack>
-            <ScaleSettingsEditor value={settings.resize} limits={outputSizeLimits("resize")} disabled={unused.resize !== null} onChange={(resize) => update({ resize })} />
-          </Box>
+          <ResizeField
+            value={settings.resize}
+            method="lanczos, in the decode"
+            unusedReason={unused.resize}
+            outputSize={plan.outputSize}
+            onChange={(resize) => update({ resize })}
+          />
           <EncodeSettingsEditor
             value={settings.encode}
             fixedContainer={steps.fg ? { container: FRAME_GEN_CONTAINER, reason: "Frame generation always writes MP4" } : undefined}

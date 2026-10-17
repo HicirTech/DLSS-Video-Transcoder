@@ -16,6 +16,7 @@ export function SuperResolutionEditor({ value, kind, onChange }: SuperResolution
   return (
     <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
       <ScaleSettingsEditor
+        label="Upscale to"
         value={value.scale}
         limits={outputSizeLimits("sr")}
         noneLabel="Source size — DLAA, no upscale"
