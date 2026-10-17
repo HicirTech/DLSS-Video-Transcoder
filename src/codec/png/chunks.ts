@@ -156,6 +156,17 @@ function hex32(v: number): string {
   return "0x" + v.toString(16).padStart(8, "0");
 }
 
+/** Bytes from the start of a PNG through its IHDR data: the signature, IHDR's length and type, and its 13 bytes. */
+export const PNG_HEADER_BYTES = 33;
+
+/** The IHDR of a PNG from its first PNG_HEADER_BYTES, enough to size an image without reading the rest. */
+export function readPngHeader(head: Uint8Array): PngHeader {
+  if (!isPng(head)) throw new PngError("bad signature, not a PNG file");
+  if (head.length < PNG_HEADER_BYTES) throw new PngError("truncated file: missing IHDR chunk");
+  if (readU32(head, 12) !== TYPE_IHDR) throw new PngError(`first chunk must be IHDR, found "${chunkTypeName(readU32(head, 12))}"`);
+  return parseIhdr(head, 16, readU32(head, 8));
+}
+
 /**
  * Walks the chunk stream, validating framing and CRCs, collects PLTE/tRNS/IDAT and requires IEND.
  */

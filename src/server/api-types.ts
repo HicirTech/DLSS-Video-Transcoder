@@ -14,6 +14,7 @@
  *   POST /api/upload?name=<file name>  body: the file's bytes -> UploadResult (streamed to disk, any size; the path is usable as a job input)
  *   GET  /api/tools                 -> ToolsReport      (ffmpeg / ffprobe availability)
  *   GET  /api/catalog               -> RuntimeManifest  (installed DLSS runtime DLL versions; see JobRequest.dllDir)
+ *   GET  /api/media?path=<abs path> -> MediaInfo        (size, rate and length of a file a job would read; 404 when it is not a file, 400 when it cannot be read)
  * WebSocket:
  *   /ws  server -> client messages are WsEvent JSON; the client never needs to send anything.
  */
@@ -310,6 +311,23 @@ export interface JobStatus {
   /** Most recent log lines, at most JOB_LOG_LIMIT. */
   log: string[];
 }
+
+/** Response of GET /api/media: what the server reads from a file before a job runs, so a form can show it and plan sizes. */
+export type MediaInfo =
+  | { kind: "image"; width: number; height: number }
+  | {
+      kind: "video";
+      /** Display size, already turned for a 90/270 rotation: the size a job decodes. */
+      width: number;
+      height: number;
+      /** The average rate a job decodes and stamps (VideoInfo.fpsText) and the nominal rate frame generation plans on. */
+      fps: string;
+      nominalFps: string;
+      frames: number | null;
+      durationSeconds: number | null;
+      codec: string;
+      hasAudio: boolean;
+    };
 
 /** Response of GET /api/settings/defaults. */
 export interface SettingsDefaults {

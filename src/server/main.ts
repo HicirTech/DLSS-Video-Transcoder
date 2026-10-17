@@ -20,6 +20,7 @@ import {
 import { checkDllDir } from "./dll-dir.ts";
 import { JobManager } from "./jobs.ts";
 import { isWithin } from "./path-scope.ts";
+import { mediaInfo } from "./media-info.ts";
 import { ProbeRunner } from "./probe-runner.ts";
 import { dllFeatureOf, jobShapeOf } from "./settings-in-use.ts";
 import { MAX_REQUEST_BODY_BYTES, storeUpload } from "./upload.ts";
@@ -110,6 +111,16 @@ const server = Bun.serve({
         const status = jobs.cancel(req.params.id);
         return status ? json(status) : fail("No job exists with that id.", 404);
       },
+    },
+    "/api/media": async (req) => {
+      const path = new URL(req.url).searchParams.get("path") ?? "";
+      if (!isAbsolute(path) || !existsSync(path) || !statSync(path).isFile())
+        return fail("File not found. The 'path' query parameter must be an absolute path to an existing file.", 404);
+      try {
+        return json(await mediaInfo(path));
+      } catch (error) {
+        return fail(`${path} could not be read as a PNG or a video: ${(error as Error).message}`);
+      }
     },
     "/api/file": (req) => {
       // Serves any local file for preview, because user-selected inputs and job outputs

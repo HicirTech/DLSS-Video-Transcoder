@@ -38,6 +38,26 @@ function rateText(text: string | undefined): string | null {
 /** The rate assumed when ffprobe reports neither rate field as usable. */
 const FALLBACK_FPS = 30;
 
+/** The ffprobe argv whose JSON videoInfoFrom reads. */
+function probeArgv(ffprobe: string, input: string): string[] {
+  return [
+    ffprobe,
+    "-v",
+    "error",
+    "-show_entries",
+    "stream=index,codec_type,codec_name,width,height,sample_aspect_ratio,r_frame_rate,avg_frame_rate,nb_frames:stream_side_data=rotation:format=duration",
+    "-of",
+    "json",
+    input,
+  ];
+}
+
+/** What ffprobe's run says about the file: its VideoInfo, or an error carrying ffprobe's own message. */
+function probedInfo(run: { exitCode: number | null; stdout: string; stderr: string }, input: string): VideoInfo {
+  if (run.exitCode !== 0) throw new Error(`ffprobe could not read this file as video: ${run.stderr.trim()}`);
+  return videoInfoFrom(JSON.parse(run.stdout) as ProbeJson, input);
+}
+
 /**
  * What the decode pipe will actually emit, read from the decoder rather than
  * predicted. ffprobe prints the display-matrix angle as a truncated integer
@@ -50,14 +70,20 @@ const FALLBACK_FPS = 30;
  * ffmpeg start plus one frame (~65 ms here, next to the ~62 ms ffprobe already
  * spends), which is why the caller only pays it when a rotation is present.
  */
-function decodedFrameSize(ffmpeg: string, input: string): { width: number; height: number } | null {
-  const proc = Bun.spawnSync([ffmpeg, "-hide_banner", "-nostdin", "-i", input, "-map", "0:v:0", "-frames:v", "1", "-vf", "showinfo", "-f", "null", "-"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const shown = /\ss:(\d+)x(\d+)\s/.exec(new TextDecoder().decode(proc.stderr));
-  if (!shown) return null;
-  return { width: Number(shown[1]), height: Number(shown[2]) };
+function frameSizeArgv(ffmpeg: string, input: string): string[] {
+  return [ffmpeg, "-hide_banner", "-nostdin", "-i", input, "-map", "0:v:0", "-frames:v", "1", "-vf", "showinfo", "-f", "null", "-"];
+}
+
+/**
+ * `info` with the size the decoder printed (frameSizeArgv's stderr) when it disagrees with the angle: the
+ * decoder is the one feeding the pipeline, so its output size wins over one predicted from the rotation.
+ */
+function withDecodedSize(info: VideoInfo, decoderStderr: string): VideoInfo {
+  const shown = /\ss:(\d+)x(\d+)\s/.exec(decoderStderr);
+  if (!shown) return info;
+  const decoded = { width: Number(shown[1]), height: Number(shown[2]) };
+  if (decoded.width === info.width && decoded.height === info.height) return info;
+  return { ...info, ...decoded };
 }
 
 /**
@@ -67,27 +93,48 @@ function decodedFrameSize(ffmpeg: string, input: string): { width: number; heigh
  * 90/180/270 matrix — the case phone footage produces.
  */
 export function probeVideo(ffprobe: string, input: string, ffmpeg?: string): VideoInfo {
-  const proc = Bun.spawnSync(
-    [
-      ffprobe,
-      "-v",
-      "error",
-      "-show_entries",
-      "stream=index,codec_type,codec_name,width,height,sample_aspect_ratio,r_frame_rate,avg_frame_rate,nb_frames:stream_side_data=rotation:format=duration",
-      "-of",
-      "json",
-      input,
-    ],
-    { stdout: "pipe", stderr: "pipe" },
-  );
-  if (proc.exitCode !== 0) throw new Error(`ffprobe could not read this file as video: ${new TextDecoder().decode(proc.stderr).trim()}`);
-  const info = videoInfoFrom(JSON.parse(new TextDecoder().decode(proc.stdout)) as ProbeJson, input);
+  const decoder = new TextDecoder();
+  const probe = Bun.spawnSync(probeArgv(ffprobe, input), { stdout: "pipe", stderr: "pipe" });
+  const info = probedInfo({ exitCode: probe.exitCode, stdout: decoder.decode(probe.stdout), stderr: decoder.decode(probe.stderr) }, input);
   if (info.rotation === 0 || !ffmpeg) return info;
-  const decoded = decodedFrameSize(ffmpeg, input);
-  if (!decoded || (decoded.width === info.width && decoded.height === info.height)) return info;
-  // The decoder disagreed with the angle. It is the one feeding the pipeline,
-  // so its output size wins over one predicted from the rotation.
-  return { ...info, width: decoded.width, height: decoded.height };
+  const frame = Bun.spawnSync(frameSizeArgv(ffmpeg, input), { stdout: "pipe", stderr: "pipe" });
+  return withDecodedSize(info, decoder.decode(frame.stderr));
+}
+
+/**
+ * How long each process of probeVideoAsync may run before it is stopped. ffprobe took ~62 ms here (see
+ * frameSizeArgv); the rest is a chosen margin for a file on a slow or network drive.
+ */
+const PROBE_TIMEOUT_MS = 15_000;
+
+/**
+ * probeVideo for the server's own thread (GET /api/media), which must not block on a child process: the same
+ * two probes, spawned asynchronously, each stopped after PROBE_TIMEOUT_MS.
+ */
+export async function probeVideoAsync(ffprobe: string, input: string, ffmpeg: string): Promise<VideoInfo> {
+  const info = probedInfo(await runBounded(probeArgv(ffprobe, input)), input);
+  if (info.rotation === 0) return info;
+  return withDecodedSize(info, (await runBounded(frameSizeArgv(ffmpeg, input))).stderr);
+}
+
+/** Runs `argv` to its end without blocking this thread; a run past PROBE_TIMEOUT_MS is stopped and throws. */
+async function runBounded(argv: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const child = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore", windowsHide: true });
+  // Read for the whole run so neither pipe fills and stalls the child; a stopped child's output is not needed.
+  const stdout = new Response(child.stdout).text().catch(() => "");
+  const stderr = new Response(child.stderr).text().catch(() => "");
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill();
+  }, PROBE_TIMEOUT_MS);
+  try {
+    const exitCode = await child.exited;
+    if (timedOut) throw new Error(`Reading the file took longer than ${PROBE_TIMEOUT_MS / 1000} s, so it was stopped. Check that the file opens in a player, then choose it again.`);
+    return { exitCode, stdout: await stdout, stderr: await stderr };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export interface ProbeJson {
