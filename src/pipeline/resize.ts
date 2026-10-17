@@ -1,14 +1,8 @@
 /**
- * CPU bilinear resize for tightly packed 8-bit frames, plus the even-dimension
- * rounding every target size goes through, plus the alpha split the still path
- * needs around the neural engines. Used by the still-image path to reach the
- * engine's working size; video pre-scales in ffmpeg instead.
+ * CPU bilinear resize for tightly packed 8-bit frames, plus the alpha split the
+ * still path needs around the neural engines. Used by the still-image path to
+ * reach the engine's working size; video pre-scales in ffmpeg instead.
  */
-
-/** Nearest even value, at least 2: 4:2:0 chroma subsampling cannot encode an odd dimension. */
-export function evenSize(value: number): number {
-  return Math.max(2, Math.round(value / 2) * 2);
-}
 
 /**
  * Bilinear resize of an interleaved 8-bit image with `channels` samples per

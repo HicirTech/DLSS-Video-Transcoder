@@ -4,9 +4,9 @@
  * and srOutputProblem names what DLSS refuses. No GPU.
  */
 import { describe, expect, test } from "bun:test";
-import { PerfQuality, qualityForSizes, srOutputProblem } from "../src/ngx/results.ts";
-import { resolveTargetSize } from "../src/pipeline/image.ts";
+import { PerfQuality, qualityForSizes } from "../src/ngx/results.ts";
 import { DEFAULT_SCALE_SETTINGS, DLSS_SR_MAX_OUTPUT_SIDE } from "../src/server/api-types.ts";
+import { resolveTargetSize, srOutputProblem } from "../src/server/output-size.ts";
 
 function srOutput(width: number, height: number, factor: number) {
   const output = resolveTargetSize(width, height, { ...DEFAULT_SCALE_SETTINGS, mode: "factor", factor });

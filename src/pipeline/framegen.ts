@@ -19,6 +19,7 @@
  */
 import { existsSync } from "node:fs";
 import { DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, type EncodeSettings, FRAME_GEN_CONTAINER, type FrameGenEngine } from "../server/api-types.ts";
+import { evenSize } from "../server/output-size.ts";
 import { throwIfAborted } from "./cancel.ts";
 import { dlssgRuntimeKey, type DlssgRuntime } from "./dlssg-host-launch.ts";
 import { DlssgSession, probeDlssg } from "./dlssg.ts";
@@ -45,7 +46,6 @@ import {
   resolveTargetRate,
 } from "./framegen-plan.ts";
 import { type Rational, parseRational, ratDiv, ratMul, ratToNumber, rational } from "./rational.ts";
-import { evenSize } from "./resize.ts";
 import { requireFfmpegTools } from "./tools.ts";
 import { type VideoInfo, probeVideo } from "./video-probe.ts";
 import { ABORT_TIMEOUT_MS } from "./worker-abort.ts";

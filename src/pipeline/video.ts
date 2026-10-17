@@ -8,6 +8,7 @@
 import { existsSync } from "node:fs";
 import type { EncodeSettings, EngineKind, JobRequest, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { DEFAULT_ENCODE_SETTINGS, ENGINE_USES_MOTION } from "../server/api-types.ts";
+import { evenSize, resolveTargetSize } from "../server/output-size.ts";
 import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine, type Engine } from "./engine.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
@@ -27,8 +28,6 @@ import { runAsyncNrEncode } from "./async-nr-encode.ts";
 import { tryCreateNvofBackend } from "./nvof.ts";
 import { DXGI_FORMAT_R8G8B8A8_UNORM, linearLayout } from "../native/d3d12.ts";
 import { describeGpu, openGpu, type GpuSession } from "./gpu.ts";
-import { resolveTargetSize } from "./image.ts";
-import { evenSize } from "./resize.ts";
 import { requireFfmpegTools } from "./tools.ts";
 import { probeVideo, type VideoInfo } from "./video-probe.ts";
 
