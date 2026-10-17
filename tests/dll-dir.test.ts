@@ -1,6 +1,6 @@
 /**
- * checkDllDir (src/server/dll-dir.ts): a job's dllDir has to be a version folder of the DLSS
- * feature the job loads. A synthetic catalog fixes every case; one case builds the catalog from a
+ * checkDllDir (src/server/dll-dir.ts): a step's dllDir has to be a version folder of the DLSS
+ * feature the step loads. A synthetic catalog fixes every case; one case builds the catalog from a
  * temporary runtime tree, to hold the check to what GET /api/catalog really lists.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -26,7 +26,7 @@ function manifestEntry(feature: FeatureDescriptor, dirs: string[]): RuntimeManif
 const CATALOG: RuntimeManifest = { features: FEATURES.map((feature) => manifestEntry(feature, [listedDir(feature.key)])) };
 
 describe("checkDllDir", () => {
-  test("accepts the version folders of the job's own feature", () => {
+  test("accepts the version folders of the step's own feature", () => {
     expect(checkDllDir(listedDir("sr"), "sr", CATALOG)).toBeNull();
     expect(checkDllDir(listedDir("nr"), "nr", CATALOG)).toBeNull();
     expect(checkDllDir(listedDir("fg"), "fg", CATALOG)).toBeNull();
@@ -37,28 +37,28 @@ describe("checkDllDir", () => {
     expect(checkDllDir(`${listedDir("nr")}${sep}`, "nr", CATALOG)).toBeNull();
   });
 
-  test("refuses a folder of another feature and names what it holds and what the job needs", () => {
+  test("refuses a folder of another feature and names the step, what the folder holds and what the step needs", () => {
     expect(checkDllDir(listedDir("fg"), "sr", CATALOG)).toBe(
-      `dllDir ${listedDir("fg")} holds DLSS Frame Generation (nvngx_dlssg.dll); an sr job needs a DLSS Super Resolution folder (nvngx_dlss.dll) from GET /api/catalog.`,
+      `superResolution.dllDir ${listedDir("fg")} holds DLSS Frame Generation (nvngx_dlssg.dll); this step needs a DLSS Super Resolution folder (nvngx_dlss.dll) from GET /api/catalog.`,
     );
     expect(checkDllDir(listedDir("rr"), "nr", CATALOG)).toBe(
-      `dllDir ${listedDir("rr")} holds DLSS Ray Reconstruction (nvngx_dlssd.dll); an nr job needs a DLSS Neural Rendering folder (nvngx_dlssnr.dll) from GET /api/catalog.`,
+      `neuralRendering.dllDir ${listedDir("rr")} holds DLSS Ray Reconstruction (nvngx_dlssd.dll); this step needs a DLSS Neural Rendering folder (nvngx_dlssnr.dll) from GET /api/catalog.`,
     );
     expect(checkDllDir(listedDir("sr"), "fg", CATALOG)).toBe(
-      `dllDir ${listedDir("sr")} holds DLSS Super Resolution (nvngx_dlss.dll); a frame generation job needs a DLSS Frame Generation folder (nvngx_dlssg.dll) from GET /api/catalog.`,
+      `frameGen.dllDir ${listedDir("sr")} holds DLSS Super Resolution (nvngx_dlss.dll); this step needs a DLSS Frame Generation folder (nvngx_dlssg.dll) from GET /api/catalog.`,
     );
   });
 
-  test("an sr, nr or frame generation job is refused every other feature's folder", () => {
+  test("each step is refused every other feature's folder", () => {
     const others = (key: FeatureKey): FeatureKey[] => FEATURES.map((feature) => feature.key).filter((other) => other !== key);
-    for (const engine of ["sr", "nr", "fg"] as const) {
-      for (const other of others(engine)) {
-        expect(checkDllDir(listedDir(other), engine, CATALOG), `${engine} job, ${other} folder`).toContain(`holds ${featureByKey(other).name}`);
+    for (const step of ["sr", "nr", "fg"] as const) {
+      for (const other of others(step)) {
+        expect(checkDllDir(listedDir(other), step, CATALOG), `${step} step, ${other} folder`).toContain(`holds ${featureByKey(other).name}`);
       }
     }
   });
 
-  test("a folder that two features list belongs to either job", () => {
+  test("a folder that two features list belongs to either step", () => {
     const shared = join(RUNTIME, "both");
     const catalog: RuntimeManifest = { features: FEATURES.map((feature) => manifestEntry(feature, feature.key === "sr" || feature.key === "nr" ? [shared] : [listedDir(feature.key)])) };
     expect(checkDllDir(shared, "sr", catalog)).toBeNull();
@@ -66,7 +66,7 @@ describe("checkDllDir", () => {
   });
 
   test("a folder no feature lists, or a relative one, is refused with the way out", () => {
-    const expected = `dllDir must be the absolute "dir" of one of the DLSS Super Resolution versions (nvngx_dlss.dll) that GET /api/catalog lists; omit it to load the bundled runtime DLL.`;
+    const expected = `superResolution.dllDir must be the absolute "dir" of one of the DLSS Super Resolution versions (nvngx_dlss.dll) that GET /api/catalog lists; omit it to load the bundled runtime DLL.`;
     expect(checkDllDir(join(RUNTIME, "dlss", "999.0.0.0"), "sr", CATALOG)).toBe(expected);
     expect(checkDllDir(join("dlss", "310.7.0.0"), "sr", CATALOG)).toBe(expected);
     expect(checkDllDir(join(RUNTIME, "dlssnr", "999.0.0.0"), "nr", CATALOG)).toContain("DLSS Neural Rendering versions (nvngx_dlssnr.dll)");
@@ -79,7 +79,7 @@ describe("checkDllDir against the catalog of a runtime tree", () => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  test("each installed feature's folder belongs to that feature's jobs alone", () => {
+  test("each installed feature's folder belongs to that feature's step alone", () => {
     const root = mkdtempSync(join(tmpdir(), "dll-dir-"));
     dirs.push(root);
     const runtime = join(root, "runtime");
@@ -89,11 +89,11 @@ describe("checkDllDir against the catalog of a runtime tree", () => {
     }
     // An empty DLSS Swapper cache, so the machine's own installs do not join the catalog.
     const catalog = buildRuntimeCatalog(runtime, join(root, "no-swapper-cache"));
-    for (const engine of ["sr", "nr", "fg"] as const) {
+    for (const step of ["sr", "nr", "fg"] as const) {
       for (const feature of FEATURES) {
-        const message = checkDllDir(join(runtime, feature.runtimeSubdir), engine, catalog);
-        if (feature.key === engine) expect(message, `${engine} job, own folder`).toBeNull();
-        else expect(message, `${engine} job, ${feature.key} folder`).toContain(`holds ${feature.name} (${feature.dllName})`);
+        const message = checkDllDir(join(runtime, feature.runtimeSubdir), step, catalog);
+        if (feature.key === step) expect(message, `${step} step, own folder`).toBeNull();
+        else expect(message, `${step} step, ${feature.key} folder`).toContain(`holds ${feature.name} (${feature.dllName})`);
       }
     }
   });

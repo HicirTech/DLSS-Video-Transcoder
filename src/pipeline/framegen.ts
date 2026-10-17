@@ -1,6 +1,7 @@
 /**
- * Video frame generation to an exact target frame rate: ffmpeg decode -> one or
- * more DLSSG stages -> a nearest-timestamp writer -> encode, coordinated here.
+ * Video frame generation to an exact target frame rate: ffmpeg decode -> the job's
+ * Super Resolution and Neural Rendering, when it runs them -> one or more DLSSG
+ * stages -> a nearest-timestamp writer -> encode, coordinated here.
  *
  * Two paths (chosen in framegen-plan.ts):
  *
@@ -18,7 +19,23 @@
  * Ported from the reference project's frame_interpolation package.
  */
 import { existsSync } from "node:fs";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, type EncodeSettings, FRAME_GEN_CONTAINER, type FrameGenEngine } from "../server/api-types.ts";
+import {
+  DEFAULT_ENCODE_SETTINGS,
+  DEFAULT_FRAME_GEN_MULTIPLIER,
+  DEFAULT_SCALE_SETTINGS,
+  type EncodeSettings,
+  FRAME_GEN_CONTAINER,
+  type FrameGenEngine,
+  type FrameGenStep,
+  type JobRequest,
+  jobSteps,
+  type NeuralRenderingStep,
+  type ScaleSettings,
+  type StepKind,
+  stepsSuffix,
+  type SuperResolutionStep,
+} from "../server/api-types.ts";
+import { evenSize, resolveTargetSize, srOutputProblem } from "../server/output-size.ts";
 import { throwIfAborted } from "./cancel.ts";
 import { dlssgRuntimeKey, type DlssgRuntime } from "./dlssg-host-launch.ts";
 import { DlssgSession, probeDlssg } from "./dlssg.ts";
@@ -29,10 +46,11 @@ import { ffmpegFailedMessage, NoFramesDecodedError } from "./ffmpeg-failure.ts";
 import { EncodeSink, buildFrameGenEncodeArgs } from "./framegen-encode-sink.ts";
 import { noFramesGeneratedMessage } from "./framegen-host-messages.ts";
 import { estimatedFrameProgress, type ProgressReporter } from "./frame-progress.ts";
-import { FrameReader } from "./frame-reader.ts";
+import { FrameReader, type FrameSource } from "./frame-reader.ts";
 import { type RunParams, runOverlapped, runSequential } from "./framegen-run.ts";
 import { defaultOutputPath } from "./output-path.ts";
 import { removePartialOutput } from "./partial-output.ts";
+import { ProcessedFrames } from "./processed-frames.ts";
 import { Stage, openGuideWorker } from "./framegen-stage.ts";
 import { verifyOutputVideo } from "./framegen-verify.ts";
 import {
@@ -45,7 +63,6 @@ import {
   resolveTargetRate,
 } from "./framegen-plan.ts";
 import { type Rational, parseRational, ratDiv, ratMul, ratToNumber, rational } from "./rational.ts";
-import { evenSize } from "./resize.ts";
 import { requireFfmpegTools } from "./tools.ts";
 import { type VideoInfo, probeVideo } from "./video-probe.ts";
 import { ABORT_TIMEOUT_MS } from "./worker-abort.ts";
@@ -68,11 +85,21 @@ export interface FrameGenOptions {
    */
   engine?: FrameGenEngine;
   runtimeDir: string;
-  /** A DLSS Frame Generation version folder from the runtime catalog to load instead of runtimeDir/dlssg (JobRequest.dllDir). */
+  /** A DLSS Frame Generation version folder from the runtime catalog to load instead of runtimeDir/dlssg (JobRequest.frameGen.dllDir). */
   dllDir?: string;
+  /** Upscales each decoded frame to the output size before frame generation, which then runs at that size. */
+  superResolution?: SuperResolutionStep;
+  /** Enhances each frame before frame generation, after Super Resolution when both run. */
+  neuralRendering?: NeuralRenderingStep;
+  /** A lanczos resize of the decoded frames; only without superResolution, which sets the size itself. */
+  resize?: ScaleSettings;
+  /** The GPU Super Resolution and Neural Rendering run on, one of the two at most (GpuOptions); frame generation's host picks its own (FRAME_GEN_GPU_CHOICE). */
+  adapterIndex?: number;
+  adapterUuid?: string;
+  appDataPath?: string;
   /** Default DEFAULT_ENCODE_SETTINGS.quality. */
   quality?: number;
-  /** Output codec; default DEFAULT_ENCODE_SETTINGS.codec, which falls back to its CPU sibling when NVENC cannot start. */
+  /** Output codec; default DEFAULT_ENCODE_SETTINGS.codec, which falls back to its CPU sibling when NVENC cannot start or the output is past NVENC_MAX_SIDE. */
   codec?: EncodeSettings["codec"];
   /** Keep the source's audio track, when it has one; default DEFAULT_ENCODE_SETTINGS.copyAudio. */
   copyAudio?: boolean;
@@ -83,10 +110,40 @@ export interface FrameGenOptions {
   onFinishing?: () => void;
 }
 
+/** What a run adds to a request: its folders, and how it reports and stops. */
+type FrameGenRun = Pick<FrameGenOptions, "runtimeDir" | "appDataPath" | "onProgress" | "signal" | "onFinishing">;
+
+/**
+ * The options a validated video request with a frame generation step (`frameGen`, its request.frameGen) runs
+ * with. Whatever runs such a request maps it through here, so no front end reads one differently from the job
+ * worker.
+ */
+export function frameGenJobOptions(request: JobRequest, frameGen: FrameGenStep, run: FrameGenRun): FrameGenOptions {
+  return {
+    input: request.input,
+    output: request.output,
+    targetFps: frameGen.targetFps,
+    multiplier: frameGen.multiplier,
+    engine: frameGen.engine,
+    dllDir: frameGen.dllDir,
+    superResolution: request.superResolution,
+    neuralRendering: request.neuralRendering,
+    resize: request.resize,
+    adapterUuid: request.adapterUuid,
+    quality: request.encode?.quality,
+    codec: request.encode?.codec,
+    copyAudio: request.encode?.copyAudio,
+    ...run,
+  };
+}
+
 export interface FrameGenResult {
   output: string;
+  /** The output size, which frame generation ran at. */
   width: number;
   height: number;
+  /** The steps that ran, in order; frame generation is always the last. */
+  steps: StepKind[];
   sourceFps: number;
   outputFps: number;
   /** Display form of the target rate, e.g. "59.94" or "120". */
@@ -171,6 +228,14 @@ interface FrameGenJob {
   ffprobe: string;
   caps: Awaited<ReturnType<typeof probeDlssg>>;
   info: VideoInfo;
+  /** The steps that run, in order, frame generation last. */
+  steps: StepKind[];
+  /** Whether Super Resolution or Neural Rendering runs on the decoded frames before frame generation. */
+  chained: boolean;
+  /** The size ffmpeg decodes at: the source's when Super Resolution runs, else the output size. */
+  decodeWidth: number;
+  decodeHeight: number;
+  /** The output size, which frame generation runs at. */
   width: number;
   height: number;
   frameBytes: number;
@@ -204,9 +269,10 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   let decodeErrText = "";
   const decodeErrDrained = new Response(decoder.stderr as ReadableStream<Uint8Array>).text().then((t) => { decodeErrText = t; }).catch(() => {});
 
-  // Decoded and generated frames live in SharedArrayBuffers so the guide and
-  // encode threads read them without copies.
-  const reader = new FrameReader(decoder.stdout as ReadableStream<Uint8Array>, true);
+  // The frames frame generation reads and generates live in SharedArrayBuffers
+  // so the guide and encode threads read them without copies. Decoded frames
+  // the engine chain processes first stay on this thread, so they need not.
+  const decoded = new FrameReader(decoder.stdout as ReadableStream<Uint8Array>, !job.chained);
   const writer = new NearestTimestampWriter((frame) => sink.write(frame), targetRate);
   const zeros = new Uint16Array(motionFieldBytes(width, height) / Uint16Array.BYTES_PER_ELEMENT);
   const stages: Stage[] = [];
@@ -214,11 +280,14 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   let stagesClosed: Promise<unknown> | null = null;
   const closeStages = (): Promise<unknown> => (stagesClosed ??= Promise.allSettled(stages.map((stage) => stage.close())));
   const capacity = Math.floor(DEFAULT_BUFFER_LIMIT / frameBytes);
+  let processed: ProcessedFrames | null = null;
 
   let run: PipelineRun;
   try {
+    // Before the stages, so a Super Resolution or Neural Rendering that cannot start fails the job before any DLSSG host does.
+    if (job.chained) processed = openProcessedFrames(job, decoded);
     await openStages(job, zeros, stages);
-    run = await runPipeline(job, { reader, writer, sink }, stages, capacity);
+    run = await runPipeline(job, { reader: processed ?? decoded, writer, sink }, stages, capacity);
   } catch (error) {
     // abort() kills the worker's ffmpeg and waits for it to release the output
     // file, so the partial file can be deleted here and a failed job never
@@ -231,6 +300,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   } finally {
     sink.close();
     await closeStages();
+    processed?.close();
   }
 
   const decodeExit = await decoder.exited;
@@ -253,12 +323,21 @@ async function planFrameGen(options: FrameGenOptions): Promise<FrameGenJob> {
   const nativeMultiplierMax = caps.multiFrameCountMax + 1;
 
   const info = probeVideo(ffprobe, options.input, ffmpeg);
+  const sr = options.superResolution;
   // Every encoder here writes 4:2:0, which cannot represent an odd dimension,
-  // so the whole chain runs at even sizes and the decoder scales to match --
-  // the same rule video.ts and image.ts apply to their targets.
-  const width = evenSize(info.width);
-  const height = evenSize(info.height);
-  const rescaled = width !== info.width || height !== info.height;
+  // so frame generation runs at even sizes and the decoder or Super Resolution
+  // scales to match -- the same rule video.ts and image.ts apply to their targets.
+  const target = resolveTargetSize(info.width, info.height, sr?.scale ?? options.resize ?? DEFAULT_SCALE_SETTINGS);
+  const width = evenSize(target.width);
+  const height = evenSize(target.height);
+  // SR's limits need the source size, so they are checked here, before any GPU work starts.
+  const srProblem = sr ? srOutputProblem(info, { width, height }) : null;
+  if (srProblem) throw new Error(srProblem);
+  // SR upscales inside DLSS, so it takes the frames at the source size; without it ffmpeg decodes at the output size.
+  const decodeWidth = sr ? info.width : width;
+  const decodeHeight = sr ? info.height : height;
+  const steps: StepKind[] = [...jobSteps({ superResolution: sr, neuralRendering: options.neuralRendering }), "fg"];
+  const resized = !sr && options.resize !== undefined && options.resize.mode !== "none";
   const frameBytes = width * height * 4;
   if (info.frames === null || info.frames <= 0)
     throw new Error("Could not determine the source frame count, which frame generation needs for its progress estimate. Re-mux the file (e.g. `ffmpeg -i in -c copy out.mp4`) so ffprobe can read it.");
@@ -277,7 +356,7 @@ async function planFrameGen(options: FrameGenOptions): Promise<FrameGenJob> {
   const expectedDecoded = Math.max(1, Math.round(sourceSeconds * ratToNumber(sourceRate)));
   const estimatedOutput = Math.ceil(sourceSeconds * ratToNumber(targetRate));
   const expectsGeneration = plan.generatedPerInterval > 0;
-  const output = options.output ?? defaultOutputPath(options.input, "dlssg", `.${FRAME_GEN_CONTAINER}`);
+  const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resized), `.${FRAME_GEN_CONTAINER}`);
   // Read before anything can write there: it decides what the failure path may delete.
   const outputExisted = existsSync(output);
   const detail =
@@ -286,18 +365,52 @@ async function planFrameGen(options: FrameGenOptions): Promise<FrameGenJob> {
       : plan.path === "Cascade"
         ? `${plan.cascadeStages} x 2x stage(s) on a ${plan.gridMultiplier}x grid, max timing error ${ratToNumber(plan.maximumTemporalError).toFixed(4)} s`
         : "no synthesis, nearest source frame";
-  progress(0, `source ${info.width}x${info.height}${rescaled ? ` -> ${width}x${height} (4:2:0 needs even dimensions)` : ""}${info.displayAspect ? ` (non-square pixels, display ${info.displayAspect.num}:${info.displayAspect.den})` : ""} ${info.codec} ${formatRate(sourceRate)} fps, ${frames} frames${expectedDecoded !== frames ? ` (~${expectedDecoded} after the ${formatRate(sourceRate)} CFR decode)` : ""}; ${plan.path}: -> ${formatRate(targetRate)} fps (${detail}); HAGS ${caps.hagsEnabled ? "on" : "off"}; ~${estimatedOutput} output frames`);
-  return { options, progress, ffmpeg, ffprobe, caps, info, width, height, frameBytes, sourceRate, targetRate, plan, expectedDecoded, expectsGeneration, output, outputExisted };
+  // Only the decode's own rescale: a size the steps or a resize set is said in stepsClause.
+  const rescaled = !sr && !resized && (width !== info.width || height !== info.height);
+  progress(0, `source ${info.width}x${info.height}${rescaled ? ` -> ${width}x${height} (4:2:0 needs even dimensions)` : ""}${info.displayAspect ? ` (non-square pixels, display ${info.displayAspect.num}:${info.displayAspect.den})` : ""} ${info.codec} ${formatRate(sourceRate)} fps, ${frames} frames${expectedDecoded !== frames ? ` (~${expectedDecoded} after the ${formatRate(sourceRate)} CFR decode)` : ""}; ${stepsClause({ width, height }, options, resized)}${plan.path}: -> ${formatRate(targetRate)} fps (${detail}); HAGS ${caps.hagsEnabled ? "on" : "off"}; ~${estimatedOutput} output frames`);
+  const chained = steps.length > 1;
+  return { options, progress, ffmpeg, ffprobe, caps, info, steps, chained, decodeWidth, decodeHeight, width, height, frameBytes, sourceRate, targetRate, plan, expectedDecoded, expectsGeneration, output, outputExisted };
+}
+
+/**
+ * What the job does to the decoded frames before frame generation, as a clause of the plan's progress line, e.g.
+ * "Super Resolution to 1920x1080, then Neural Rendering; "; empty when they reach it as decoded.
+ */
+function stepsClause(size: { width: number; height: number }, options: FrameGenOptions, resized: boolean): string {
+  const sizeText = `${size.width}x${size.height}`;
+  const parts: string[] = [];
+  if (options.superResolution) parts.push(`Super Resolution to ${sizeText}`);
+  else if (resized) parts.push(`resized to ${sizeText}`);
+  if (options.neuralRendering) parts.push("Neural Rendering");
+  return parts.length ? `${parts.join(", then ")}; ` : "";
+}
+
+/** Opens the engine chain the decoded frames go through before frame generation; the caller closes it. */
+function openProcessedFrames({ options, progress, decodeWidth, decodeHeight, width, height }: FrameGenJob, decoded: FrameReader): ProcessedFrames {
+  return ProcessedFrames.open({
+    reader: decoded,
+    decodeWidth,
+    decodeHeight,
+    outputWidth: width,
+    outputHeight: height,
+    superResolution: options.superResolution,
+    neuralRendering: options.neuralRendering,
+    adapterIndex: options.adapterIndex,
+    adapterUuid: options.adapterUuid,
+    runtimeDir: options.runtimeDir,
+    appDataPath: options.appDataPath,
+    progress,
+  });
 }
 
 /** Starts the decoder and opens the encode sink, which owns the audio and the output file. */
-async function openEncodePipeline({ options, progress, ffmpeg, info, width, height, targetRate, output }: FrameGenJob) {
-  const decoder = Bun.spawn([ffmpeg, ...decodeArgv({ input: options.input, source: info, output: { width, height } })], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+async function openEncodePipeline({ options, progress, ffmpeg, info, decodeWidth, decodeHeight, width, height, targetRate, output }: FrameGenJob) {
+  const decoder = Bun.spawn([ffmpeg, ...decodeArgv({ input: options.input, source: info, output: { width: decodeWidth, height: decodeHeight } })], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   // Only re-open the source as a second input when its audio is carried;
   // otherwise ffmpeg needlessly demuxes/decodes the whole source again.
   const wantAudio = info.hasAudio && (options.copyAudio ?? DEFAULT_ENCODE_SETTINGS.copyAudio);
   // Probed on the device the encode will use, FRAMEGEN_CUDA_DEVICE (framegen-plan.ts says why).
-  const resolvedCodec = resolveEncodeCodec(options.codec ?? DEFAULT_ENCODE_SETTINGS.codec, ffmpeg, FRAMEGEN_CUDA_DEVICE);
+  const resolvedCodec = resolveEncodeCodec(options.codec ?? DEFAULT_ENCODE_SETTINGS.codec, ffmpeg, FRAMEGEN_CUDA_DEVICE, { width, height });
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
 
   let sink: EncodeSink;
@@ -310,7 +423,7 @@ async function openEncodePipeline({ options, progress, ffmpeg, info, width, heig
         width,
         height,
         targetRate,
-        // The even-dimension rescale above changes the pixel grid, so the source's
+        // Any change of size above changes the pixel grid, so the source's
         // DAR -- not its sample aspect -- is what the output must be tagged with.
         displayAspect: info.displayAspect,
         codec: resolvedCodec.codec,
@@ -370,7 +483,7 @@ async function openStages({ options, progress, width, height, plan }: FrameGenJo
 /** The frame loop: feeds the stages, writes the encode and finishes the sink, failing fast when generation is disabled. */
 async function runPipeline(
   { options, progress, frameBytes, sourceRate, plan, caps, expectedDecoded, expectsGeneration }: FrameGenJob,
-  { reader, writer, sink }: { reader: FrameReader; writer: NearestTimestampWriter; sink: EncodeSink },
+  { reader, writer, sink }: { reader: FrameSource; writer: NearestTimestampWriter; sink: EncodeSink },
   stages: Stage[],
   capacity: number,
 ): Promise<PipelineRun> {
@@ -422,7 +535,7 @@ async function runPipeline(
 }
 
 function finishFrameGen(
-  { progress, ffprobe, width, height, sourceRate, targetRate, plan, caps, frameBytes, output }: FrameGenJob,
+  { progress, ffprobe, steps, width, height, sourceRate, targetRate, plan, caps, frameBytes, output }: FrameGenJob,
   writer: NearestTimestampWriter,
   stages: Stage[],
   { mode, inputFrames, peak }: PipelineRun,
@@ -440,6 +553,7 @@ function finishFrameGen(
     output,
     width,
     height,
+    steps,
     sourceFps: ratToNumber(sourceRate),
     outputFps: ratToNumber(targetRate),
     targetFps: formatRate(targetRate),

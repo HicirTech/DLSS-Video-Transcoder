@@ -3,11 +3,12 @@ import { isPng } from "../codec/png/chunks.ts";
 import { decodePng } from "../codec/png/decode.ts";
 import { encodePng } from "../codec/png/encode.ts";
 import { DlssSrSession } from "../ngx/sr.ts";
-import { DEFAULT_SR_PRESET, DlssRenderPreset, perfQualityName, qualityForSizes, srOutputProblem } from "../ngx/results.ts";
+import { DEFAULT_SR_PRESET, DlssRenderPreset, perfQualityName, qualityForSizes } from "../ngx/results.ts";
 import { describeGpu, openGpu } from "../pipeline/gpu.ts";
-import { enhanceStill, resolveTargetSize, runStillPasses } from "../pipeline/image.ts";
+import { enhanceStill, runStillPasses } from "../pipeline/image.ts";
 import { defaultOutputPath } from "../pipeline/output-path.ts";
 import { DEFAULT_SCALE_SETTINGS } from "../server/api-types.ts";
+import { resolveTargetSize, srOutputProblem } from "../server/output-size.ts";
 import { adapterOption, numberOption, option, positionalArgs, runtimeDirOption } from "./args.ts";
 import { commandSpec, SR_FACTOR_OPTION, WARMUP_OPTION } from "./commands.ts";
 import { dlssVersionOption } from "./dlss-version-option.ts";
@@ -51,7 +52,7 @@ export async function srCommand(args: string[]): Promise<void> {
     dllDir,
   });
   const enhanced = await enhanceStill(image, async (colour) => ({
-    rgba: await runStillPasses("sr", warmupFrames, (reset) => sr.evaluate(colour, reset)),
+    rgba: await runStillPasses(true, warmupFrames, (reset) => sr.evaluate(colour, reset)),
     width: target.width,
     height: target.height,
   }));

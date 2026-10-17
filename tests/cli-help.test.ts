@@ -3,9 +3,9 @@
  * SETTING_RANGES entry the option is checked against. No GPU.
  */
 import { describe, expect, test } from "bun:test";
-import { commandSpec, FG_MULTIPLIER_OPTION, SR_FACTOR_OPTION, WARMUP_OPTION } from "../src/cli/commands.ts";
+import { commandSpec, FG_MULTIPLIER_OPTION, SR_FACTOR_OPTION, VIDEO_STEP_OPTS, WARMUP_OPTION } from "../src/cli/commands.ts";
 import { DLSS_RATIO, PerfQuality, perfQualityName } from "../src/ngx/results.ts";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DLSS_SR_MAX_OUTPUT_SIDE, SETTING_RANGES } from "../src/server/api-types.ts";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_WARMUP_FRAMES, DLSS_SR_MAX_OUTPUT_SIDE, SETTING_RANGES } from "../src/server/api-types.ts";
 
 /** The help row of `flag` ("--intensity") in `command`'s table entry. */
 function optionRow(command: string, flag: string) {
@@ -54,7 +54,7 @@ describe("sr --factor", () => {
     for (const command of ["sr", "nr"]) {
       const { desc, def } = optionRow(command, "--warmup");
       expect(desc).toContain(`${WARMUP_OPTION.min}..${WARMUP_OPTION.max}`);
-      expect(def).toBe(String(DEFAULT_NR_SETTINGS.warmupFrames));
+      expect(def).toBe(String(DEFAULT_WARMUP_FRAMES));
     }
   });
 
@@ -66,10 +66,19 @@ describe("sr --factor", () => {
 });
 
 describe("video", () => {
-  test("shares its encode rows with fg and its look rows with nr, so the pages cannot disagree", () => {
-    for (const flag of ["--codec", "--quality"]) expect(optionRow("video", flag)).toBe(optionRow("fg", flag));
+  test("shares its encode and rate rows with fg and its look rows with nr, so the pages cannot disagree", () => {
+    for (const flag of ["--codec", "--quality", "--fps", "--multiplier"]) expect(optionRow("video", flag)).toBe(optionRow("fg", flag));
     for (const flag of ["--intensity", "--style", "--preset", "--local-tone", "--local-structure", "--skin-structure", "--auto-mask", "--ui-correction"]) {
       expect(optionRow("video", flag)).toBe(optionRow("nr", flag));
+    }
+    expect(optionRow("video", "--fg-path").desc).toBe(optionRow("fg", "--engine").desc);
+  });
+
+  test("every step's options are on the page, after the step switches", () => {
+    const flags = commandSpec("video").options.map((option) => option.flag.split(/\s+/)[0]!);
+    for (const step of ["sr", "nr", "fg"] as const) {
+      expect(flags.indexOf(`--${step}`), step).toBeGreaterThanOrEqual(0);
+      for (const row of VIDEO_STEP_OPTS[step]) expect(flags.indexOf(row.flag.split(/\s+/)[0]!), row.flag).toBeGreaterThan(flags.indexOf("--fg"));
     }
   });
 
@@ -79,10 +88,11 @@ describe("video", () => {
     expect(optionRow("video", "--codec").def).toStartWith(DEFAULT_ENCODE_SETTINGS.codec);
   });
 
-  test("--factor states Super Resolution's range and limit", () => {
+  test("--factor states Super Resolution's range and limit, and the resize's range without it", () => {
     const { desc } = optionRow("video", "--factor");
-    expect(desc).toContain(`sr takes ${SR_FACTOR_OPTION.min}..${SR_FACTOR_OPTION.max}`);
+    expect(desc).toContain(`with --sr, Super Resolution upscales to it, N ${SR_FACTOR_OPTION.min}..${SR_FACTOR_OPTION.max}`);
     expect(desc).toContain(`at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side`);
+    expect(desc).toContain(`without it, the decode resizes to it with lanczos, N ${SETTING_RANGES.factor.min}..${SETTING_RANGES.factor.max}`);
   });
 });
 

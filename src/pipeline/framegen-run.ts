@@ -6,7 +6,7 @@
  * in-order fallback for frames too large for that window.
  */
 import { raceAbort, throwIfAborted } from "./cancel.ts";
-import type { FrameReader } from "./frame-reader.ts";
+import type { FrameSource } from "./frame-reader.ts";
 import type { NearestTimestampWriter, TimedFrame } from "./framegen-plan.ts";
 import type { AnalyzedFrame, PreparedFrame, Stage } from "./framegen-stage.ts";
 import { type Rational, ratDiv, rational } from "./rational.ts";
@@ -18,7 +18,7 @@ export interface RunResult {
 }
 
 export interface RunParams {
-  reader: FrameReader;
+  reader: FrameSource;
   frameBytes: number;
   sourceRate: Rational;
   stages: Stage[];

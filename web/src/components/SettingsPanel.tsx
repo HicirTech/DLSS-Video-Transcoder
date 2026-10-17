@@ -2,10 +2,10 @@ import { useId, useState } from "react";
 import { Button, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
 import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
-import { DEFAULT_NR_SETTINGS, FRAME_GEN_GPU_CHOICE, type ProbeReport, SETTING_RANGES } from "../../../src/server/api-types";
+import { DEFAULT_WARMUP_FRAMES, FRAME_GEN_GPU_CHOICE, type ProbeReport, SETTING_RANGES } from "../../../src/server/api-types";
 import { api } from "../api";
 import { errorMessage } from "../errors";
-import { STORAGE_KEY, useSettings } from "../hooks/useSettings";
+import { STORAGE_KEY, useSettings, withServerDefaults } from "../hooks/useSettings";
 import { useToast } from "../hooks/useToast";
 import { LogPanel } from "./LogPanel";
 import { NumberField } from "./NumberField";
@@ -23,7 +23,7 @@ const AUTO_GPU = "auto";
 
 export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
   const gpuLabelId = useId();
-  const { settings, setNr, setAdapterUuid, reset, replaceAll } = useSettings();
+  const { settings, update, reset, replaceAll } = useSettings();
   const toast = useToast();
   const [loading, setLoading] = useState(false);
   // Only adapters a job would accept are offered; the probe judged that by the rule jobs apply.
@@ -33,9 +33,8 @@ export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
   const loadServerDefaults = async (): Promise<void> => {
     setLoading(true);
     try {
-      const defaults = await api.settingsDefaults();
-      // The server has no GPU preference of its own; the stored one is kept.
-      replaceAll({ nr: defaults.settings, scale: defaults.scale, encode: defaults.encode, adapterUuid: settings.adapterUuid });
+      // The server has no GPU preference or step switches of its own; the stored ones are kept.
+      replaceAll(withServerDefaults(settings, await api.settingsDefaults()));
       toast.showSuccess("Loaded the server's default settings");
     } catch (err) {
       toast.showError(`Could not load server defaults: ${errorMessage(err)}`);
@@ -49,12 +48,12 @@ export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
       <Section title="GPU">
         <Stack spacing={1}>
           <FormControl sx={{ maxWidth: 560 }}>
-            <InputLabel id={gpuLabelId}>Run image and video jobs on</InputLabel>
+            <InputLabel id={gpuLabelId}>Run Super Resolution and Neural Rendering on</InputLabel>
             <Select<string>
               labelId={gpuLabelId}
-              label="Run image and video jobs on"
+              label="Run Super Resolution and Neural Rendering on"
               value={settings.adapterUuid ?? AUTO_GPU}
-              onChange={(event) => setAdapterUuid(event.target.value === AUTO_GPU ? null : event.target.value)}
+              onChange={(event) => update({ adapterUuid: event.target.value === AUTO_GPU ? null : event.target.value })}
             >
               <MenuItem value={AUTO_GPU}>Automatic: the NVIDIA adapter with the most VRAM that has a CUDA device</MenuItem>
               {gpus.map((a) => (
@@ -75,7 +74,8 @@ export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
                 ? `${gpus.length} GPU${gpus.length === 1 ? "" : "s"} with a CUDA device in the last probe. The choice is kept by the device's UUID, which survives reboots; the adapter index and LUID the probe shows do not.`
                 : "The last probe listed no NVIDIA adapter with a CUDA device, so only the automatic choice is available."
               : "Run the probe to list the GPUs a job can be sent to."}{" "}
-            Frame generation ignores this: {FRAME_GEN_GPU_CHOICE}.
+            A job with no step switched on copies its frames on this GPU too. Frame generation ignores this:{" "}
+            {FRAME_GEN_GPU_CHOICE}.
           </Typography>
           {probe ? null : (
             <Button variant="outlined" disabled={probing} onClick={onProbe} sx={{ alignSelf: "flex-start" }}>
@@ -89,16 +89,17 @@ export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
         <Stack spacing={1}>
           <NumberField
             label="Warm-up frames"
-            value={settings.nr.warmupFrames}
+            value={settings.warmupFrames}
             {...SETTING_RANGES.warmupFrames}
             step={1}
+            integer
             sx={{ width: 200 }}
-            onChange={(warmupFrames) => setNr({ ...settings.nr, warmupFrames })}
+            onChange={(warmupFrames) => update({ warmupFrames })}
           />
           <Typography variant="caption" color="text.secondary">
-            Extra evaluations of the first frame so the temporal state settles before the output is taken. Images use
-            this; videos settle naturally over their first frames. Range {SETTING_RANGES.warmupFrames.min}–{SETTING_RANGES.warmupFrames.max}; default{" "}
-            {DEFAULT_NR_SETTINGS.warmupFrames}.
+            Image jobs only: passes over the still before the one that is kept, each through every step switched on,
+            so the temporal state of Super Resolution and Neural Rendering settles. Videos settle over their first
+            frames. Range {SETTING_RANGES.warmupFrames.min}–{SETTING_RANGES.warmupFrames.max}; default {DEFAULT_WARMUP_FRAMES}.
           </Typography>
         </Stack>
       </Section>
@@ -114,9 +115,9 @@ export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
             </Button>
           </Stack>
           <Typography variant="caption" color="text.secondary">
-            Neural rendering, scale, encode and GPU settings persist in this browser under the localStorage key{" "}
-            <Mono>{STORAGE_KEY}</Mono>. Reset to defaults restores the app's built-in defaults; Load server defaults
-            fetches the server's own instead.
+            The steps each tab runs, their settings, the resize, encode and GPU settings persist in this browser under
+            the localStorage key <Mono>{STORAGE_KEY}</Mono>. Reset to defaults restores the app's built-in defaults;
+            Load server defaults fetches the server's own instead, keeping the step switches and the GPU.
           </Typography>
           <LogPanel lines={JSON.stringify(settings, null, 2).split("\n")} maxHeight={320} />
         </Stack>

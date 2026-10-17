@@ -1,39 +1,32 @@
 import { type ChangeEvent, useId, useState } from "react";
 import { Button, FormControl, FormHelperText, InputLabel, MenuItem, Select, Stack, TextField } from "@mui/material";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
-import { ENGINE_KINDS, type EngineKind, MOTION_KINDS, type MotionKind } from "../../../src/server/api-types";
+import { MOTION_KINDS, type MotionKind } from "../../../src/server/api-types";
 import { api } from "../api";
 import { errorMessage } from "../errors";
 
-// Record<...>: an engine or motion the API accepts without menu words is a build error, not a blank item.
-const ENGINE_MENU_LABELS: Record<EngineKind, string> = {
-  sr: "DLSS Super Resolution (upscale)",
-  nr: "DLSS Neural Rendering (enhance)",
-  bypass: "Bypass (passthrough copy, no DLSS)",
-};
+// Record<...>: a motion mode the API accepts without menu words is a build error, not a blank item.
 const MOTION_MENU_LABELS: Record<MotionKind, string> = {
   none: "None — process each frame independently",
   flow: "Optical flow (estimate motion between frames)",
 };
 
-interface PathFieldsProps {
+interface InputPathFieldProps {
   kind: "image" | "video";
-  input: string;
-  output: string;
+  value: string;
   disabled?: boolean;
-  onInputChange: (value: string) => void;
-  onOutputChange: (value: string) => void;
+  onChange: (value: string) => void;
 }
 
-/** Absolute input / optional output path fields shared by the Image and Video tabs. */
-export function PathFields({ kind, input, output, disabled, onInputChange, onOutputChange }: PathFieldsProps) {
+/** The absolute input path, typed or filled in by an upload; shared by the Image and Video tabs. */
+export function InputPathField({ kind, value, disabled, onChange }: InputPathFieldProps) {
   const example = kind === "image" ? "C:\\Pictures\\photo.png" : "D:\\Footage\\clip.mp4";
   // Image jobs read PNG only (processImage); the server queues any other format and the job then fails.
   const accept = kind === "image" ? ".png,image/png" : "video/*";
-  const inputHelp =
+  const help =
     kind === "image"
-      ? "Absolute path of a PNG on the machine that runs the server — or upload one. Image jobs take PNG only; any other format is queued and then fails."
-      : "Absolute path on the machine that runs the server — or upload a file.";
+      ? "Absolute path of a PNG on the machine that runs the server — or upload one. Image jobs take PNG only."
+      : "Absolute path on the machine that runs the server — or upload a file. Any format ffmpeg can decode.";
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -45,7 +38,7 @@ export function PathFields({ kind, input, output, disabled, onInputChange, onOut
     setUploadError(null);
     try {
       const result = await api.uploadFile(file);
-      onInputChange(result.path);
+      onChange(result.path);
     } catch (err) {
       setUploadError(errorMessage(err));
     } finally {
@@ -54,92 +47,65 @@ export function PathFields({ kind, input, output, disabled, onInputChange, onOut
   };
 
   return (
-    <Stack spacing={1.5}>
-      <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start" }}>
-        <TextField
-          label="Input path"
-          placeholder={example}
-          value={input}
-          disabled={disabled}
-          fullWidth
-          required
-          error={Boolean(uploadError)}
-          helperText={uploadError ?? inputHelp}
-          onChange={(event) => onInputChange(event.target.value)}
-          slotProps={{ htmlInput: { spellCheck: false } }}
-        />
-        <Button
-          component="label"
-          variant="outlined"
-          startIcon={<UploadFileIcon />}
-          disabled={disabled || uploading}
-          sx={{ mt: 1, whiteSpace: "nowrap", flexShrink: 0 }}
-        >
-          {uploading ? "Uploading…" : "Upload"}
-          <input hidden type="file" accept={accept} onChange={(event) => void onPick(event)} />
-        </Button>
-      </Stack>
+    <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start" }}>
       <TextField
-        label="Output path"
-        placeholder="Leave empty to write next to the input with a suffix"
-        value={output}
+        label="Input path"
+        placeholder={example}
+        value={value}
         disabled={disabled}
         fullWidth
-        onChange={(event) => onOutputChange(event.target.value)}
+        required
+        error={Boolean(uploadError)}
+        helperText={uploadError ?? help}
+        onChange={(event) => onChange(event.target.value)}
         slotProps={{ htmlInput: { spellCheck: false } }}
       />
+      <Button
+        component="label"
+        variant="outlined"
+        startIcon={<UploadFileIcon />}
+        disabled={disabled || uploading}
+        sx={{ mt: 1, whiteSpace: "nowrap", flexShrink: 0 }}
+      >
+        {uploading ? "Uploading…" : "Upload"}
+        <input hidden type="file" accept={accept} onChange={(event) => void onPick(event)} />
+      </Button>
     </Stack>
   );
 }
 
-interface EngineSelectProps {
-  value: EngineKind;
-  disabled?: boolean;
-  onChange: (value: EngineKind) => void;
+interface OutputPathFieldProps {
+  value: string;
+  /** The file name the job gives its output when this is left empty (planJob), or null before there is an input. */
+  defaultName: string | null;
+  onChange: (value: string) => void;
 }
 
-export function EngineSelect({ value, disabled, onChange }: EngineSelectProps) {
-  const engineLabelId = useId();
+/** The optional output path; empty writes next to the input under the name the steps give it. */
+export function OutputPathField({ value, defaultName, onChange }: OutputPathFieldProps) {
   return (
-    <FormControl sx={{ minWidth: 260 }} disabled={disabled}>
-      <InputLabel id={engineLabelId}>Engine</InputLabel>
-      <Select<EngineKind>
-        labelId={engineLabelId}
-        label="Engine"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {ENGINE_KINDS.map((engine) => (
-          <MenuItem key={engine} value={engine}>
-            {ENGINE_MENU_LABELS[engine]}
-          </MenuItem>
-        ))}
-      </Select>
-      <FormHelperText>
-        Super Resolution upscales to the output size below. Neural rendering enhances each frame at its current
-        size. Bypass copies frames unchanged, for comparison.
-      </FormHelperText>
-    </FormControl>
+    <TextField
+      label="Output path"
+      placeholder={defaultName ? `Leave empty to write ${defaultName} next to the input` : "Leave empty to write next to the input, named after the steps"}
+      value={value}
+      fullWidth
+      onChange={(event) => onChange(event.target.value)}
+      slotProps={{ htmlInput: { spellCheck: false }, inputLabel: { shrink: true } }}
+    />
   );
 }
 
 interface MotionSelectProps {
   value: MotionKind;
-  disabled?: boolean;
   onChange: (value: MotionKind) => void;
 }
 
-export function MotionSelect({ value, disabled, onChange }: MotionSelectProps) {
+export function MotionSelect({ value, onChange }: MotionSelectProps) {
   const motionLabelId = useId();
   return (
-    <FormControl sx={{ minWidth: 220 }} disabled={disabled}>
+    <FormControl sx={{ minWidth: 260, maxWidth: 420 }}>
       <InputLabel id={motionLabelId}>Motion</InputLabel>
-      <Select<MotionKind>
-        labelId={motionLabelId}
-        label="Motion"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
+      <Select<MotionKind> labelId={motionLabelId} label="Motion" value={value} onChange={(event) => onChange(event.target.value)}>
         {MOTION_KINDS.map((motion) => (
           <MenuItem key={motion} value={motion}>
             {MOTION_MENU_LABELS[motion]}
@@ -147,9 +113,8 @@ export function MotionSelect({ value, disabled, onChange }: MotionSelectProps) {
         ))}
       </Select>
       <FormHelperText>
-        Optical flow estimates motion between frames for steadier temporal results — using the GPU hardware
-        flow engine (NVOFA) when available, otherwise a slower CPU estimator. Super Resolution only: Neural
-        Rendering and bypass take no motion vectors.
+        Optical flow hands Super Resolution the motion between frames, for steadier detail over time: on the GPU's
+        hardware flow engine (NVOFA) when it starts, otherwise a slower CPU estimator.
       </FormHelperText>
     </FormControl>
   );

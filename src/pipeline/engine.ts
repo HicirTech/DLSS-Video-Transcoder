@@ -1,10 +1,10 @@
 /**
- * The frame engine contract (RGBA8 in, RGBA8 out) plus the factory registry the
- * NGX engines register themselves into.
+ * The frame engine contract (RGBA8 in, RGBA8 out), the registry the NGX engines register themselves into,
+ * and the chain a job's frames go through: Super Resolution, then Neural Rendering.
  *
- * `BypassEngine` round-trips a frame through GPU memory unchanged, so decode,
- * upload, readback, encode and muxing can be verified without a neural runtime
- * and a neural result has an untouched pass to be compared against.
+ * `BypassEngine` round-trips a frame through GPU memory unchanged: a job without either step runs it, so
+ * decode, upload, readback, encode and muxing are the same path, and a neural result has an untouched pass to
+ * be compared against.
  */
 import {
   D3D12_RESOURCE_STATE_COPY_DEST,
@@ -13,7 +13,7 @@ import {
   DXGI_FORMAT_R8G8B8A8_UNORM,
   type D3D12Resource,
 } from "../native/d3d12.ts";
-import { ENGINE_KINDS, type EngineKind, type NrSettings } from "../server/api-types.ts";
+import type { NrSettings } from "../server/api-types.ts";
 import type { GpuSession } from "./gpu.ts";
 
 export interface FrameInput {
@@ -35,18 +35,28 @@ export interface Engine {
   close(): void;
 }
 
-export interface EngineOptions {
-  width: number;
-  height: number;
-  settings: NrSettings;
-  /** Output size for an upscaling engine (sr); defaults to width/height (1:1) when omitted. */
-  outputWidth?: number;
-  outputHeight?: number;
-  /** Folder with user-supplied NVIDIA runtime DLLs (neural engine only). */
+/** Where an NGX engine loads its DLL from. */
+interface EngineRuntime {
+  /** Folder with user-supplied NVIDIA runtime DLLs. */
   runtimeDir?: string;
   /** Specific DLSS DLL folder to load (version switching); defaults to the runtime feature folder. */
   dllDir?: string;
   appDataPath?: string;
+}
+
+/** DLSS Super Resolution's engine: renders `width`x`height` frames to `outputWidth`x`outputHeight`. */
+export interface SrEngineOptions extends EngineRuntime {
+  width: number;
+  height: number;
+  outputWidth: number;
+  outputHeight: number;
+}
+
+/** DLSS Neural Rendering's engine: enhances `width`x`height` frames at their size. */
+export interface NrEngineOptions extends EngineRuntime {
+  width: number;
+  height: number;
+  settings: NrSettings;
 }
 
 export class BypassEngine implements Engine {
@@ -92,32 +102,86 @@ export class BypassEngine implements Engine {
   }
 }
 
-export type EngineFactory = (kind: EngineKind, session: GpuSession, options: EngineOptions) => Engine;
+type SrEngineFactory = (session: GpuSession, options: SrEngineOptions) => Engine;
+type NrEngineFactory = (session: GpuSession, options: NrEngineOptions) => Engine;
 
-let neuralFactory: EngineFactory | null = null;
-let srFactory: EngineFactory | null = null;
+let neuralFactory: NrEngineFactory | null = null;
+let srFactory: SrEngineFactory | null = null;
 
 /** The neural (feature 18) engine registers itself here so this module does not import NGX code. */
-export function registerNeuralEngine(factory: EngineFactory): void {
+export function registerNeuralEngine(factory: NrEngineFactory): void {
   neuralFactory = factory;
 }
 
 /** The DLSS Super Resolution engine registers itself here, for the same reason. */
-export function registerSrEngine(factory: EngineFactory): void {
+export function registerSrEngine(factory: SrEngineFactory): void {
   srFactory = factory;
 }
 
-export function createEngine(kind: EngineKind, session: GpuSession, options: EngineOptions): Engine {
-  switch (kind) {
-    case "bypass":
-      return new BypassEngine(session, options.width, options.height);
-    case "nr":
-      if (!neuralFactory) throw new Error("Neural engine is not registered; import src/ngx/nr.ts before creating it");
-      return neuralFactory(kind, session, options);
-    case "sr":
-      if (!srFactory) throw new Error("SR engine is not registered; import src/ngx/sr-engine.ts before creating it");
-      return srFactory(kind, session, options);
-    default:
-      throw new Error(`Unknown engine "${String(kind)}". Choose one of: ${ENGINE_KINDS.join(", ")}.`);
+/** The per-frame steps a job runs on its decoded frames (JobRequest.superResolution and neuralRendering). */
+export interface EngineChainOptions {
+  /** The size of the frames the chain is fed: the source's when SR runs, else the decoded size. */
+  width: number;
+  height: number;
+  /** Super Resolution's output size and version folder, when the step runs. */
+  sr?: { outputWidth: number; outputHeight: number; dllDir?: string };
+  /** Neural Rendering's look and version folder, when the step runs: after SR, at SR's output size. */
+  nr?: { settings: NrSettings; dllDir?: string };
+  runtimeDir?: string;
+  appDataPath?: string;
+}
+
+/**
+ * The engine a job's frames go through. One step opens just its own engine, so a job of one step runs the
+ * same engine a one-engine job always ran; both open SR and then NR; neither opens BypassEngine.
+ */
+export function createEngineChain(session: GpuSession, options: EngineChainOptions): Engine {
+  const runtime = { runtimeDir: options.runtimeDir, appDataPath: options.appDataPath };
+  let sr: Engine | null = null;
+  if (options.sr) {
+    if (!srFactory) throw new Error("SR engine is not registered; load it through engine-loader.ts before creating it");
+    sr = srFactory(session, { ...runtime, dllDir: options.sr.dllDir, width: options.width, height: options.height, outputWidth: options.sr.outputWidth, outputHeight: options.sr.outputHeight });
+  }
+  if (!options.nr) return sr ?? new BypassEngine(session, options.width, options.height);
+  try {
+    if (!neuralFactory) throw new Error("Neural engine is not registered; load it through engine-loader.ts before creating it");
+    const nr = neuralFactory(session, { ...runtime, dllDir: options.nr.dllDir, width: sr?.outputWidth ?? options.width, height: sr?.outputHeight ?? options.height, settings: options.nr.settings });
+    return sr ? new ChainEngine(sr, nr) : nr;
+  } catch (error) {
+    sr?.close(); // opened above, and nothing else holds it yet
+    throw error;
+  }
+}
+
+/** Super Resolution followed by Neural Rendering: NR enhances each frame SR has upscaled. */
+class ChainEngine implements Engine {
+  readonly name = "sr+nr";
+  readonly width: number;
+  readonly height: number;
+  readonly outputWidth: number;
+  readonly outputHeight: number;
+
+  constructor(
+    private readonly sr: Engine,
+    private readonly nr: Engine,
+  ) {
+    this.width = sr.width;
+    this.height = sr.height;
+    this.outputWidth = nr.outputWidth;
+    this.outputHeight = nr.outputHeight;
+  }
+
+  process(frame: FrameInput): Uint8Array {
+    const upscaled = this.sr.process(frame);
+    // NR takes no motion vectors; a scene cut clears its history as it clears SR's.
+    return this.nr.process({ rgba: upscaled, reset: frame.reset, motion: null });
+  }
+
+  close(): void {
+    try {
+      this.sr.close();
+    } finally {
+      this.nr.close();
+    }
   }
 }

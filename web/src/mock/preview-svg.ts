@@ -20,7 +20,8 @@ function escapeXml(text: string): string {
 /** A stand-in for /api/file: a generated landscape whose look depends on the path (outputs look "enhanced"). */
 export function mockPreviewSvg(path: string): string {
   const name = path.split(/[\\/]/).pop() ?? path;
-  const enhanced = /(-|_)nr\.|enhanced|output/i.test(name);
+  // An output named after a step that changes the picture (clip.nr.png, clip.sr-nr.png) looks enhanced.
+  const enhanced = /[._-](sr|nr)[.-]|enhanced|output/i.test(name);
   let hash = 7;
   for (const ch of path) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   const hue = hash % 360;

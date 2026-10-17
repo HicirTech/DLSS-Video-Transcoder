@@ -22,7 +22,8 @@ export async function nrCommand(args: string[]): Promise<void> {
   }
   const image = decodePng(bytes);
   const output = positional[1] ?? defaultOutputPath(input, "nr", ".png");
-  const settings = { ...nrSettingsOption(args), warmupFrames: numberOption(args, "--warmup", WARMUP_OPTION) };
+  const settings = nrSettingsOption(args);
+  const warmupFrames = numberOption(args, "--warmup", WARMUP_OPTION);
   const session = openGpu({ adapterIndex: adapterOption(args) });
   console.log(describeGpu(session));
   const started = performance.now();
@@ -33,14 +34,14 @@ export async function nrCommand(args: string[]): Promise<void> {
     runtimeDir: runtimeDirOption(args),
   });
   const enhanced = await enhanceStill(image, async (colour) => ({
-    rgba: await runStillPasses("nr", settings.warmupFrames, (reset) => nr.evaluate(colour, reset)),
+    rgba: await runStillPasses(true, warmupFrames, (reset) => nr.evaluate(colour, reset)),
     width: image.width,
     height: image.height,
   }));
   await Bun.write(output, encodePng(enhanced, { level: 6 }));
   nr.close();
   // Only settings the runtime acts on are worth reporting; the preset is not one of them.
-  console.log(`DLSS NR: ${image.width}x${image.height} enhanced (style ${settings.style}, intensity ${settings.intensity}, ${settings.warmupFrames + 1} passes) in ${(performance.now() - started).toFixed(1)} ms`);
+  console.log(`DLSS NR: ${image.width}x${image.height} enhanced (style ${settings.style}, intensity ${settings.intensity}, ${warmupFrames + 1} passes) in ${(performance.now() - started).toFixed(1)} ms`);
   console.log(`wrote ${output}`);
   process.exit(0);
 }

@@ -24,14 +24,7 @@ const out = mkdtempSync(join(tmpdir(), "nr-settings-"));
 
 async function hashFor(label: string, overrides: Partial<NrSettings>): Promise<string> {
   const output = join(out, `${label.replace(/[^\w.-]/g, "_")}.png`);
-  await processImage({
-    input,
-    output,
-    engine: "nr",
-    scale: { mode: "none", factor: 1, width: 0, height: 0 },
-    settings: { ...DEFAULT_NR_SETTINGS, ...overrides },
-    runtimeDir,
-  });
+  await processImage({ input, output, neuralRendering: { settings: { ...DEFAULT_NR_SETTINGS, ...overrides } }, runtimeDir });
   return createHash("sha256").update(new Uint8Array(await Bun.file(output).arrayBuffer())).digest("hex").slice(0, 16);
 }
 

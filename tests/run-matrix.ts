@@ -1,9 +1,11 @@
 /**
  * Manual harness (not part of `bun test`): the server-side job paths across
- * engine x scale x motion x codec x container — processImage, which no CLI
+ * steps x scale x motion x codec x container — processImage, which no CLI
  * command runs, and processVideo, which the video command runs one combination
  * at a time. Prints one line per combination with the output hash, so a
- * refactor can be compared line by line.
+ * refactor can be compared line by line. The rows named after an engine (bypass,
+ * nr, sr) are the combinations jobs ran before each step had its own switch, and
+ * keep their names so a baseline from then still lines up.
  *
  *   bun run tests/run-matrix.ts <outDir> <clip.mp4> <image.png>
  */
@@ -18,7 +20,7 @@ import { DEFAULT_RUNTIME_DIR } from "../src/paths.ts";
 import { processImage } from "../src/pipeline/image.ts";
 import { BUNDLED_FFMPEG_DIR } from "../src/pipeline/tools.ts";
 import { processVideo } from "../src/pipeline/video.ts";
-import { DEFAULT_NR_SETTINGS, type EncodeSettings, type ScaleSettings } from "../src/server/api-types.ts";
+import { DEFAULT_NR_SETTINGS, type EncodeSettings, type MotionKind, type NeuralRenderingStep, type NrSettings, type ScaleSettings, type SuperResolutionStep } from "../src/server/api-types.ts";
 
 const [outDir, clip, image] = Bun.argv.slice(2) as [string, string, string];
 const runtimeDir = DEFAULT_RUNTIME_DIR;
@@ -78,11 +80,21 @@ function provenance(): { onProgress: (fraction: number, message: string) => void
   };
 }
 
-async function imageJob(name: string, engine: "bypass" | "nr" | "sr", scale: ScaleSettings, nr = settings): Promise<void> {
+/** A job's steps and resize: an engine name for what a job of one engine ran (see the header), or "sr+nr" for both steps. */
+type Steps = "bypass" | "nr" | "sr" | "sr+nr";
+
+/** bypass is no step with the scale as a resize, nr Neural Rendering with it as a resize, sr Super Resolution to it. */
+function stepsOf(steps: Steps, scale: ScaleSettings, nr: NrSettings, motion: MotionKind): { superResolution?: SuperResolutionStep; neuralRendering?: NeuralRenderingStep; resize?: ScaleSettings } {
+  const superResolution = steps === "sr" || steps === "sr+nr" ? { scale, motion } : undefined;
+  const neuralRendering = steps === "nr" || steps === "sr+nr" ? { settings: nr } : undefined;
+  return { superResolution, neuralRendering, resize: superResolution ? undefined : scale };
+}
+
+async function imageJob(name: string, steps: Steps, scale: ScaleSettings, nr = settings): Promise<void> {
   const output = join(outDir, `img-${safe(name)}.png`);
   const where = provenance();
   try {
-    await processImage({ input: image, output, engine, scale, settings: nr, runtimeDir, onProgress: where.onProgress });
+    await processImage({ input: image, output, ...stepsOf(steps, scale, nr, "none"), runtimeDir, onProgress: where.onProgress });
     line(`image ${name}`, 0, `sha=${await sha(output)} bytes=${statSync(output).size}`);
   } catch (error) {
     line(`image ${name}`, 1, `error="${(error as Error).message.slice(0, 90)}"`);
@@ -90,17 +102,11 @@ async function imageJob(name: string, engine: "bypass" | "nr" | "sr", scale: Sca
   where.print();
 }
 
-async function videoJob(
-  name: string,
-  engine: "bypass" | "nr" | "sr",
-  motion: "none" | "flow",
-  scale: ScaleSettings,
-  encode: EncodeSettings,
-): Promise<void> {
+async function videoJob(name: string, steps: Steps, motion: MotionKind, scale: ScaleSettings, encode: EncodeSettings): Promise<void> {
   const output = join(outDir, `vid-${safe(name)}.${encode.container}`);
   const where = provenance();
   try {
-    const r = await processVideo({ input: clip, output, engine, motion, scale, settings, encode, runtimeDir, onProgress: where.onProgress });
+    const r = await processVideo({ input: clip, output, ...stepsOf(steps, scale, settings, motion), encode, runtimeDir, onProgress: where.onProgress });
     // libx265 schedules frame-parallel threads non-deterministically, so its
     // bitstream differs run to run on identical input. Everything else here is
     // reproducible, so only this one reports structure instead of a hash.
@@ -151,5 +157,12 @@ for (const [codec, container] of [
 }
 
 await videoJob("nr scale=size copyAudio", "nr", "none", SIZE, { codec: "h264", quality: 20, container: "mp4", copyAudio: true });
+
+// Both steps in one job, which a job of one engine could not run.
+await imageJob("sr+nr scale=factor2", "sr+nr", FACTOR2);
+for (const motion of ["none", "flow"] as const) {
+  await videoJob(`sr+nr motion=${motion}`, "sr+nr", motion, FACTOR2, { codec: "h264", quality: 20, container: "mp4", copyAudio: false });
+}
+await videoJob("sr+nr h264_nvenc/mp4", "sr+nr", "none", FACTOR2, { codec: "h264_nvenc", quality: 22, container: "mp4", copyAudio: true });
 
 process.exit(0);

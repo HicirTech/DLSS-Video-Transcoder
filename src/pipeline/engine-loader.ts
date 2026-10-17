@@ -1,10 +1,9 @@
 /**
- * Registers an NGX engine with createEngine by importing its module. The import is lazy so a machine without
- * the NVIDIA runtime can still run a bypass job; whatever runs a job's engine loads it through here.
+ * Registers the NGX engines a job's steps run with createEngineChain by importing their modules. Lazy, so a
+ * machine without the NVIDIA runtime can still run a job without them; whatever runs a job's engines loads
+ * them through here.
  */
-import type { EngineKind } from "../server/api-types.ts";
-
-export async function loadEngine(kind: EngineKind): Promise<void> {
-  if (kind === "nr") await import("../ngx/nr.ts");
-  else if (kind === "sr") await import("../ngx/sr-engine.ts");
+export async function loadEngines(steps: { sr: boolean; nr: boolean }): Promise<void> {
+  if (steps.sr) await import("../ngx/sr-engine.ts");
+  if (steps.nr) await import("../ngx/nr.ts");
 }

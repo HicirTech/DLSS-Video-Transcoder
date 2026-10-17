@@ -26,7 +26,8 @@ import { FeatureCommonInfo, NgxCore } from "./core.ts";
 import { prepareForwarderSync } from "./forwarder-runtime.ts";
 import { encodeMotionR16G16 } from "../pipeline/half-float.ts";
 import { NgxParam, NgxParameters } from "./params.ts";
-import { DEFAULT_SR_PRESET, DLSS_PRESET_PARAM, DlssCreateFlag, DlssRenderPreset, NGX_APPLICATION_ID, ngxCheck, srOutputProblem } from "./results.ts";
+import { srOutputProblem } from "../server/output-size.ts";
+import { DEFAULT_SR_PRESET, DLSS_PRESET_PARAM, DlssCreateFlag, DlssRenderPreset, NGX_APPLICATION_ID, ngxCheck } from "./results.ts";
 
 const UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 

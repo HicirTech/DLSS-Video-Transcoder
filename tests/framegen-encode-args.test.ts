@@ -20,11 +20,11 @@ const base = {
 };
 
 describe("buildFrameGenEncodeArgs", () => {
-  test("the NVENC path muxes a copy of the elementary stream", () => {
+  test("the NVENC path muxes a copy of the elementary stream, each frame re-stamped on the target clock", () => {
     const open = buildFrameGenEncodeArgs({ ...base, codec: "h264_nvenc", hasAudio: false });
     expect(open.nvencArgs).toEqual([
       "-v", "error", "-y", "-f", "h264", "-framerate", "60/1", "-i", "pipe:0",
-      "-map", "0:v:0", "-c:v", "copy", "-an",
+      "-map", "0:v:0", "-c:v", "copy", "-bsf:v", "setts=ts=N*1/(60*TB):duration=1/(60*TB)", "-an",
       "-video_track_timescale", "60", "-movflags", "+faststart", "out.mp4",
     ]);
     expect(open.nvenc).toEqual({ width: 1280, height: 720, fpsNum: 60, fpsDen: 1, codec: "h264", cq: 20 });
@@ -74,7 +74,7 @@ describe("buildFrameGenEncodeArgs", () => {
     const aspect = open.nvencArgs.indexOf("-aspect");
     const bsf = open.nvencArgs.indexOf("-bsf:v");
     expect(open.nvencArgs[aspect + 1]).toBe("4:3");
-    expect(open.nvencArgs[bsf + 1]).toBe("h264_metadata=sample_aspect_ratio=8/9");
+    expect(open.nvencArgs[bsf + 1]).toBe("h264_metadata=sample_aspect_ratio=8/9,setts=ts=N*1/(60*TB):duration=1/(60*TB)");
     // Output options: before an -i they would bind to that input instead.
     expect(aspect).toBeGreaterThan(open.nvencArgs.lastIndexOf("-i"));
     expect(bsf).toBeGreaterThan(open.nvencArgs.lastIndexOf("-i"));
@@ -90,7 +90,7 @@ describe("buildFrameGenEncodeArgs", () => {
 
   test("the bitstream filter follows the copy demuxer", () => {
     const open = buildFrameGenEncodeArgs({ ...base, width: 720, height: 480, codec: "hevc_nvenc", hasAudio: false, displayAspect: rational(4, 3) });
-    expect(open.nvencArgs).toContain("hevc_metadata=sample_aspect_ratio=8/9");
+    expect(open.nvencArgs[open.nvencArgs.indexOf("-bsf:v") + 1]).toStartWith("hevc_metadata=sample_aspect_ratio=8/9,");
   });
 
   test("a square-pixel source adds no aspect argv on either path", () => {

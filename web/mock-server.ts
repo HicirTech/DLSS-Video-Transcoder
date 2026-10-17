@@ -8,10 +8,10 @@
  */
 import index from "./index.html";
 import type { JobRequest, WsEvent } from "../src/server/api-types";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, isActiveState } from "../src/server/api-types";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, isActiveState } from "../src/server/api-types";
 import { MAX_REQUEST_BODY_BYTES, uploadFileName } from "../src/server/upload";
 import { asJobRequest, validateJobRequest } from "../src/server/validate";
-import { MOCK_PROBE, MOCK_TOOLS, mockCatalog, mockSettingsDefaults, mockUpload } from "./src/mock/fixtures";
+import { MOCK_PROBE, MOCK_TOOLS, mockCatalog, mockMediaInfo, mockSettingsDefaults, mockUpload } from "./src/mock/fixtures";
 import { MockJobEngine } from "./src/mock/job-engine";
 import { mockPreviewSvg } from "./src/mock/preview-svg";
 import { createSeedJobs } from "./src/mock/seed-jobs";
@@ -55,6 +55,11 @@ const server = Bun.serve({
         for await (const chunk of req.body ?? []) size += chunk.byteLength;
         return json(mockUpload({ name: named.name, size }), 201);
       },
+    },
+    "/api/media": (req) => {
+      const path = new URL(req.url).searchParams.get("path");
+      if (!path) return failure(404, "File not found. The 'path' query parameter must be an absolute path to an existing file.");
+      return json(mockMediaInfo(path));
     },
     "/api/settings/defaults": () => json(mockSettingsDefaults()),
     "/api/tools": () => json(MOCK_TOOLS),
@@ -123,11 +128,8 @@ const feeder = setInterval(() => {
   engine.create({
     kind,
     input: kind === "image" ? `C:\\Users\\tim\\Pictures\\IMG_${serial}.png` : `D:\\Footage\\clip-${serial}.mp4`,
-    engine: "nr",
-    motion: kind === "video" ? "flow" : "none",
-    settings: { ...DEFAULT_NR_SETTINGS },
-    scale: { ...DEFAULT_SCALE_SETTINGS },
-    encode: { ...DEFAULT_ENCODE_SETTINGS },
+    neuralRendering: { settings: { ...DEFAULT_NR_SETTINGS } },
+    ...(kind === "video" ? { encode: { ...DEFAULT_ENCODE_SETTINGS } } : {}),
   });
 }, FEEDER_INTERVAL_MS);
 

@@ -1,17 +1,20 @@
 import { useId } from "react";
 import { FormControl, FormControlLabel, FormHelperText, InputLabel, MenuItem, Select, Stack, Switch } from "@mui/material";
-import { AAC_KBPS, AUDIO_IN_CONTAINER, DEFAULT_ENCODE_SETTINGS, ENCODE_CODECS, ENCODE_CONTAINERS, SETTING_RANGES, type EncodeSettings } from "../../../src/server/api-types";
+import { AAC_KBPS, AUDIO_IN_CONTAINER, DEFAULT_ENCODE_SETTINGS, ENCODE_CODECS, ENCODE_CONTAINERS, NVENC_MAX_SIDE, SETTING_RANGES, type EncodeSettings } from "../../../src/server/api-types";
+import { nvencLimitExceeded } from "../../../src/server/output-size";
 import { NumberField } from "./NumberField";
 
 interface EncodeSettingsEditorProps {
   value: EncodeSettings;
   /** A container the job is going to write whatever is stored, shown locked with the reason. */
   fixedContainer?: { container: EncodeSettings["container"]; reason: string };
+  /** The size the job encodes, once the source's is known: an NVENC codec that does not take it is flagged. */
+  outputSize?: { width: number; height: number } | null;
   onChange: (next: EncodeSettings) => void;
 }
 
 // Record<...>: a codec or container the API accepts without menu words is a build error, not a blank item.
-const CODEC_LABELS: Record<EncodeSettings["codec"], string> = {
+export const CODEC_LABELS: Record<EncodeSettings["codec"], string> = {
   h264: "H.264 (software)",
   hevc: "HEVC / H.265 (software)",
   av1: "AV1 (software)",
@@ -19,22 +22,35 @@ const CODEC_LABELS: Record<EncodeSettings["codec"], string> = {
   hevc_nvenc: "HEVC / H.265 (NVIDIA GPU)",
   av1_nvenc: "AV1 (NVIDIA GPU)",
 };
-const CONTAINER_LABELS: Record<EncodeSettings["container"], string> = { mp4: "MP4", mkv: "MKV", mov: "MOV" };
+export const CONTAINER_LABELS: Record<EncodeSettings["container"], string> = { mp4: "MP4", mkv: "MKV", mov: "MOV" };
+
+/**
+ * What the codec field says when the job's output is larger than the chosen NVENC encoder takes (NVENC_MAX_SIDE),
+ * else null: the job then encodes the same format on the CPU (resolveEncodeCodec).
+ */
+function nvencLimitNote(codec: EncodeSettings["codec"], size: { width: number; height: number } | null | undefined): string | null {
+  const limit = size ? nvencLimitExceeded(codec, size) : null;
+  if (!size || limit === null) return null;
+  const onGpu = ENCODE_CODECS.filter((other) => NVENC_MAX_SIDE[other] !== undefined && nvencLimitExceeded(other, size) === null).map((other) => CODEC_LABELS[other]);
+  const instead = onGpu.length ? ` ${onGpu.join(" or ")} would keep it on the GPU.` : "";
+  return `${CODEC_LABELS[codec]} encodes at most ${limit} pixels per side, so at ${size.width}×${size.height} this job encodes the same format on the CPU instead, which is slower.${instead}`;
+}
 
 /** The audio switch's words for what the container in effect does with the track (AUDIO_IN_CONTAINER). */
 function audioSwitchLabel(container: EncodeSettings["container"]): string {
   return AUDIO_IN_CONTAINER[container] === "copy" ? "Copy the source audio track" : `Keep the source audio, re-encoded to AAC ${AAC_KBPS} kb/s`;
 }
 
-export function EncodeSettingsEditor({ value, fixedContainer, onChange }: EncodeSettingsEditorProps) {
+export function EncodeSettingsEditor({ value, fixedContainer, outputSize, onChange }: EncodeSettingsEditorProps) {
   const codecLabelId = useId();
   const containerLabelId = useId();
   const update = (patch: Partial<EncodeSettings>): void => onChange({ ...value, ...patch });
   const container = fixedContainer?.container ?? value.container;
+  const limitNote = nvencLimitNote(value.codec, outputSize);
 
   return (
     <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
-      <FormControl sx={{ minWidth: 200 }}>
+      <FormControl sx={{ minWidth: 200, maxWidth: 420 }}>
         <InputLabel id={codecLabelId}>Codec</InputLabel>
         <Select<EncodeSettings["codec"]>
           labelId={codecLabelId}
@@ -48,6 +64,7 @@ export function EncodeSettingsEditor({ value, fixedContainer, onChange }: Encode
             </MenuItem>
           ))}
         </Select>
+        {limitNote ? <FormHelperText sx={{ color: "warning.main" }}>{limitNote}</FormHelperText> : null}
       </FormControl>
       <NumberField
         label="Quality (CRF / CQ)"

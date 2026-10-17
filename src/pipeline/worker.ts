@@ -4,7 +4,7 @@
  */
 import type { JobRequest } from "../server/api-types.ts";
 import { JobCancelledError } from "./cancel.ts";
-import { loadEngine } from "./engine-loader.ts";
+import { loadEngines } from "./engine-loader.ts";
 import type { FrameTally, ProgressReporter } from "./frame-progress.ts";
 import { processImage } from "./image.ts";
 
@@ -54,16 +54,16 @@ async function run(message: RunMessage): Promise<void> {
     if (frames === undefined) log(text);
   };
   try {
-    await loadEngine(request.engine);
+    await loadEngines({ sr: request.superResolution !== undefined, nr: request.neuralRendering !== undefined });
     if (request.kind === "image") {
       const result = await processImage({
         input: request.input,
         output: request.output,
-        engine: request.engine,
-        scale: request.scale,
-        settings: request.settings,
+        superResolution: request.superResolution,
+        neuralRendering: request.neuralRendering,
+        resize: request.resize,
+        warmupFrames: request.warmupFrames,
         runtimeDir: message.runtimeDir,
-        dllDir: request.dllDir,
         adapterUuid: request.adapterUuid,
         appDataPath: message.appDataPath,
         signal: jobCancellation.signal,
@@ -77,22 +77,10 @@ async function run(message: RunMessage): Promise<void> {
       return;
     }
     if (request.frameGen) {
-      const { processFrameGen } = await import("./framegen.ts");
-      const result = await processFrameGen({
-        input: request.input,
-        output: request.output,
-        targetFps: request.frameGen.targetFps,
-        multiplier: request.frameGen.multiplier,
-        engine: request.frameGen.engine,
-        quality: request.encode?.quality,
-        codec: request.encode?.codec,
-        copyAudio: request.encode?.copyAudio,
-        runtimeDir: message.runtimeDir,
-        dllDir: request.dllDir,
-        signal: jobCancellation.signal,
-        onFinishing,
-        onProgress,
-      });
+      const { frameGenJobOptions, processFrameGen } = await import("./framegen.ts");
+      const result = await processFrameGen(
+        frameGenJobOptions(request, request.frameGen, { runtimeDir: message.runtimeDir, appDataPath: message.appDataPath, signal: jobCancellation.signal, onFinishing, onProgress }),
+      );
       post({ type: "done", id, output: result.output, detail: { ...result } });
       return;
     }

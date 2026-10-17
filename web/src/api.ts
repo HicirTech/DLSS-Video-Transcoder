@@ -3,6 +3,7 @@ import {
   JOB_LOG_LIMIT,
   type JobRequest,
   type JobStatus,
+  type MediaInfo,
   type ProbeReport,
   type SettingsDefaults,
   type ToolsReport,
@@ -28,6 +29,8 @@ export interface ApiClient {
   cancelJob(id: string): Promise<JobStatus>;
   /** Uploads a browser file to the server; resolves to the saved absolute path to use as a job input. */
   uploadFile(file: File): Promise<UploadResult>;
+  /** What a job would read from the file at `path`: its size, and a video's rates, length, codec and audio. */
+  media(path: string): Promise<MediaInfo>;
   /** URL that serves the raw bytes of a local file (input / output previews). */
   fileUrl(path: string): string;
 }
@@ -127,6 +130,7 @@ function createHttpClient(): ApiClient {
     createJob: (body) => request<JobStatus>("/api/jobs", postJson(body)),
     cancelJob: (id) => request<JobStatus>(`/api/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
     uploadFile: (file) => request<UploadResult>(`/api/upload?name=${encodeURIComponent(file.name)}`, { method: "POST", body: file }),
+    media: (path) => request<MediaInfo>(`/api/media?path=${encodeURIComponent(path)}`),
     fileUrl: (path) => `/api/file?path=${encodeURIComponent(path)}`,
   };
 }

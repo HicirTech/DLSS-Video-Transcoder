@@ -1,21 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { join, resolve, sep } from "node:path";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, ENGINE_KINDS, JOB_KINDS, MOTION_KINDS, SETTING_RANGES } from "../src/server/api-types.ts";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, DEFAULT_SR_STEP, JOB_KINDS, MOTION_KINDS, SETTING_RANGES } from "../src/server/api-types.ts";
 import { validateJobRequest } from "../src/server/validate.ts";
 
 const ROOT = resolve(sep === "\\" ? "C:\\app\\logs" : "/app/logs");
+const UUID = "GPU-524e8373-5fe1-44b3-c0aa-cdbe917e7ed2";
 
-/** A request the server must accept, so each test can vary exactly one field. */
+const sr = (overrides: Record<string, unknown> = {}) => ({ scale: { ...DEFAULT_SR_STEP.scale }, motion: "flow", ...overrides });
+const nr = (overrides: Record<string, unknown> = {}) => ({ settings: { ...DEFAULT_NR_SETTINGS, ...overrides } });
+
+/** A video request the server must accept, so each test can vary exactly one field. */
 function request(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    kind: "video",
-    input: join(ROOT, "in.mp4"),
-    engine: "nr",
-    motion: "flow",
-    settings: { ...DEFAULT_NR_SETTINGS },
-    scale: { ...DEFAULT_SCALE_SETTINGS },
-    ...overrides,
-  };
+  return { kind: "video", input: join(ROOT, "in.mp4"), superResolution: sr(), neuralRendering: nr(), ...overrides };
 }
 
 describe("validateJobRequest", () => {
@@ -24,38 +20,52 @@ describe("validateJobRequest", () => {
     expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS } }))).toBeNull();
     expect(validateJobRequest(request({ frameGen: { targetFps: "120" } }))).toBeNull();
     expect(validateJobRequest(request({ frameGen: { multiplier: 2, engine: "cascade" } }))).toBeNull();
-    expect(validateJobRequest(request({ dllDir: join(ROOT, "dlss", "310.7") }))).toBeNull();
+    expect(validateJobRequest(request({ superResolution: sr({ dllDir: join(ROOT, "dlss", "310.7") }) }))).toBeNull();
   });
 
   test("rejects non-objects and arrays", () => {
     for (const bad of [null, 42, "x", [], undefined]) expect(validateJobRequest(bad)).toMatch(/must be a JSON object/);
   });
 
-  test("accepts every kind, engine and motion the contract lists", () => {
-    for (const kind of JOB_KINDS) expect(validateJobRequest(request({ kind })), kind).toBeNull();
-    for (const engine of ENGINE_KINDS) expect(validateJobRequest(request({ engine })), engine).toBeNull();
-    for (const motion of MOTION_KINDS) expect(validateJobRequest(request({ motion })), motion).toBeNull();
+  test("accepts every kind and motion the contract lists, and any set of steps", () => {
+    for (const kind of JOB_KINDS) expect(validateJobRequest({ kind, input: join(ROOT, "in.png") }), kind).toBeNull();
+    for (const motion of MOTION_KINDS) expect(validateJobRequest(request({ superResolution: sr({ motion }) })), motion).toBeNull();
+    const steps = { superResolution: sr(), neuralRendering: nr(), frameGen: { targetFps: "60" } };
+    for (let mask = 0; mask < 8; mask++) {
+      const chosen = Object.fromEntries(Object.entries(steps).filter((_, index) => mask & (1 << index)));
+      expect(validateJobRequest({ kind: "video", input: join(ROOT, "in.mp4"), ...chosen }), Object.keys(chosen).join("+") || "none").toBeNull();
+    }
   });
 
   test("names the offending top-level field", () => {
     expect(validateJobRequest(request({ kind: "audio" }))).toMatch(/kind must be one of image, video \(got "audio"\)/);
     expect(validateJobRequest(request({ input: "" }))).toMatch(/input must be/);
-    expect(validateJobRequest(request({ engine: "turbo" }))).toMatch(/engine must be one of sr, nr, bypass \(got "turbo"\)/);
-    expect(validateJobRequest(request({ motion: "sideways" }))).toMatch(/motion must be one of none, flow \(got "sideways"\)/);
-    expect(validateJobRequest(request({ dllDir: 7 }))).toMatch(/dllDir must be a string/);
-    expect(validateJobRequest(request({ settings: [] }))).toMatch(/settings must be an object/);
-    expect(validateJobRequest(request({ scale: "big" }))).toMatch(/scale must be an object/);
+    expect(validateJobRequest(request({ superResolution: "big" }))).toBe("superResolution must be an object when present.");
+    expect(validateJobRequest(request({ neuralRendering: [] }))).toBe("neuralRendering must be an object when present.");
+    expect(validateJobRequest(request({ superResolution: sr({ motion: "sideways" }) }))).toMatch(/superResolution\.motion must be one of none, flow \(got "sideways"\)/);
+    expect(validateJobRequest(request({ neuralRendering: { settings: [] } }))).toMatch(/neuralRendering\.settings must be an object/);
+    expect(validateJobRequest(request({ superResolution: { scale: "big" } }))).toMatch(/superResolution\.scale must be an object/);
+    for (const step of ["superResolution", "neuralRendering"]) {
+      const value = request()[step] as Record<string, unknown>;
+      expect(validateJobRequest(request({ [step]: { ...value, dllDir: 7 } })), step).toBe(`${step}.dllDir must be a string when present.`);
+    }
+    expect(validateJobRequest(request({ frameGen: { targetFps: "60", dllDir: 7 } }))).toBe("frameGen.dllDir must be a string when present.");
+  });
+
+  test("the fields the step objects replaced are refused by name, so an old client is not run as a different job", () => {
+    expect(validateJobRequest(request({ engine: "nr" }))).toBe(
+      "engine is no longer part of a job: give each step its own object (superResolution, neuralRendering, frameGen) and resize for a plain resize.",
+    );
+    expect(validateJobRequest(request({ scale: { ...DEFAULT_SCALE_SETTINGS }, settings: { ...DEFAULT_NR_SETTINGS } }))).toMatch(/^scale, settings are no longer part of a job/);
   });
 
   test("rejects out-of-range numbers and reports the real range", () => {
     const cases: Array<[string, Record<string, unknown>, RegExp]> = [
-      ["intensity high", { settings: { ...DEFAULT_NR_SETTINGS, intensity: 2.5 } }, /settings\.intensity must be between 0 and 2 \(got 2\.5\)/],
-      ["intensity NaN", { settings: { ...DEFAULT_NR_SETTINGS, intensity: Number.NaN } }, /settings\.intensity must be a finite number between 0 and 2/],
-      ["skinStructure low", { settings: { ...DEFAULT_NR_SETTINGS, skinStructure: -2 } }, /settings\.skinStructure must be between -1 and 2/],
-      ["warmupFrames fractional", { settings: { ...DEFAULT_NR_SETTINGS, warmupFrames: 4.5 } }, /settings\.warmupFrames must be a whole number between 0 and 64/],
-      ["warmupFrames high", { settings: { ...DEFAULT_NR_SETTINGS, warmupFrames: 65 } }, /settings\.warmupFrames must be between 0 and 64/],
-      ["factor low", { scale: { ...DEFAULT_SCALE_SETTINGS, factor: 0.1 } }, /scale\.factor must be between 0\.25 and 8/],
-      ["width high", { scale: { ...DEFAULT_SCALE_SETTINGS, width: 20000 } }, /scale\.width must be between 16 and 16384/],
+      ["intensity high", { neuralRendering: nr({ intensity: 2.5 }) }, /neuralRendering\.settings\.intensity must be between 0 and 2 \(got 2\.5\)/],
+      ["intensity NaN", { neuralRendering: nr({ intensity: Number.NaN }) }, /neuralRendering\.settings\.intensity must be a finite number between 0 and 2/],
+      ["skinStructure low", { neuralRendering: nr({ skinStructure: -2 }) }, /neuralRendering\.settings\.skinStructure must be between -1 and 2/],
+      ["SR factor high", { superResolution: sr({ scale: { ...DEFAULT_SR_STEP.scale, factor: 9 } }) }, /superResolution\.scale\.factor must be between 0\.25 and 8/],
+      ["resize width high", { superResolution: undefined, resize: { ...DEFAULT_SCALE_SETTINGS, width: 20000 } }, /resize\.width must be between 16 and 16384/],
       ["quality high", { encode: { ...DEFAULT_ENCODE_SETTINGS, quality: 60 } }, /encode\.quality must be between 0 and 51/],
     ];
     for (const [name, override, pattern] of cases) {
@@ -65,38 +75,32 @@ describe("validateJobRequest", () => {
   });
 
   test("rejects values outside the enums", () => {
-    expect(validateJobRequest(request({ settings: { ...DEFAULT_NR_SETTINGS, preset: 4 } }))).toMatch(/settings\.preset must be one of 0, 1, 2, 3/);
-    expect(validateJobRequest(request({ settings: { ...DEFAULT_NR_SETTINGS, style: 3 } }))).toMatch(/settings\.style must be one of 0, 1, 2/);
-    expect(validateJobRequest(request({ scale: { ...DEFAULT_SCALE_SETTINGS, mode: "stretch" } }))).toMatch(/scale\.mode must be one of none, factor, size/);
+    expect(validateJobRequest(request({ neuralRendering: nr({ preset: 4 }) }))).toMatch(/neuralRendering\.settings\.preset must be one of 0, 1, 2, 3/);
+    expect(validateJobRequest(request({ neuralRendering: nr({ style: 3 }) }))).toMatch(/neuralRendering\.settings\.style must be one of 0, 1, 2/);
+    expect(validateJobRequest(request({ superResolution: sr({ scale: { ...DEFAULT_SR_STEP.scale, mode: "stretch" } }) }))).toMatch(/superResolution\.scale\.mode must be one of none, factor, size/);
     expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS, codec: "vp9" } }))).toMatch(/encode\.codec must be one of h264, hevc, av1/);
     expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS, container: "avi" } }))).toMatch(/encode\.container must be one of mp4, mkv, mov/);
   });
 
+  test("rejects non-boolean flags", () => {
+    expect(validateJobRequest(request({ neuralRendering: nr({ autoMask: "yes" }) }))).toMatch(/neuralRendering\.settings\.autoMask must be true or false/);
+  });
+
   test("accepts a CUDA device UUID in nvidia-smi's form and rejects anything else", () => {
-    const uuid = "GPU-524e8373-5fe1-44b3-c0aa-cdbe917e7ed2";
-    expect(validateJobRequest(request({ adapterUuid: uuid }))).toBeNull();
+    expect(validateJobRequest(request({ adapterUuid: UUID }))).toBeNull();
     for (const bad of ["gpu-524e8373-5fe1-44b3-c0aa-cdbe917e7ed2", "524e8373-5fe1-44b3-c0aa-cdbe917e7ed2", "GPU-524e837-5fe1-44b3-c0aa-cdbe917e7ed2", "0", 7]) {
       expect(validateJobRequest(request({ adapterUuid: bad }))).toMatch(/adapterUuid must be a CUDA device UUID/);
     }
   });
 
-  test("a GPU choice cannot ride along with frame generation, which runs on the default device", () => {
-    const uuid = "GPU-524e8373-5fe1-44b3-c0aa-cdbe917e7ed2";
-    expect(validateJobRequest(request({ kind: "video", frameGen: { targetFps: "120" }, adapterUuid: uuid }))).toMatch(/does not apply to frame generation/);
-    expect(validateJobRequest(request({ kind: "video", frameGen: { targetFps: "120" } }))).toBeNull();
-  });
-
-  test("a DLL folder rides along with a job that loads a DLSS DLL: sr, nr or frame generation, not bypass", () => {
-    const dllDir = join(ROOT, "dlss", "310.7");
-    for (const engine of ["sr", "nr"]) expect(validateJobRequest(request({ engine, dllDir })), engine).toBeNull();
-    expect(validateJobRequest(request({ engine: "bypass", dllDir }))).toMatch(/dllDir does not apply to the bypass engine, which loads no DLSS DLL; omit it/);
-    // Frame generation ignores the engine and loads DLSS Frame Generation, so the folder is taken whatever engine comes with it.
-    for (const engine of ["sr", "nr", "bypass"]) expect(validateJobRequest(request({ engine, frameGen: { targetFps: "120" }, dllDir })), engine).toBeNull();
-    expect(validateJobRequest(request({ engine: "bypass" }))).toBeNull();
-  });
-
-  test("rejects non-boolean flags", () => {
-    expect(validateJobRequest(request({ settings: { ...DEFAULT_NR_SETTINGS, autoMask: "yes" } }))).toMatch(/settings\.autoMask must be true or false/);
+  test("a GPU choice reaches Super Resolution, Neural Rendering and a plain copy, so frame generation alone refuses it", () => {
+    const frameGen = { targetFps: "120" };
+    expect(validateJobRequest({ kind: "video", input: join(ROOT, "in.mp4"), frameGen, adapterUuid: UUID })).toMatch(
+      /^adapterUuid applies to Super Resolution and Neural Rendering; frame generation picks its GPU itself/,
+    );
+    expect(validateJobRequest({ kind: "video", input: join(ROOT, "in.mp4"), frameGen })).toBeNull();
+    expect(validateJobRequest(request({ superResolution: undefined, frameGen, adapterUuid: UUID }))).toBeNull();
+    expect(validateJobRequest({ kind: "video", input: join(ROOT, "in.mp4"), adapterUuid: UUID })).toBeNull();
   });
 
   test("frameGen needs a rate and takes a known engine", () => {
@@ -138,24 +142,39 @@ describe("validateJobRequest", () => {
     expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS, container: "mkv" }, output: join(ROOT, "out.mkv") }))).toBeNull();
   });
 
-  test("Super Resolution takes a factor of at least 1, since DLSS SR only enlarges", () => {
+  test("Super Resolution takes a factor of at least 1 and an exact size of at most 8192 per side, since DLSS SR only enlarges", () => {
     const shrink = { ...DEFAULT_SCALE_SETTINGS, mode: "factor", factor: 0.5 };
-    expect(validateJobRequest(request({ engine: "sr", scale: shrink }))).toBe(
-      "Super Resolution only enlarges: scale.factor must be at least 1 for engine sr (got 0.5; 1 runs DLAA at the source size). Use nr or bypass to shrink.",
+    expect(validateJobRequest(request({ superResolution: sr({ scale: shrink }) }))).toBe(
+      "Super Resolution only enlarges: superResolution.scale.factor must be at least 1 (got 0.5; 1 runs DLAA at the source size). Use resize without superResolution to shrink.",
     );
-    expect(validateJobRequest(request({ engine: "sr", scale: { ...shrink, factor: 1 } }))).toBeNull();
-    // Other engines shrink through ffmpeg, and frame generation ignores the scale.
-    expect(validateJobRequest(request({ engine: "nr", scale: shrink }))).toBeNull();
-    expect(validateJobRequest(request({ engine: "sr", scale: shrink, frameGen: { targetFps: "120" } }))).toBeNull();
+    expect(validateJobRequest(request({ superResolution: sr({ scale: { ...shrink, factor: 1 } }) }))).toBeNull();
+    expect(validateJobRequest(request({ superResolution: sr({ scale: { ...DEFAULT_SCALE_SETTINGS, mode: "size", width: 8194, height: 4096 } }) }))).toBe(
+      "Super Resolution writes at most 8192 pixels per side (got 8194x4096).",
+    );
+    // Without Super Resolution, a resize shrinks through ffmpeg.
+    expect(validateJobRequest(request({ superResolution: undefined, resize: shrink }))).toBeNull();
   });
 
-  test("frameGen is rejected on an image job, which has no frames to interpolate", () => {
-    expect(validateJobRequest(request({ kind: "image", input: "C:\\in.png", frameGen: { targetFps: "120" } }))).toMatch(/video jobs only/);
+  test("a resize is refused beside Super Resolution, which sets the output size itself", () => {
+    expect(validateJobRequest(request({ resize: { ...DEFAULT_SCALE_SETTINGS, mode: "factor" } }))).toBe(
+      "resize does not apply with superResolution, which sets the output size itself; omit it.",
+    );
+  });
+
+  test("an image job takes no motion, frame generation or encode settings, and only it takes warm-up passes", () => {
+    const image = { kind: "image", input: join(ROOT, "in.png") };
+    expect(validateJobRequest({ ...image, superResolution: sr({ motion: "flow" }) })).toBe('superResolution.motion applies to video jobs only; omit it or set it to "none".');
+    expect(validateJobRequest({ ...image, superResolution: sr({ motion: "none" }), warmupFrames: 8 })).toBeNull();
+    expect(validateJobRequest({ ...image, frameGen: { targetFps: "120" } })).toMatch(/video jobs only/);
+    expect(validateJobRequest({ ...image, encode: { ...DEFAULT_ENCODE_SETTINGS } })).toBe("encode applies to video jobs only.");
+    expect(validateJobRequest({ ...image, warmupFrames: 4.5 })).toBe("warmupFrames must be a whole number between 0 and 64.");
+    expect(validateJobRequest({ ...image, warmupFrames: 65 })).toBe("warmupFrames must be between 0 and 64 (got 65).");
+    expect(validateJobRequest(request({ warmupFrames: 4 }))).toBe("warmupFrames applies to image jobs only.");
   });
 
   test("the defaults the server advertises are themselves valid", () => {
     // A default the API would reject would make GET /api/settings/defaults a trap.
-    expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS } }))).toBeNull();
+    expect(validateJobRequest(request({ superResolution: { ...DEFAULT_SR_STEP }, encode: { ...DEFAULT_ENCODE_SETTINGS } }))).toBeNull();
     for (const [field, range] of Object.entries(SETTING_RANGES)) {
       expect(range.min, `${field} range`).toBeLessThan(range.max);
     }

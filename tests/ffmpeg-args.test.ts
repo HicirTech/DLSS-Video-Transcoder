@@ -84,4 +84,16 @@ describe("muxCopyArgs", () => {
     expect(args.slice(-5)).toEqual(["-video_track_timescale", "60000", "-movflags", "+faststart", "out.mp4"]);
     expect(args).toContain("-an");
   });
+
+  // The raw demuxer's 1/1200000 s clock does not divide 125/7508 s, so its own stamps drift a tick.
+  test("retime re-stamps packet N at N / rate, as an output option", () => {
+    const args = muxCopyArgs({ demux: "h264", frameRate: "7508/125", audioSource: null, container: "mp4", displayAspect: null, size: { width: 1280, height: 720 }, retime: rational(7508, 125), output: "out.mp4" });
+    expect(args.slice(args.indexOf("copy") + 1, args.indexOf("-an"))).toEqual(["-bsf:v", "setts=ts=N*125/(7508*TB):duration=125/(7508*TB)"]);
+  });
+
+  test("retime chains onto the aspect filter: a second -bsf:v would replace the first", () => {
+    const args = muxCopyArgs({ demux: "h264", frameRate: "25", audioSource: null, container: "mp4", displayAspect: rational(4, 3), size: { width: 720, height: 480 }, retime: rational(25), output: "out.mp4" });
+    expect(args.filter((arg) => arg === "-bsf:v")).toHaveLength(1);
+    expect(args[args.indexOf("-bsf:v") + 1]).toBe("h264_metadata=sample_aspect_ratio=8/9,setts=ts=N*1/(25*TB):duration=1/(25*TB)");
+  });
 });
