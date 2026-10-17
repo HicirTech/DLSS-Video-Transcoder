@@ -2,7 +2,7 @@
  * In-memory job queue. One job runs at a time (one GPU), each in its own
  * worker so the HTTP server never blocks on native calls.
  */
-import { CANCELLED_MESSAGE, isTerminalState, JOB_LOG_LIMIT, type JobRequest, type JobStatus, type WsEvent } from "./api-types.ts";
+import { CANCELLED_MESSAGE, isTerminalState, JOB_LOG_LIMIT, jobSteps, type JobRequest, type JobStatus, type WsEvent } from "./api-types.ts";
 import { HOST_PROCESS_NAME } from "../pipeline/dlssg-host-launch.ts";
 import type { FrameTally } from "../pipeline/frame-progress.ts";
 import type { CancelMessage, RunMessage, WorkerMessage } from "../pipeline/worker.ts";
@@ -79,7 +79,7 @@ export class JobManager {
       kind: request.kind,
       input: request.input,
       output: request.output ?? null,
-      engine: request.engine,
+      steps: jobSteps(request),
       state: "queued",
       cancelRequest: "none",
       progress: 0,

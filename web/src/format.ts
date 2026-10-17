@@ -6,6 +6,25 @@ export function baseName(path: string): string {
   return trimmed.split(/[\\/]/).pop() ?? trimmed;
 }
 
+/** The file name without its last extension, as the server's default output name keeps it ("clip.mp4" -> "clip"). */
+export function stemOf(path: string): string {
+  const name = baseName(path);
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+
+/** An ffmpeg rate ("30000/1001", "25") as frames per second, or null when it is not one. */
+export function rateValue(text: string): number | null {
+  const [num, den = "1"] = text.split("/");
+  const value = Number(num) / Number(den);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/** Frames per second with at most three decimals and no trailing zeros: 29.97, 23.976, 60. */
+export function formatFps(fps: number): string {
+  return String(Number(fps.toFixed(3)));
+}
+
 /** Duration such as "0.8 s", "1m 23s" or "2h 05m". */
 export function formatDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "-";

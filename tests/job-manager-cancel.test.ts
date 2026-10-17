@@ -7,11 +7,11 @@ import { HOST_PROCESS_NAME } from "../src/pipeline/dlssg-host-launch.ts";
 import { frameProgress } from "../src/pipeline/frame-progress.ts";
 import { JobManager, type JobManagerOptions } from "../src/server/jobs.ts";
 import type { JobRequest } from "../src/server/api-types.ts";
-import { DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS } from "../src/server/api-types.ts";
+import { DEFAULT_NR_SETTINGS } from "../src/server/api-types.ts";
 import { FakeWorker } from "./fake-worker.ts";
 
 function request(): JobRequest {
-  return { kind: "image", input: "W:/GPUVideoProcessor/1.png", engine: "nr", motion: "none", settings: { ...DEFAULT_NR_SETTINGS }, scale: { ...DEFAULT_SCALE_SETTINGS } };
+  return { kind: "image", input: "W:/GPUVideoProcessor/1.png", neuralRendering: { settings: { ...DEFAULT_NR_SETTINGS } } };
 }
 
 function manager(worker: FakeWorker, graces: Pick<JobManagerOptions, "cancelGraceMs" | "finishingGraceMs"> = {}): JobManager {

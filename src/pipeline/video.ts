@@ -1,16 +1,17 @@
 /**
  * Video job: ffmpeg decodes to raw RGBA frames on a pipe, every frame goes
- * through the engine, and the result is encoded with the original audio copied
- * across. Owns the choice between the three encode paths (GPU-resident async,
- * threaded NVENC, single-thread rawvideo) and the GPU session's lifetime.
+ * through the job's engine chain (Super Resolution, then Neural Rendering), and
+ * the result is encoded with the original audio copied across. Owns the choice
+ * between the three encode paths (GPU-resident async, threaded NVENC,
+ * single-thread rawvideo) and the GPU session's lifetime.
  * ffmpeg / ffprobe are external tools found via tools.ts.
  */
 import { existsSync } from "node:fs";
-import type { EncodeSettings, EngineKind, JobRequest, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
-import { DEFAULT_ENCODE_SETTINGS, ENGINE_USES_MOTION } from "../server/api-types.ts";
-import { evenSize, nvencLimitExceeded, resolveTargetSize } from "../server/output-size.ts";
+import type { EncodeSettings, JobRequest, NeuralRenderingStep, ScaleSettings, StepKind, SuperResolutionStep } from "../server/api-types.ts";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_SCALE_SETTINGS, jobSteps, stepsSuffix } from "../server/api-types.ts";
+import { evenSize, nvencLimitExceeded, resolveTargetSize, srOutputProblem } from "../server/output-size.ts";
 import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
-import { createEngine, type Engine } from "./engine.ts";
+import { createEngineChain, type Engine } from "./engine.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
 import { aspectArgs, audioArgs, decodeArgv, encoderArgs, faststartArgs, muxCopyArgs } from "./ffmpeg-args.ts";
 import { ffmpegFailedMessage, NoFramesDecodedError } from "./ffmpeg-failure.ts";
@@ -19,13 +20,12 @@ import { frameProgress, type ProgressReporter } from "./frame-progress.ts";
 import { defaultOutputPath } from "./output-path.ts";
 import { framesWrittenOf, removePartialOutput } from "./partial-output.ts";
 import { tryParseRate } from "./rational.ts";
-import { createMotionEstimator } from "./flow.ts";
+import { createFrameGuide, type FrameGuide } from "./frame-guide.ts";
 import { SceneCutDetector } from "./scene-score.ts";
 import { FrameReader } from "./frame-reader.ts";
 import { probeNvencCaps, type NvencSdkCodec } from "./nvenc.ts";
 import { runThreadedEncode } from "./threaded-encode.ts";
 import { runAsyncNrEncode } from "./async-nr-encode.ts";
-import { tryCreateNvofBackend } from "./nvof.ts";
 import { DXGI_FORMAT_R8G8B8A8_UNORM, linearLayout } from "../native/d3d12.ts";
 import { describeGpu, openGpu, type GpuSession } from "./gpu.ts";
 import { requireFfmpegTools } from "./tools.ts";
@@ -34,18 +34,16 @@ import { probeVideo, type VideoInfo } from "./video-probe.ts";
 export interface VideoJobOptions {
   input: string;
   output?: string;
-  engine: EngineKind;
-  motion: MotionKind;
-  scale: ScaleSettings;
-  settings: NrSettings;
+  superResolution?: SuperResolutionStep;
+  neuralRendering?: NeuralRenderingStep;
+  /** A lanczos resize of the decoded frames; only without superResolution, which sets the size itself. */
+  resize?: ScaleSettings;
   encode?: EncodeSettings;
   /** One of the two, never both: see GpuOptions. */
   adapterIndex?: number;
   adapterUuid?: string;
   debugLayer?: boolean;
   runtimeDir?: string;
-  /** Specific DLSS DLL folder to load (version switching); defaults to the runtime feature folder. */
-  dllDir?: string;
   appDataPath?: string;
   onProgress?: ProgressReporter;
   /** Cooperative cancellation (see cancel.ts): checked at every frame until the encode is finishing, which then completes. */
@@ -69,12 +67,10 @@ export function videoJobOptions(request: JobRequest, run: VideoRun): VideoJobOpt
   return {
     input: request.input,
     output: request.output,
-    engine: request.engine,
-    motion: request.motion,
-    scale: request.scale,
-    settings: request.settings,
+    superResolution: request.superResolution,
+    neuralRendering: request.neuralRendering,
+    resize: request.resize,
     encode: request.encode,
-    dllDir: request.dllDir,
     adapterUuid: request.adapterUuid,
     ...run,
   };
@@ -87,7 +83,8 @@ export interface VideoJobResult {
   fps: number;
   frames: number;
   sceneCuts: number;
-  engine: EngineKind;
+  /** The steps that ran, in order. */
+  steps: StepKind[];
   ms: number;
 }
 
@@ -156,17 +153,23 @@ async function prepareVideoJob(options: VideoJobOptions): Promise<VideoJob> {
   const { ffmpeg, ffprobe } = requireFfmpegTools("video jobs");
   const requestedEncode = options.encode ?? DEFAULT_ENCODE_SETTINGS;
   const info = probeVideo(ffprobe, options.input, ffmpeg);
+  const sr = options.superResolution;
   // Every codec here encodes 4:2:0 (yuv420p / NVENC NV12), which requires even
   // width and height. resolveTargetSize leaves scale 'none' (the default) at the
   // raw source size, so an odd-sized source would only fail at encode time.
-  const rawTarget = resolveTargetSize(info.width, info.height, options.scale);
+  const rawTarget = resolveTargetSize(info.width, info.height, sr?.scale ?? options.resize ?? DEFAULT_SCALE_SETTINGS);
   const target = { width: evenSize(rawTarget.width), height: evenSize(rawTarget.height) };
-  const output = options.output ?? defaultOutputPath(options.input, options.engine, `.${requestedEncode.container}`);
+  // SR's limits need the source size, so they are checked here, before the GPU opens and the job says it is upscaling.
+  const srProblem = sr ? srOutputProblem(info, target) : null;
+  if (srProblem) throw new Error(srProblem);
+  const steps = jobSteps({ superResolution: sr, neuralRendering: options.neuralRendering });
+  const resized = !sr && options.resize !== undefined && options.resize.mode !== "none";
+  const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resized), `.${requestedEncode.container}`);
   // Whether the destination is ours to delete after an abnormal end: see partial-output.ts.
   const outputExisted = existsSync(output);
   // SR upscales inside DLSS: decode at source size and let the engine write the
-  // target size. Other engines get frames pre-scaled to the target by ffmpeg.
-  const upscaling = options.engine === "sr";
+  // target size. Without SR, ffmpeg decodes frames at the target size.
+  const upscaling = sr !== undefined;
   const renderWidth = upscaling ? info.width : target.width;
   const renderHeight = upscaling ? info.height : target.height;
   progress(0, `source ${info.width}x${info.height}${info.displayAspect ? ` (non-square pixels, display ${info.displayAspect.num}:${info.displayAspect.den})` : ""} ${info.codec} ${info.fpsText} fps, ${info.frames ?? "?"} frames; ${upscaling ? `upscaling to ${target.width}x${target.height}` : `working size ${target.width}x${target.height}`}`);
@@ -175,7 +178,7 @@ async function prepareVideoJob(options: VideoJobOptions): Promise<VideoJob> {
   const completed = (size: { width: number; height: number }, counts: FrameCounts): VideoJobResult => {
     if (counts.frames === 0) throw new NoFramesDecodedError();
     progress(1, `encoded ${counts.frames} frames to ${output}${counts.sceneCuts ? ` (${counts.sceneCuts} scene cuts reset history)` : ""}`);
-    return { output, width: size.width, height: size.height, fps: info.fps, frames: counts.frames, sceneCuts: counts.sceneCuts, engine: options.engine, ms: Math.round(performance.now() - started) };
+    return { output, width: size.width, height: size.height, fps: info.fps, frames: counts.frames, sceneCuts: counts.sceneCuts, steps, ms: Math.round(performance.now() - started) };
   };
 
   // The probe above is synchronous; a cancel sent during it is only delivered after a yield.
@@ -194,10 +197,11 @@ async function prepareVideoJob(options: VideoJobOptions): Promise<VideoJob> {
   return { options, progress, ffmpeg, info, target, output, outputExisted, upscaling, renderWidth, renderHeight, session, cudaOrdinal, encode, completed };
 }
 
-/** The GPU-resident async path (see processVideo), which closes the GPU session when it ends. */
+/** The GPU-resident async path for Neural Rendering alone (see processVideo), which closes the GPU session when it ends. */
 async function runGpuResidentNr(
   { options, progress, ffmpeg, info, output, outputExisted, target, session, cudaOrdinal, encode, completed }: VideoJob,
   nrNative: { codec: NvencSdkCodec; demux: string },
+  nrStep: NeuralRenderingStep,
 ): Promise<VideoJobResult> {
   try {
     const { num, den } = rateParts(info.fpsText);
@@ -212,7 +216,7 @@ async function runGpuResidentNr(
     const guide = (rgba: Uint8Array, index: number) => cuts.guide(rgba, index);
     progress(0, `encode: NVENC ${nrNative.codec} (GPU-resident async zero-copy pipeline)`);
     const { DlssNrSession } = await import("../ngx/nr-render.ts");
-    const nr = DlssNrSession.open(session, { width: target.width, height: target.height, settings: options.settings, runtimeDir: options.runtimeDir!, dllDir: options.dllDir, appDataPath: options.appDataPath });
+    const nr = DlssNrSession.open(session, { width: target.width, height: target.height, settings: nrStep.settings, runtimeDir: options.runtimeDir!, dllDir: nrStep.dllDir, appDataPath: options.appDataPath });
     try {
       const r = await runAsyncNrEncode({
         session, nr, ffmpeg, decodeArgs, sinkArgs,
@@ -233,54 +237,22 @@ async function runGpuResidentNr(
   }
 }
 
-function openEngine({ options, session, upscaling, renderWidth, renderHeight, target }: VideoJob): Engine {
+function openEngineChain({ options, session, renderWidth, renderHeight, target }: VideoJob): Engine {
+  const sr = options.superResolution;
+  const nr = options.neuralRendering;
   try {
-    return createEngine(options.engine, session, {
+    return createEngineChain(session, {
       width: renderWidth,
       height: renderHeight,
-      outputWidth: upscaling ? target.width : undefined,
-      outputHeight: upscaling ? target.height : undefined,
-      settings: options.settings,
+      sr: sr ? { outputWidth: target.width, outputHeight: target.height, dllDir: sr.dllDir } : undefined,
+      nr: nr ? { settings: nr.settings, dllDir: nr.dllDir } : undefined,
       runtimeDir: options.runtimeDir,
-      dllDir: options.dllDir,
       appDataPath: options.appDataPath,
     });
   } catch (error) {
     session.close(); // setup failed before the main try/finally owns it, so close here or leak the GPU session
     throw error;
   }
-}
-
-/** The per-frame guide, and the motion estimator behind it when the job asked for flow and its engine reads motion. */
-function createGuide(
-  { options, progress, session, cudaOrdinal, renderWidth, renderHeight }: VideoJob,
-  engine: Engine,
-): { guide: EnginePath["guide"]; estimator: ReturnType<typeof createMotionEstimator> | null } {
-  // Scene-cut / motion guide. Both backends keep a one-frame history, so `guide`
-  // must be called exactly once per frame and in decode order.
-  const cuts = new SceneCutDetector(renderWidth, renderHeight);
-  let estimator: ReturnType<typeof createMotionEstimator> | null = null;
-  if (options.motion === "flow" && !ENGINE_USES_MOTION[options.engine]) {
-    progress(0, `optical flow: skipped, the ${options.engine} engine takes no motion vectors`);
-  } else if (options.motion === "flow") {
-    try {
-      const nvof = tryCreateNvofBackend(renderWidth, renderHeight, cudaOrdinal);
-      estimator = createMotionEstimator(renderWidth, renderHeight, nvof.backend ? { backend: nvof.backend } : {});
-      progress(0, nvof.backend ? "optical flow: NVIDIA hardware (NVOFA)" : `optical flow: CPU block matching. ${nvof.reason}`);
-    } catch (error) {
-      engine.close();
-      session.close();
-      throw error;
-    }
-  }
-  const guide = (rgba: Uint8Array, index: number): { reset: boolean; motion: Float32Array | null; sceneCut: boolean } => {
-    if (estimator) {
-      const g = estimator.process(rgba);
-      return { reset: index === 0 || g.reset, motion: g.motion, sceneCut: g.reset && index > 0 };
-    }
-    return { ...cuts.guide(rgba, index), motion: null };
-  };
-  return { guide, estimator };
 }
 
 /** Decode, DLSS and NVENC each on their own thread, with ffmpeg only muxing the elementary stream. */
@@ -377,8 +349,8 @@ async function runRawvideo(
 }
 
 async function runEngineJob(job: VideoJob): Promise<VideoJobResult> {
-  const { options, info, output, outputExisted, session, cudaOrdinal, encode, renderWidth, renderHeight, completed } = job;
-  const engine = openEngine(job);
+  const { options, progress, info, output, outputExisted, session, cudaOrdinal, encode, renderWidth, renderHeight, completed } = job;
+  const engine = openEngineChain(job);
   const outWidth = engine.outputWidth;
   const outHeight = engine.outputHeight;
 
@@ -391,7 +363,16 @@ async function runEngineJob(job: VideoJob): Promise<VideoJobResult> {
   // Video is always input 0 (the pipe); audio, when copied, is input 1 (source).
   const wantAudio = info.hasAudio && encode.copyAudio;
 
-  const { guide, estimator } = createGuide(job, engine);
+  let frameGuide: FrameGuide;
+  try {
+    frameGuide = createFrameGuide(renderWidth, renderHeight, { flow: options.superResolution?.motion === "flow", cudaOrdinal, progress });
+  } catch (error) {
+    // Nothing below owns the engine or the session yet.
+    engine.close();
+    session.close();
+    throw error;
+  }
+  const guide = frameGuide.guide;
 
   const frameBytes = renderWidth * renderHeight * 4;
   // Second choice: decode, DLSS and NVENC each on their own thread, encoding on
@@ -411,7 +392,7 @@ async function runEngineJob(job: VideoJob): Promise<VideoJobResult> {
     removePartialOutput(output, useThreaded ? framesWrittenOf(error) : counts.frames, outputExisted);
     throw error;
   } finally {
-    estimator?.close();
+    frameGuide.close();
     engine.close();
     session.close();
   }
@@ -424,11 +405,11 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
 
   // Fastest path, tried first: DLSS output stays on the GPU and NVENC reads it
   // through a shared buffer, so the two overlap with no CPU frame copy between
-  // them, which the threaded pipeline cannot avoid. Only NR at 1:1 qualifies
-  // (no upscale) with an NVENC codec at even, in-cap dimensions. motion is
-  // ignored: feature 18 consumes no motion vectors, so motion="flow" would only
-  // burn optical-flow time here.
-  const nrNative = options.engine === "nr" && !upscaling && options.runtimeDir ? nvencNativeTarget(encode.codec, target.width, target.height) : null;
-  if (nrNative && probeNvencCaps(cudaOrdinal).available) return runGpuResidentNr(job, nrNative);
+  // them, which the threaded pipeline cannot avoid. Only Neural Rendering alone
+  // qualifies (no SR to upscale first) with an NVENC codec at even, in-cap
+  // dimensions; feature 18 consumes no motion vectors, so it needs no optical flow.
+  const nr = options.neuralRendering;
+  const nrNative = nr && !upscaling && options.runtimeDir ? nvencNativeTarget(encode.codec, target.width, target.height) : null;
+  if (nr && nrNative && probeNvencCaps(cudaOrdinal).available) return runGpuResidentNr(job, nrNative, nr);
   return runEngineJob(job);
 }

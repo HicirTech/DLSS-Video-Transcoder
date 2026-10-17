@@ -4,8 +4,9 @@ import CancelIcon from "@mui/icons-material/Cancel";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ImageIcon from "@mui/icons-material/Image";
 import MovieIcon from "@mui/icons-material/Movie";
-import type { EngineKind, JobState, JobStatus } from "../../../src/server/api-types";
+import type { JobState, JobStatus } from "../../../src/server/api-types";
 import { baseName, formatDuration, formatTime, isJobActive, jobElapsedMs } from "../format";
+import { STEP_TITLES } from "../job-plan";
 import { LogPanel } from "./LogPanel";
 import { Mono } from "./Section";
 import { StateChip } from "./StatusChips";
@@ -20,13 +21,6 @@ interface JobCardProps {
 }
 
 type ProgressColor = "primary" | "success" | "error" | "warning" | "inherit";
-
-// Record<EngineKind, ...>: a new engine without a label is a build error, not a wrong chip.
-const ENGINE_LABELS: Record<EngineKind, string> = {
-  sr: "super resolution",
-  nr: "neural rendering",
-  bypass: "bypass (passthrough)",
-};
 
 const PROGRESS_COLORS: Record<JobState, ProgressColor> = {
   queued: "inherit",
@@ -52,7 +46,12 @@ export function JobCard({ job, now, onCancel, cancelling = false, defaultExpande
           {baseName(job.input)}
         </Typography>
         <StateChip state={job.state} />
-        <Chip label={ENGINE_LABELS[job.engine]} variant="outlined" />
+        {job.steps.length ? (
+          job.steps.map((step) => <Chip key={step} label={STEP_TITLES[step]} variant="outlined" />)
+        ) : (
+          // No step: the job only re-encodes, or resizes, what it decodes.
+          <Chip label="copy" variant="outlined" />
+        )}
         <Box sx={{ flex: 1 }} />
         <Mono dim>{job.id}</Mono>
         {active && onCancel ? (

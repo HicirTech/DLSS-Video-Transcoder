@@ -52,7 +52,7 @@ export async function srCommand(args: string[]): Promise<void> {
     dllDir,
   });
   const enhanced = await enhanceStill(image, async (colour) => ({
-    rgba: await runStillPasses("sr", warmupFrames, (reset) => sr.evaluate(colour, reset)),
+    rgba: await runStillPasses(true, warmupFrames, (reset) => sr.evaluate(colour, reset)),
     width: target.width,
     height: target.height,
   }));

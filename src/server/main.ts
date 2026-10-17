@@ -12,9 +12,14 @@ import { APP_DATA_DIR, RUNTIME_DIR } from "../paths.ts";
 import { toolsReport } from "../pipeline/tools.ts";
 import {
   DEFAULT_ENCODE_SETTINGS,
+  DEFAULT_FRAME_GEN_STEP,
   DEFAULT_NR_SETTINGS,
   DEFAULT_SCALE_SETTINGS,
+  DEFAULT_SR_STEP,
+  DEFAULT_WARMUP_FRAMES,
+  type JobRequest,
   type SettingsDefaults,
+  type StepKind,
   type WsEvent,
 } from "./api-types.ts";
 import { checkDllDir } from "./dll-dir.ts";
@@ -22,14 +27,27 @@ import { JobManager } from "./jobs.ts";
 import { isWithin } from "./path-scope.ts";
 import { mediaInfo } from "./media-info.ts";
 import { ProbeRunner } from "./probe-runner.ts";
-import { dllFeatureOf, jobShapeOf } from "./settings-in-use.ts";
 import { MAX_REQUEST_BODY_BYTES, storeUpload } from "./upload.ts";
 import { asJobRequest, validateJobRequest } from "./validate.ts";
 
 const UPLOADS_DIR = join(APP_DATA_DIR, "uploads");
 mkdirSync(UPLOADS_DIR, { recursive: true });
 const PORT = Number(process.env.PORT ?? 4080);
-const SETTINGS_DEFAULTS: SettingsDefaults = { settings: DEFAULT_NR_SETTINGS, scale: DEFAULT_SCALE_SETTINGS, encode: DEFAULT_ENCODE_SETTINGS };
+const SETTINGS_DEFAULTS: SettingsDefaults = {
+  superResolution: DEFAULT_SR_STEP,
+  neuralRendering: DEFAULT_NR_SETTINGS,
+  frameGen: DEFAULT_FRAME_GEN_STEP,
+  resize: DEFAULT_SCALE_SETTINGS,
+  encode: DEFAULT_ENCODE_SETTINGS,
+  warmupFrames: DEFAULT_WARMUP_FRAMES,
+};
+
+/** The version folder each step of `request` names, with the step, for the catalog check. */
+function stepDllDirs(request: JobRequest): Array<[StepKind, string]> {
+  const named: Array<[StepKind, string | undefined]> = [["sr", request.superResolution?.dllDir], ["nr", request.neuralRendering?.dllDir], ["fg", request.frameGen?.dllDir]];
+  return named.filter((entry): entry is [StepKind, string] => entry[1] !== undefined);
+}
+
 const probeRunner = new ProbeRunner();
 
 const json = (body: unknown, status = 200): Response =>
@@ -92,12 +110,14 @@ const server = Bun.serve({
             return fail("The output path must be absolute and inside the app-data folder or the input's own directory.");
         }
         // A DLL directory drives a native LoadLibrary, so it must be one the server itself
-        // advertises through GET /api/catalog, for the feature this job loads. A bypass job
-        // without frame generation loads none: validateJobRequest has already refused a dllDir on it.
-        const dllFeature = dllFeatureOf(jobShapeOf(request));
-        if (request.dllDir !== undefined && dllFeature !== null) {
-          const dllDirError = checkDllDir(request.dllDir, dllFeature, buildRuntimeCatalog(RUNTIME_DIR));
-          if (dllDirError) return fail(dllDirError);
+        // advertises through GET /api/catalog, for the feature of the step that loads it.
+        const dllDirs = stepDllDirs(request);
+        if (dllDirs.length) {
+          const catalog = buildRuntimeCatalog(RUNTIME_DIR);
+          for (const [step, dllDir] of dllDirs) {
+            const dllDirError = checkDllDir(dllDir, step, catalog);
+            if (dllDirError) return fail(dllDirError);
+          }
         }
         return json(jobs.submit(request), 201);
       },

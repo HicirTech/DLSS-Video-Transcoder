@@ -5,9 +5,9 @@
 import { describe, expect, test } from "bun:test";
 import { runStillPasses } from "../src/pipeline/image.ts";
 
-async function passes(engine: "sr" | "nr" | "bypass", warmupFrames: number) {
+async function passes(temporal: boolean, warmupFrames: number) {
   const resets: boolean[] = [];
-  const last = await runStillPasses(engine, warmupFrames, (reset, total) => {
+  const last = await runStillPasses(temporal, warmupFrames, (reset, total) => {
     resets.push(reset);
     return new Uint8Array([resets.length, total]);
   });
@@ -15,12 +15,12 @@ async function passes(engine: "sr" | "nr" | "bypass", warmupFrames: number) {
 }
 
 describe("runStillPasses", () => {
-  test("a neural engine resets once, then runs warmupFrames more passes, and returns the last output", async () => {
-    expect(await passes("sr", 4)).toEqual({ resets: [true, false, false, false, false], last: [5, 5] });
-    expect(await passes("nr", 0)).toEqual({ resets: [true], last: [1, 1] });
+  test("a temporal engine resets once, then runs warmupFrames more passes, and returns the last output", async () => {
+    expect(await passes(true, 4)).toEqual({ resets: [true, false, false, false, false], last: [5, 5] });
+    expect(await passes(true, 0)).toEqual({ resets: [true], last: [1, 1] });
   });
 
-  test("bypass keeps no state and runs once whatever the warm-up", async () => {
-    expect(await passes("bypass", 4)).toEqual({ resets: [true], last: [1, 1] });
+  test("the copy a job without steps runs keeps no state and runs once whatever the warm-up", async () => {
+    expect(await passes(false, 4)).toEqual({ resets: [true], last: [1, 1] });
   });
 });

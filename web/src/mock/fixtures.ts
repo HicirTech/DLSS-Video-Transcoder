@@ -1,11 +1,18 @@
 /*
- * Static mock answers for the read-only endpoints: hardware probe, tools, runtime catalog, upload and
- * settings defaults. No DOM dependency, so the Bun mock server (web/mock-server.ts) and the browser
+ * Static mock answers for the read-only endpoints: hardware probe, tools, runtime catalog, upload, media
+ * info and settings defaults. No DOM dependency, so the Bun mock server (web/mock-server.ts) and the browser
  * (`?mock=1`) share them.
  */
 import type { RuntimeManifest } from "../../../src/ngx/runtime-catalog";
-import type { ProbeReport, SettingsDefaults, ToolsReport, UploadResult } from "../../../src/server/api-types";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS } from "../../../src/server/api-types";
+import type { MediaInfo, ProbeReport, SettingsDefaults, ToolsReport, UploadResult } from "../../../src/server/api-types";
+import {
+  DEFAULT_ENCODE_SETTINGS,
+  DEFAULT_FRAME_GEN_STEP,
+  DEFAULT_NR_SETTINGS,
+  DEFAULT_SCALE_SETTINGS,
+  DEFAULT_SR_STEP,
+  DEFAULT_WARMUP_FRAMES,
+} from "../../../src/server/api-types";
 
 const RUNTIME_FOLDER = "C:\\Tools\\neural-render\\runtime";
 const DRIVER_STORE = "C:\\Windows\\System32\\DriverStore\\FileRepository\\nvlti.inf_amd64_3f1c2b7e9d0a4c55";
@@ -255,10 +262,19 @@ export function mockUpload(file: Pick<File, "name" | "size">): UploadResult {
   return { path: `C:\\mock\\uploads\\${file.name}`, name: file.name, size: file.size };
 }
 
+/** What GET /api/media answers: a 1080p still for a .png, else a 1080p 29.97 fps clip with audio. */
+export function mockMediaInfo(path: string): MediaInfo {
+  if (/\.png$/i.test(path)) return { kind: "image", width: 1920, height: 1080 };
+  return { kind: "video", width: 1920, height: 1080, fps: "30000/1001", nominalFps: "30000/1001", frames: 2880, durationSeconds: 96.096, codec: "h264", hasAudio: true };
+}
+
 export function mockSettingsDefaults(): SettingsDefaults {
   return {
-    settings: { ...DEFAULT_NR_SETTINGS },
-    scale: { ...DEFAULT_SCALE_SETTINGS },
+    superResolution: structuredClone(DEFAULT_SR_STEP),
+    neuralRendering: { ...DEFAULT_NR_SETTINGS },
+    frameGen: { ...DEFAULT_FRAME_GEN_STEP },
+    resize: { ...DEFAULT_SCALE_SETTINGS },
     encode: { ...DEFAULT_ENCODE_SETTINGS },
+    warmupFrames: DEFAULT_WARMUP_FRAMES,
   };
 }

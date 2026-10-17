@@ -1,7 +1,7 @@
 import { useId } from "react";
 import { FormControl, FormHelperText, InputLabel, MenuItem, Select, Stack } from "@mui/material";
 import { DEFAULT_SCALE_SETTINGS, SCALE_MODES, SETTING_RANGES, type ScaleSettings } from "../../../src/server/api-types";
-import type { OutputSizeLimits } from "../../../src/server/settings-in-use";
+import type { OutputSizeLimits } from "../../../src/server/output-size";
 import { NumberField } from "./NumberField";
 
 /** Menu words for each output-size mode; the Record makes a mode without words a build error. */
@@ -13,20 +13,22 @@ const MODE_LABELS: Record<ScaleSettings["mode"], string> = {
 
 interface ScaleSettingsEditorProps {
   value: ScaleSettings;
-  /** What the job's engine can write (outputSizeLimits): the fields hold to it and a stored value outside it is marked. */
+  /** What the step that sets the size can write (outputSizeLimits): the fields hold to it and a stored value outside it is marked. */
   limits: OutputSizeLimits;
+  /** The menu words for mode none, when keeping the source size means more than that (Super Resolution runs DLAA). */
+  noneLabel?: string;
   /** The job ignores the output size (unusedSettings); its section says why. */
   disabled?: boolean;
   onChange: (next: ScaleSettings) => void;
 }
 
-export function ScaleSettingsEditor({ value, limits, disabled, onChange }: ScaleSettingsEditorProps) {
+export function ScaleSettingsEditor({ value, limits, noneLabel, disabled, onChange }: ScaleSettingsEditorProps) {
   const modeLabelId = useId();
   const update = (patch: Partial<ScaleSettings>): void => onChange({ ...value, ...patch });
   const factorMin = Math.max(SETTING_RANGES.factor.min, limits.factorMin ?? SETTING_RANGES.factor.min);
   const widthMax = Math.min(SETTING_RANGES.width.max, limits.sideMax ?? SETTING_RANGES.width.max);
   const heightMax = Math.min(SETTING_RANGES.height.max, limits.sideMax ?? SETTING_RANGES.height.max);
-  // A stored value from another engine can sit outside this one's limits until it is edited, which clamps it.
+  // A value stored under wider limits can sit outside these until it is edited, which clamps it.
   const outside =
     (value.mode === "factor" && value.factor < factorMin) || (value.mode === "size" && (value.width > widthMax || value.height > heightMax));
 
@@ -43,7 +45,7 @@ export function ScaleSettingsEditor({ value, limits, disabled, onChange }: Scale
           >
             {SCALE_MODES.map((mode) => (
               <MenuItem key={mode} value={mode}>
-                {MODE_LABELS[mode]}
+                {mode === "none" && noneLabel ? noneLabel : MODE_LABELS[mode]}
               </MenuItem>
             ))}
           </Select>

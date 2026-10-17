@@ -4,7 +4,7 @@
  */
 import { DEFAULT_SR_PRESET, DLSS_RATIO, perfQualityName } from "../ngx/results.ts";
 import { cpuSiblingCodec, FFMPEG_NVENC_ENCODERS, isNvenc } from "../pipeline/encode-select.ts";
-import { AAC_KBPS, AUDIO_IN_CONTAINER, DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, DLSS_SR_MAX_OUTPUT_SIDE, ENCODE_CODECS, ENCODE_CONTAINERS, ENGINE_KINDS, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, MOTION_KINDS, type MotionKind, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, NVENC_MAX_SIDE, SETTING_RANGES, SR_FACTOR_MIN } from "../server/api-types.ts";
+import { AAC_KBPS, AUDIO_IN_CONTAINER, DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, DEFAULT_SR_STEP, DEFAULT_WARMUP_FRAMES, DLSS_SR_MAX_OUTPUT_SIDE, ENCODE_CODECS, ENCODE_CONTAINERS, FRAME_GEN_CONTAINER, FRAME_GEN_FPS_CHOICES, FRAME_GEN_GPU_CHOICE, FRAME_GEN_NATIVE_MAXIMUM, MOTION_KINDS, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, NVENC_MAX_SIDE, SETTING_RANGES, SR_FACTOR_MIN, type StepKind } from "../server/api-types.ts";
 
 interface OptionSpec {
   /** As typed on the command line, e.g. "--factor N" or "--json". */
@@ -32,7 +32,7 @@ function settingRange(field: keyof typeof SETTING_RANGES): string {
 export const SR_FACTOR_OPTION = { min: SR_FACTOR_MIN, max: SETTING_RANGES.factor.max, fallback: 2 } as const;
 
 /** `sr` / `nr --warmup`: the extra passes an image job runs over a still, with the job's range and default. */
-export const WARMUP_OPTION = { ...SETTING_RANGES.warmupFrames, fallback: DEFAULT_NR_SETTINGS.warmupFrames } as const;
+export const WARMUP_OPTION = { ...SETTING_RANGES.warmupFrames, fallback: DEFAULT_WARMUP_FRAMES } as const;
 const WARMUP_OPT: OptionSpec = { flag: "--warmup N", desc: `extra passes over the same image so the temporal state settles, as an image job runs them, ${settingRange("warmupFrames")}`, def: String(WARMUP_OPTION.fallback) };
 
 /** `fg --multiplier`: the range the API validates frameGen.multiplier against, and the multiplier used when it is absent. */
@@ -49,10 +49,12 @@ const CODEC_OPT: OptionSpec = {
 };
 const QUALITY_OPT: OptionSpec = { flag: "--quality N", desc: `encoder quality (CRF for CPU, CQ for NVENC), ${settingRange("quality")} (lower = better)`, def: String(QUALITY_OPTION.fallback) };
 
-/** `video --motion` when absent: no optical flow. */
-export const VIDEO_MOTION_DEFAULT: MotionKind = "none";
+/** The frame generation rows fg and video share; fg calls the path option --engine, video --fg-path. */
+const FG_FPS_OPT: OptionSpec = { flag: "--fps RATE", desc: `output frame rate: ${FRAME_GEN_FPS_CHOICES.join(", ")}, or an exact num/den; overrides --multiplier`, def: "source fps x --multiplier" };
+const FG_MULTIPLIER_OPT: OptionSpec = { flag: "--multiplier N", desc: `output/input frame ratio when --fps is not given, a whole number from ${FG_MULTIPLIER_OPTION.min} to ${FG_MULTIPLIER_OPTION.max} (2 = double fps)`, def: String(FG_MULTIPLIER_OPTION.fallback) };
+const FG_PATH_DESC = `auto = one native session when output/source is an exact integer from 2 up to ${FRAME_GEN_NATIVE_MAXIMUM} (3x and above only with HAGS on), else a cascade of 2x stages; when the runtime disables every interval of a native 3x+ session, auto re-runs it as a cascade; native or cascade force that path`;
 
-/** The Neural Rendering look rows nr and video share; nrSettingsOption reads them, and video refuses them for another engine. */
+/** The Neural Rendering look rows nr and video share; nrSettingsOption reads them, and video refuses them without --nr. */
 export const NR_SETTING_OPTS: readonly OptionSpec[] = [
   { flag: "--intensity F", desc: `overall strength, ${settingRange("intensity")}; the installed ${NR_RUNTIME_MEASURED} stops responding above ${NR_INTENSITY_EFFECTIVE_MAX}, so every value from there up gives the same image`, def: String(DEFAULT_NR_SETTINGS.intensity) },
   { flag: "--style N", desc: `look style: ${NR_STYLES.map((style) => `${style} = ${NR_STYLE_LABELS[style]}`).join(", ")} (strong, visible effect)`, def: String(DEFAULT_NR_SETTINGS.style) },
@@ -63,6 +65,21 @@ export const NR_SETTING_OPTS: readonly OptionSpec[] = [
   { flag: "--auto-mask", desc: "let the runtime derive the processed-region mask instead of the whole frame", def: "off" },
   { flag: "--ui-correction", desc: `protect overlays / text / sharp UI edges from being re-rendered; ${NR_IGNORED_NOTE}`, def: "off" },
 ];
+
+/** `video`'s per-step version row: a specific installed DLL of the step's feature, as `versions` lists them. */
+function stepVersionOpt(step: StepKind, feature: string): OptionSpec {
+  return { flag: `--${step}-version VER`, desc: `load a specific installed ${feature} DLL version (prefix match ok); list them with \`versions\``, def: "bundled runtime DLL" };
+}
+
+/** The `video` options that configure one step, which the command refuses unless that step's switch is given. */
+export const VIDEO_STEP_OPTS: Record<StepKind, readonly OptionSpec[]> = {
+  sr: [
+    { flag: "--motion MODE", desc: `Super Resolution's motion vectors: ${MOTION_KINDS.join(" or ")}; flow estimates optical flow between frames, with NVIDIA's NVOFA when it starts and a CPU estimator otherwise`, def: DEFAULT_SR_STEP.motion },
+    stepVersionOpt("sr", "DLSS Super Resolution"),
+  ],
+  nr: [...NR_SETTING_OPTS, stepVersionOpt("nr", "DLSS Neural Rendering")],
+  fg: [FG_FPS_OPT, FG_MULTIPLIER_OPT, { flag: "--fg-path MODE", desc: FG_PATH_DESC, def: "auto" }, stepVersionOpt("fg", "DLSS Frame Generation")],
+};
 
 export const RUNTIME_OPT: OptionSpec = { flag: "--runtime DIR", desc: "runtime folder holding the NGX DLLs", def: "<repo>/runtime" };
 export const ADAPTER_OPT: OptionSpec = { flag: "--adapter N", desc: "GPU adapter index as `probe` listed it in this session (DXGI indices can change between runs); the adapter must have a CUDA device. auto = the NVIDIA adapter with the most VRAM that has one", def: "auto" };
@@ -84,7 +101,7 @@ export const COMMANDS: readonly CommandSpec[] = [
       { flag: "--no-requirements", desc: "skip the per-feature GetFeatureRequirements queries" },
       { flag: "--debug-layer", desc: "enable the D3D12 debug layer (needs the Graphics Tools installed)" },
     ],
-    notes: ["Exits 0 only when neural rendering is ready. Super Resolution and frame generation get no verdict: the report lists their DLL and what the driver says, and frame generation is checked when an fg job starts."],
+    notes: ["Exits 0 only when neural rendering is ready. Super Resolution and frame generation get no verdict: the report lists their DLL and what the driver says, and frame generation is checked when a job that runs it starts."],
   },
   {
     name: "forwarder",
@@ -124,28 +141,32 @@ export const COMMANDS: readonly CommandSpec[] = [
   },
   {
     name: "video",
-    summary: "DLSS Super Resolution, DLSS Neural Rendering or a plain GPU copy on every frame of a video, then encode: the video job the web UI runs.",
-    usage: "bun run src/cli.ts video <input> [output] --engine sr|nr|bypass [options]",
+    summary: "Any of DLSS Super Resolution, DLSS Neural Rendering and DLSS Frame Generation on a video in one pass, in that order, then encode: the video job the web UI runs.",
+    usage: "bun run src/cli.ts video <input> [output] [--sr] [--nr] [--fg] [options]",
     args: [
       { name: "input", desc: "source video (any format ffmpeg can decode)" },
-      { name: "output", desc: "destination, ending in the --container's extension; defaults to <input>.<engine>.<container> next to the input, the name a video job gives it" },
+      { name: "output", desc: `destination, ending in the --container's extension (.${FRAME_GEN_CONTAINER} with --fg); defaults to <input>.<steps>.<container> next to the input, e.g. clip.sr-nr-fg.mp4, the name a video job gives it` },
     ],
     options: [
-      { flag: "--engine NAME", desc: `required, one of ${ENGINE_KINDS.join(", ")}: sr upscales each frame from the source size with DLSS Super Resolution; nr enhances each frame at the output size with DLSS Neural Rendering; bypass runs no DLSS, so only the output size and the encode change the video` },
-      { flag: "--factor N", desc: `output size = the source size times N, each side rounded to even, ${settingRange("factor")}; DLSS Super Resolution only enlarges, so sr takes ${SR_FACTOR_OPTION.min}..${SR_FACTOR_OPTION.max} (1 runs DLAA) and writes at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side`, def: "the source size" },
-      { flag: "--size WxH", desc: `output size in pixels instead of --factor, e.g. 3840x2160: width ${settingRange("width")}, height ${settingRange("height")}, each rounded to even; for sr, each side at least the source's and at most ${DLSS_SR_MAX_OUTPUT_SIDE}`, def: "the source size" },
-      { flag: "--motion MODE", desc: `${MOTION_KINDS.join(" or ")}: flow estimates optical flow between frames and hands sr the motion vectors; nr and bypass read none, so they skip it`, def: VIDEO_MOTION_DEFAULT },
+      { flag: "--sr", desc: `run DLSS Super Resolution: upscale every frame from the source size to the output size (--factor or --size), at least the source size (a factor of ${SR_FACTOR_OPTION.min} runs DLAA) and at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side`, def: "off" },
+      { flag: "--nr", desc: "run DLSS Neural Rendering: enhance every frame at the output size, after Super Resolution when both run", def: "off" },
+      { flag: "--fg", desc: `run DLSS Frame Generation last: interpolate the processed frames to --fps, or the source rate x --multiplier; writes ${FRAME_GEN_CONTAINER} only`, def: "off" },
+      { flag: "--factor N", desc: `output size = the source size times N, each side rounded to even: with --sr, Super Resolution upscales to it, N ${SR_FACTOR_OPTION.min}..${SR_FACTOR_OPTION.max} and at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side; without it, the decode resizes to it with lanczos, N ${settingRange("factor")}`, def: `${DEFAULT_SR_STEP.scale.factor} with --sr, else the source size` },
+      { flag: "--size WxH", desc: `output size in pixels instead of --factor, e.g. 3840x2160: width ${settingRange("width")}, height ${settingRange("height")}, each rounded to even; with --sr, each side at least the source's and at most ${DLSS_SR_MAX_OUTPUT_SIDE}`, def: `${DEFAULT_SR_STEP.scale.factor}x the source with --sr, else the source size` },
+      ...VIDEO_STEP_OPTS.sr,
+      ...VIDEO_STEP_OPTS.nr,
+      ...VIDEO_STEP_OPTS.fg,
       CODEC_OPT,
       QUALITY_OPT,
-      { flag: "--container NAME", desc: `output container: ${ENCODE_CONTAINERS.join(", ")}`, def: DEFAULT_ENCODE_SETTINGS.container },
+      { flag: "--container NAME", desc: `output container: ${ENCODE_CONTAINERS.join(", ")}; --fg writes ${FRAME_GEN_CONTAINER} only`, def: DEFAULT_ENCODE_SETTINGS.container },
       { flag: "--no-audio", desc: `write no audio track; otherwise the source's audio is copied into ${containersThatAudio("copy")}, or re-encoded to AAC ${AAC_KBPS} kb/s for ${containersThatAudio("aac")}`, def: "off" },
-      ...NR_SETTING_OPTS,
-      { flag: "--dlss-version VER", desc: "load a specific installed DLL version of the --engine's feature, DLSS Super Resolution for sr or DLSS Neural Rendering for nr (prefix match ok); list them with `versions`. bypass loads no DLSS DLL and refuses it", def: "bundled runtime DLL" },
       RUNTIME_OPT,
-      ADAPTER_OPT,
+      { ...ADAPTER_OPT, desc: `${ADAPTER_OPT.desc}. Picks the GPU for --sr and --nr, or for the copy a job without steps runs; frame generation's host picks its own, so --fg alone refuses it` },
     ],
     notes: [
-      `The Neural Rendering look options, --intensity to --ui-correction, apply to --engine nr only; sr and bypass refuse them. --preset is Neural Rendering's model preset hint: an sr video runs Super Resolution render preset ${DEFAULT_SR_PRESET}, as an sr job does.`,
+      "The steps run in the order Super Resolution, Neural Rendering, frame generation, whatever order the switches come in. With none of them, the video is only re-encoded, resized when --factor or --size is given.",
+      `A step's options apply only with its switch: --motion and --sr-version with --sr; --intensity to --ui-correction and --nr-version with --nr; --fps, --multiplier, --fg-path and --fg-version with --fg. --preset is Neural Rendering's model preset hint: Super Resolution runs render preset ${DEFAULT_SR_PRESET}, as every Super Resolution job does.`,
+      `Frame generation's GPU: ${FRAME_GEN_GPU_CHOICE}.`,
       "The command line becomes a POST /api/jobs request and passes the same request validation before the GPU opens.",
     ],
   },
@@ -155,12 +176,12 @@ export const COMMANDS: readonly CommandSpec[] = [
     usage: "bun run src/cli.ts fg <input.mp4> [output.mp4] [options]",
     args: [
       { name: "input.mp4", desc: "source video (any format ffmpeg can decode)" },
-      { name: "output.mp4", desc: "destination; defaults to <input>.dlssg.mp4 next to the input" },
+      { name: "output.mp4", desc: "destination; defaults to <input>.fg.mp4 next to the input, the name a video job with frame generation alone gives it" },
     ],
     options: [
-      { flag: "--fps RATE", desc: `output frame rate: ${FRAME_GEN_FPS_CHOICES.join(", ")}, or an exact num/den; overrides --multiplier`, def: "source fps x --multiplier" },
-      { flag: "--multiplier N", desc: `output/input frame ratio when --fps is not given, a whole number from ${FG_MULTIPLIER_OPTION.min} to ${FG_MULTIPLIER_OPTION.max} (2 = double fps)`, def: String(FG_MULTIPLIER_OPTION.fallback) },
-      { flag: "--engine MODE", desc: `auto = one native session when output/source is an exact integer from 2 up to ${FRAME_GEN_NATIVE_MAXIMUM} (3x and above only with HAGS on), else a cascade of 2x stages; when the runtime disables every interval of a native 3x+ session, auto re-runs it as a cascade; native or cascade force that path`, def: "auto" },
+      FG_FPS_OPT,
+      FG_MULTIPLIER_OPT,
+      { flag: "--engine MODE", desc: FG_PATH_DESC, def: "auto" },
       CODEC_OPT,
       QUALITY_OPT,
       { flag: "--dlss-version VER", desc: "use a specific installed DLSS Frame Generation DLL version (prefix match ok); list them with `versions`", def: "bundled runtime DLL" },
@@ -173,7 +194,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     summary: "List every DLSS runtime DLL found (per feature), with its version, source and folder.",
     usage: "bun run src/cli.ts versions [--runtime DIR]",
     options: [RUNTIME_OPT],
-    notes: ["Use a listed SR version string with `sr --dlss-version`, an SR or NR one with `video --dlss-version`, and a Frame Generation one with `fg --dlss-version`."],
+    notes: ["Use a listed version string with `sr --dlss-version` or `fg --dlss-version` for that feature, and with `video --sr-version`, `--nr-version` or `--fg-version` for each step."],
   },
   {
     name: "help",

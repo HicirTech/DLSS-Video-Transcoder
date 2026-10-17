@@ -1,18 +1,28 @@
-import { useId, useState } from "react";
-import { Alert, Box, Button, Chip, FormControl, FormControlLabel, FormHelperText, InputLabel, Link, MenuItem, Select, Stack, Switch, Tooltip, Typography } from "@mui/material";
+import { useState } from "react";
+import { Alert, Box, Button, FormHelperText, Link, Stack, Typography } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
-import type { EngineKind, FrameGenEngine, FrameGenFps, JobRequest, JobStatus, MotionKind, ToolsReport } from "../../../src/server/api-types";
-import { ENGINE_USES_MOTION, FFMPEG_SUPPLY_HINT, FRAME_GEN_CONTAINER, FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM } from "../../../src/server/api-types";
-import { dllFeatureOf, outputSizeLimits, unusedSettings } from "../../../src/server/settings-in-use";
+import { FRAME_GEN_CONTAINER, type JobStatus, type StepKind, type ToolsReport } from "../../../src/server/api-types";
+import { nvencLimitExceeded, outputSizeLimits } from "../../../src/server/output-size";
+import { unusedSettings } from "../../../src/server/settings-in-use";
 import { api } from "../api";
+import { formatFps, rateValue } from "../format";
 import { useJobRunner } from "../hooks/useJobRunner";
+import { useMediaInfo } from "../hooks/useMediaInfo";
 import { useSettings } from "../hooks/useSettings";
-import { EncodeSettingsEditor } from "./EncodeSettingsEditor";
+import { formatSize, frameGenOutputFps, planJob, planStages, STEP_TITLES } from "../job-plan";
+import { videoRequest } from "../job-requests";
+import { CODEC_LABELS, CONTAINER_LABELS, EncodeSettingsEditor } from "./EncodeSettingsEditor";
+import { FrameGenEditor } from "./FrameGenEditor";
 import { JobCard } from "./JobCard";
-import { EngineSelect, MotionSelect, PathFields } from "./JobFormFields";
+import { InputPathField, OutputPathField } from "./JobFormFields";
+import { MediaSummary } from "./MediaSummary";
 import { NrSettingsEditor } from "./NrSettingsEditor";
+import { PlanLine } from "./PlanLine";
 import { ScaleSettingsEditor } from "./ScaleSettingsEditor";
 import { Mono, Section, UnusedNote } from "./Section";
+import { StepCard } from "./StepCard";
+import { SuperResolutionEditor } from "./SuperResolutionEditor";
+import { ToolsBanner } from "./ToolsBanner";
 import { VersionSelect } from "./VersionSelect";
 
 interface VideoPanelProps {
@@ -22,183 +32,131 @@ interface VideoPanelProps {
   toolsError: string | null;
 }
 
-/** What the NVENC chip measures and what it leaves to each job: ToolsReport.nvenc only says that ffmpeg lists the encoder. */
-const NVENC_CHIP_HELP =
-  "Whether this ffmpeg build lists the h264_nvenc encoder. It does not test your GPU, hevc_nvenc or av1_nvenc: each job test-encodes one frame with its own codec on its own GPU and falls back to the CPU codec when that fails.";
+/** The version folder each step loads, chosen on the form only: the installed versions can change between sessions. */
+type DllDirs = Record<StepKind, string>;
+const BUNDLED_DLLS: DllDirs = { sr: "", nr: "", fg: "" };
 
-function ToolsBanner({ tools, toolsError }: { tools: ToolsReport | null; toolsError: string | null }) {
-  if (toolsError) {
-    return (
-      <Alert severity="info" variant="outlined">
-        Could not check for ffmpeg ({toolsError}); its availability is unknown.
-      </Alert>
-    );
-  }
-  if (!tools) return null;
-  const missing = [...(tools.ffmpeg.path === null ? ["ffmpeg"] : []), ...(tools.ffprobe.path === null ? ["ffprobe"] : [])];
-  if (missing.length > 0) {
-    return (
-      <Alert severity="warning">
-        {missing.join(" and ")} {missing.length === 1 ? "was" : "were"} not found on this machine. Video jobs need ffmpeg to
-        decode frames and encode the result and ffprobe to read the source, so they will fail until both are found:{" "}
-        {FFMPEG_SUPPLY_HINT}.
-      </Alert>
-    );
-  }
-  return (
-    <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
-      <Chip label={`ffmpeg ${tools.ffmpeg.version ?? ""}`.trim()} color="success" variant="outlined" />
-      <Chip label={`ffprobe ${tools.ffprobe.version ?? ""}`.trim()} color="success" variant="outlined" />
-      <Tooltip title={NVENC_CHIP_HELP}>
-        <Chip
-          label={tools.nvenc === null ? "NVENC build unknown" : tools.nvenc ? "ffmpeg built with NVENC" : "ffmpeg built without NVENC"}
-          color={tools.nvenc ? "success" : "default"}
-          variant="outlined"
-        />
-      </Tooltip>
-      <Typography variant="caption" color="text.secondary">
-        <Mono dim>{tools.ffmpeg.path}</Mono>
-      </Typography>
-    </Stack>
-  );
-}
-
+/**
+ * The Video tab: a source, the three steps in the order they run, each on its own switch, and the output. The
+ * plan line above Run says what the job will do with the source as it stands.
+ */
 export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
-  const fpsLabelId = useId();
-  const pathLabelId = useId();
-  const { settings, setNr, setScale, setEncode } = useSettings();
+  const { settings, update } = useSettings();
   const runner = useJobRunner(jobs);
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
-  const [engine, setEngine] = useState<EngineKind>("nr");
-  const [motion, setMotion] = useState<MotionKind>("none");
-  const [frameGenOn, setFrameGenOn] = useState(false);
-  const [targetFps, setTargetFps] = useState<FrameGenFps>("60");
-  const [fgEngine, setFgEngine] = useState<FrameGenEngine>("auto");
-  const [dllDir, setDllDir] = useState("");
+  const [dllDirs, setDllDirs] = useState<DllDirs>(BUNDLED_DLLS);
+  const media = useMediaInfo(input);
+  const source = media.info?.kind === "video" ? media.info : null;
+  const steps = settings.videoSteps;
+  const plan = planJob({ kind: "video", input, source, steps, srScale: settings.superResolution.scale, resize: settings.resize, container: settings.encode.container });
+  const unused = unusedSettings(steps);
+  const sourceFps = source ? rateValue(source.nominalFps) : null;
+  const outputFps = frameGenOutputFps(settings.frameGen, source?.nominalFps ?? null);
+  const outputSize = plan.outputSize ? formatSize(plan.outputSize) : null;
+  const container = steps.fg ? FRAME_GEN_CONTAINER : settings.encode.container;
+  const canRun = input.trim() !== "" && !runner.submitting && plan.srProblem === null;
 
-  const canRun = input.trim() !== "" && !runner.submitting;
-  const shape = { engine, frameGen: frameGenOn };
-  const unused = unusedSettings(shape);
-  const dllFeature = dllFeatureOf(shape);
-  const usesMotion = unused.motion === null;
+  const setStep = (step: StepKind, on: boolean): void => update({ videoSteps: { ...steps, [step]: on } });
+  const setDllDir = (step: StepKind) => (dir: string): void => setDllDirs((current) => ({ ...current, [step]: dir }));
+  const run = (): void => void runner.submit(videoRequest({ input, output, dllDirs }, settings));
 
-  const changeEngine = (next: EngineKind): void => {
-    setEngine(next);
-    setDllDir(""); // a version chosen for one feature does not apply to another
-  };
-
-  const changeFrameGen = (on: boolean): void => {
-    setFrameGenOn(on);
-    setDllDir(""); // frame generation loads another feature's DLL than the engine does
-  };
-
-  const run = (): void => {
-    const request: JobRequest = {
-      kind: "video",
-      input: input.trim(),
-      engine,
-      // What the job will do: an engine that takes no motion vectors gets no flow.
-      motion: ENGINE_USES_MOTION[engine] ? motion : "none",
-      settings: settings.nr,
-      scale: settings.scale,
-      // Frame generation writes one container; the stored choice comes back when it is switched off.
-      encode: frameGenOn ? { ...settings.encode, container: FRAME_GEN_CONTAINER } : settings.encode,
-    };
-    if (frameGenOn) request.frameGen = { targetFps, engine: fgEngine };
-    // Frame generation picks its GPU in its host process (README, "Shared options"), so the stored GPU choice is left off it.
-    else if (settings.adapterUuid) request.adapterUuid = settings.adapterUuid;
-    if (dllFeature !== null && dllDir !== "") request.dllDir = dllDir;
-    if (output.trim() !== "") request.output = output.trim();
-    void runner.submit(request);
-  };
-
+  // Past its NVENC encoder's longest side the job encodes the same format on the CPU (resolveEncodeCodec).
+  const onCpu = plan.outputSize !== null && nvencLimitExceeded(settings.encode.codec, plan.outputSize) !== null;
+  const stages = planStages({
+    plan,
+    source,
+    srScale: settings.superResolution.scale,
+    resize: settings.resize,
+    frameGenTarget: outputFps !== null ? `${formatFps(outputFps)} fps` : `${settings.frameGen.multiplier}× the source rate`,
+    writer: `${onCpu ? "CPU encode" : CODEC_LABELS[settings.encode.codec]} in ${CONTAINER_LABELS[container]}`,
+  });
   const job = runner.job;
 
   return (
     <Stack spacing={3}>
       <ToolsBanner tools={tools} toolsError={toolsError} />
 
-      <Section title="Source and output">
-        <PathFields
-          kind="video"
-          input={input}
-          output={output}
-          onInputChange={setInput}
-          onOutputChange={setOutput}
-        />
+      <Section title="Source">
+        <Stack spacing={1}>
+          <InputPathField kind="video" value={input} onChange={setInput} />
+          <MediaSummary media={media} expected="video" />
+        </Stack>
       </Section>
 
-      <Section title="Frame generation">
-        <Stack direction="row" spacing={2} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
-          <FormControlLabel
-            control={<Switch checked={frameGenOn} onChange={(_e, checked) => changeFrameGen(checked)} />}
-            label="Interpolate to a higher frame rate"
+      <Section title="Steps" action={<Typography variant="caption" color="text.secondary">Switch on what to run; they always run in this order.</Typography>}>
+        <Stack spacing={1.5}>
+          <StepCard
+            order={1}
+            title={STEP_TITLES.sr}
+            summary="Upscales every frame with DLSS Super Resolution, from the source size to the output size."
+            on={steps.sr}
+            onToggle={(on) => setStep("sr", on)}
+            result={source && outputSize ? `${formatSize(source)} → ${outputSize}` : null}
+            problem={plan.srProblem}
+          >
+            <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
+              <SuperResolutionEditor value={settings.superResolution} kind="video" onChange={(superResolution) => update({ superResolution })} />
+              <VersionSelect feature="sr" value={dllDirs.sr} onChange={setDllDir("sr")} />
+            </Stack>
+          </StepCard>
+
+          <StepCard
+            order={2}
+            title={STEP_TITLES.nr}
+            summary="Enhances every frame at the output size with DLSS Neural Rendering; no upscale."
+            on={steps.nr}
+            onToggle={(on) => setStep("nr", on)}
+            result={outputSize ? `at ${outputSize}` : null}
+          >
+            <Stack spacing={2}>
+              <NrSettingsEditor value={settings.neuralRendering} onChange={(neuralRendering) => update({ neuralRendering })} />
+              <VersionSelect feature="nr" value={dllDirs.nr} onChange={setDllDir("nr")} />
+            </Stack>
+          </StepCard>
+
+          <StepCard
+            order={3}
+            title={STEP_TITLES.fg}
+            summary="Interpolates the processed frames to a higher frame rate with DLSS Frame Generation."
+            on={steps.fg}
+            onToggle={(on) => setStep("fg", on)}
+            result={sourceFps !== null && outputFps !== null ? `${formatFps(sourceFps)} → ${formatFps(outputFps)} fps` : null}
+          >
+            <Stack spacing={2}>
+              <FrameGenEditor value={settings.frameGen} sourceFps={sourceFps} outputFps={outputFps} onChange={(frameGen) => update({ frameGen })} />
+              <VersionSelect feature="fg" value={dllDirs.fg} onChange={setDllDir("fg")} />
+              {unused.gpu !== null ? <FormHelperText>{unused.gpu}</FormHelperText> : null}
+            </Stack>
+          </StepCard>
+        </Stack>
+      </Section>
+
+      <Section title="Output">
+        <Stack spacing={2.5}>
+          <OutputPathField value={output} defaultName={plan.defaultOutputName} onChange={setOutput} />
+          <Box>
+            <Stack direction="row" spacing={1} sx={{ alignItems: "baseline", mb: 1 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                Resize
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                lanczos, in the decode, when Super Resolution is off
+              </Typography>
+              <UnusedNote reason={unused.resize} />
+            </Stack>
+            <ScaleSettingsEditor value={settings.resize} limits={outputSizeLimits("resize")} disabled={unused.resize !== null} onChange={(resize) => update({ resize })} />
+          </Box>
+          <EncodeSettingsEditor
+            value={settings.encode}
+            fixedContainer={steps.fg ? { container: FRAME_GEN_CONTAINER, reason: "Frame generation always writes MP4" } : undefined}
+            outputSize={plan.outputSize}
+            onChange={(encode) => update({ encode })}
           />
-          <FormControl sx={{ minWidth: 180 }} disabled={!frameGenOn}>
-            <InputLabel id={fpsLabelId}>Output frame rate</InputLabel>
-            <Select<FrameGenFps>
-              labelId={fpsLabelId}
-              label="Output frame rate"
-              value={targetFps}
-              onChange={(event) => setTargetFps(event.target.value as FrameGenFps)}
-            >
-              {FRAME_GEN_FPS_CHOICES.map((fps) => (
-                <MenuItem key={fps} value={fps}>
-                  {fps} fps
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <FormControl sx={{ minWidth: 300 }} disabled={!frameGenOn}>
-            <InputLabel id={pathLabelId}>Path</InputLabel>
-            <Select<FrameGenEngine>
-              labelId={pathLabelId}
-              label="Path"
-              value={fgEngine}
-              onChange={(event) => setFgEngine(event.target.value as FrameGenEngine)}
-            >
-              {FRAME_GEN_ENGINES.map((mode) => (
-                <MenuItem key={mode} value={mode}>
-                  {mode === "auto" ? "Auto (native when possible, else cascade)" : mode === "native" ? "Native DLSSG (exact integer ratios)" : "Cascade of 2× stages"}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          {frameGenOn && dllFeature !== null ? <VersionSelect feature={dllFeature} value={dllDir} onChange={setDllDir} /> : null}
-        </Stack>
-        <FormHelperText sx={{ mt: 1 }}>
-          DLSS Frame Generation to the chosen output rate; the result keeps the source duration, and its audio when the
-          audio switch below is on. Path Auto runs
-          one native DLSSG session when output ÷ source is an exact integer the runtime supports ({FRAME_GEN_NATIVE_MAXIMUM})
-          and, from 3× up, hardware-accelerated GPU scheduling (HAGS) is on; otherwise it chains 2× stages in memory (1
-          stage for 2×, 2 for 4×, else 3 on an 8× grid) and places the nearest frame on each output instant. When the
-          runtime generates nothing in a native multi-frame session, Auto falls back to the cascade by itself. Uses the
-          codec, quality and audio settings below and always writes MP4.
-        </FormHelperText>
-        {unused.gpu !== null ? <FormHelperText>{unused.gpu}</FormHelperText> : null}
-      </Section>
-
-      <Section title="Engine, motion and output size" action={<UnusedNote reason={unused.engine} />}>
-        <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
-          <EngineSelect value={engine} disabled={unused.engine !== null} onChange={changeEngine} />
-          <MotionSelect value={usesMotion ? motion : "none"} disabled={!usesMotion} onChange={setMotion} />
-          {!frameGenOn && dllFeature !== null ? <VersionSelect feature={dllFeature} value={dllDir} onChange={setDllDir} /> : null}
-          <ScaleSettingsEditor value={settings.scale} limits={outputSizeLimits(engine)} disabled={unused.outputSize !== null} onChange={setScale} />
         </Stack>
       </Section>
 
-      <Section title="Encoding">
-        <EncodeSettingsEditor
-          value={settings.encode}
-          fixedContainer={frameGenOn ? { container: FRAME_GEN_CONTAINER, reason: "Frame generation always writes MP4" } : undefined}
-          onChange={setEncode}
-        />
-      </Section>
-
-      <Section title="Neural rendering" action={<UnusedNote reason={unused.nrLook} />}>
-        <NrSettingsEditor value={settings.nr} disabled={unused.nrLook !== null} onChange={setNr} />
-      </Section>
+      <PlanLine stages={stages} output={output.trim() || plan.defaultOutputName} />
 
       <Box>
         <Button variant="contained" size="medium" startIcon={<PlayArrowIcon />} disabled={!canRun} onClick={run}>

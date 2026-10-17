@@ -1,13 +1,13 @@
 import { useEffect, useId, useState } from "react";
 import { FormControl, FormHelperText, InputLabel, MenuItem, Select } from "@mui/material";
 import type { RuntimeManifest } from "../../../src/ngx/runtime-catalog";
-import type { DllFeature } from "../../../src/server/settings-in-use";
+import type { StepKind } from "../../../src/server/api-types";
 import { api } from "../api";
 import { errorMessage } from "../errors";
 
 interface VersionSelectProps {
-  /** The feature of the DLL the job loads (dllFeatureOf), whose installed versions are offered. */
-  feature: DllFeature;
+  /** The step whose DLL's installed versions are offered: a step's key is its feature's key in the catalog. */
+  feature: StepKind;
   /** Selected DLL folder, or "" for the bundled default. */
   value: string;
   disabled?: boolean;
@@ -17,7 +17,7 @@ interface VersionSelectProps {
 /** Lets the user pick a specific installed DLSS DLL version (or the bundled default) for a feature. */
 export function VersionSelect({ feature, value, disabled, onChange }: VersionSelectProps) {
   // Per instance, not per feature: the image and video panels both render the
-  // version picker for the same feature, so a feature-keyed id appears twice.
+  // version picker for the same step, so a feature-keyed id appears twice.
   const labelId = useId();
   const [catalog, setCatalog] = useState<RuntimeManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
