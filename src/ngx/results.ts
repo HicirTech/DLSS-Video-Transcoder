@@ -3,7 +3,6 @@
  * nvsdk_ngx_defs.h in NVIDIA's DLSS SDK, and the values every NGX init here passes.
  */
 import { hex32 } from "../native/memory.ts";
-import { DLSS_SR_MAX_OUTPUT_SIDE, SR_FACTOR_MIN } from "../server/api-types.ts";
 
 export const NGX_SUCCESS = 0x1;
 
@@ -206,18 +205,4 @@ export function qualityForFactor(factor: number): number {
 /** The PerfQuality for an SR feature that renders `renderWidth` pixels wide and writes `outputWidth`: the sr command and the sr engine both take it. */
 export function qualityForSizes(renderWidth: number, outputWidth: number): number {
   return qualityForFactor(outputWidth / renderWidth);
-}
-
-/**
- * Why DLSS SR cannot write `output` from a `render`-sized source, or null when it can: it
- * only enlarges (SR_FACTOR_MIN), and writes no side longer than DLSS_SR_MAX_OUTPUT_SIDE.
- */
-export function srOutputProblem(render: { width: number; height: number }, output: { width: number; height: number }): string | null {
-  if (output.width < render.width || output.height < render.height) {
-    return `DLSS Super Resolution only enlarges: ${output.width}x${output.height} is smaller than the ${render.width}x${render.height} source. Use a factor of at least ${SR_FACTOR_MIN} (1 runs DLAA at the source size).`;
-  }
-  if (Math.max(output.width, output.height) > DLSS_SR_MAX_OUTPUT_SIDE) {
-    return `DLSS Super Resolution writes at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side; ${output.width}x${output.height} is larger. Use a smaller factor or output size.`;
-  }
-  return null;
 }

@@ -6,12 +6,13 @@ import { decodePng } from "../codec/png/decode.ts";
 import { encodePng } from "../codec/png/encode.ts";
 import type { RgbaImage } from "../codec/png/types.ts";
 import type { EngineKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
+import { resolveTargetSize } from "../server/output-size.ts";
 import { throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine } from "./engine.ts";
 import type { ProgressReporter } from "./frame-progress.ts";
 import { describeGpu, openGpu } from "./gpu.ts";
 import { defaultOutputPath } from "./output-path.ts";
-import { attachAlpha, evenSize, resizePlane, resizeRgba, splitAlpha } from "./resize.ts";
+import { attachAlpha, resizePlane, resizeRgba, splitAlpha } from "./resize.ts";
 
 export interface ImageJobOptions {
   input: string;
@@ -44,17 +45,6 @@ export interface ImageJobResult {
   engine: EngineKind;
   passes: number;
   ms: number;
-}
-
-export function resolveTargetSize(width: number, height: number, scale: ScaleSettings): { width: number; height: number } {
-  switch (scale.mode) {
-    case "factor":
-      return { width: evenSize(width * scale.factor), height: evenSize(height * scale.factor) };
-    case "size":
-      return { width: evenSize(scale.width), height: evenSize(scale.height) };
-    default:
-      return { width, height };
-  }
 }
 
 /**
