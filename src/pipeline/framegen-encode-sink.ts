@@ -49,8 +49,10 @@ export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): FramegenEncod
    * No -shortest: the writer emits exactly ceil(decodedDuration * rate) frames,
    * so the video already spans the DECODED length and the audio is kept whole.
    * video_track_timescale = the rate numerator makes one frame exactly `den`
-   * ticks, so the mp4 timeline is exact and ffprobe's base-rate guess comes back
-   * equal to the target rather than near it.
+   * ticks. With every frame that long, mp4 states the base rate as timescale /
+   * duration, so ffprobe reads back the target itself; the copy path re-stamps
+   * its packets (muxCopyArgs retime) because the raw demuxer's own timestamps
+   * are not that even.
    */
   const timescale = ["-video_track_timescale", String(targetRate.num)];
   return {
@@ -59,7 +61,7 @@ export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): FramegenEncod
     nvencArgs: nativeTarget
       ? muxCopyArgs({
           demux: nativeTarget.demux, frameRate: outputRate, audioSource: hasAudio ? input : null,
-          container: FRAME_GEN_CONTAINER, displayAspect, size: { width, height }, extra: timescale, output,
+          container: FRAME_GEN_CONTAINER, displayAspect, size: { width, height }, retime: targetRate, extra: timescale, output,
         })
       : [],
     rawArgs: [

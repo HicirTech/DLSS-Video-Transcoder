@@ -35,9 +35,10 @@ const AVERAGE_RATE_TOLERANCE = 1e-3;
  * the wrong timeline is worse than no file, because it looks like a success.
  *
  * Packet count and base rate are exact — the track timescale is pinned to the
- * target rate's numerator — so they are compared strictly. The average rate can
- * be a few ticks off (59.94 lands at 14520000/242237), so it only guards against
- * a grossly wrong timeline.
+ * target rate's numerator and every frame lasts its denominator in ticks, so mp4
+ * states the base rate as exactly the target (buildFrameGenEncodeArgs) — and
+ * are compared strictly. The average rate only guards against a grossly wrong
+ * timeline, within AVERAGE_RATE_TOLERANCE.
  */
 export function verifyOutputVideo(
   ffprobe: string,
