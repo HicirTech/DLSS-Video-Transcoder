@@ -4,7 +4,7 @@
  */
 import { DEFAULT_SR_PRESET, DLSS_RATIO, perfQualityName } from "../ngx/results.ts";
 import { cpuSiblingCodec, FFMPEG_NVENC_ENCODERS, isNvenc } from "../pipeline/encode-select.ts";
-import { AAC_KBPS, AUDIO_IN_CONTAINER, DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, DLSS_SR_MAX_OUTPUT_SIDE, ENCODE_CODECS, ENCODE_CONTAINERS, ENGINE_KINDS, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, MOTION_KINDS, type MotionKind, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, SETTING_RANGES, SR_FACTOR_MIN } from "../server/api-types.ts";
+import { AAC_KBPS, AUDIO_IN_CONTAINER, DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, DLSS_SR_MAX_OUTPUT_SIDE, ENCODE_CODECS, ENCODE_CONTAINERS, ENGINE_KINDS, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, MOTION_KINDS, type MotionKind, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, NVENC_MAX_SIDE, SETTING_RANGES, SR_FACTOR_MIN } from "../server/api-types.ts";
 
 interface OptionSpec {
   /** As typed on the command line, e.g. "--factor N" or "--json". */
@@ -42,7 +42,11 @@ export const FG_MULTIPLIER_OPTION = { ...SETTING_RANGES.multiplier, fallback: DE
 export const QUALITY_OPTION = { ...SETTING_RANGES.quality, fallback: DEFAULT_ENCODE_SETTINGS.quality } as const;
 
 /** The encode rows, printed with the defaults a job without encode settings gets. */
-const CODEC_OPT: OptionSpec = { flag: "--codec NAME", desc: `encoder: ${ENCODE_CODECS.filter((codec) => !isNvenc(codec)).join(", ")}, or ${FFMPEG_NVENC_ENCODERS.join("/")} for GPU`, def: `${DEFAULT_ENCODE_SETTINGS.codec}, or ${cpuSiblingCodec(DEFAULT_ENCODE_SETTINGS.codec)} when NVENC cannot start` };
+const CODEC_OPT: OptionSpec = {
+  flag: "--codec NAME",
+  desc: `encoder: ${ENCODE_CODECS.filter((codec) => !isNvenc(codec)).join(", ")}, or ${FFMPEG_NVENC_ENCODERS.join("/")} for GPU, which take at most ${FFMPEG_NVENC_ENCODERS.map((codec) => `${NVENC_MAX_SIDE[codec]} (${codec})`).join(", ")} pixels per side; a larger output encodes with the CPU codec of the same format`,
+  def: `${DEFAULT_ENCODE_SETTINGS.codec}, or ${cpuSiblingCodec(DEFAULT_ENCODE_SETTINGS.codec)} when NVENC cannot start or the output is larger`,
+};
 const QUALITY_OPT: OptionSpec = { flag: "--quality N", desc: `encoder quality (CRF for CPU, CQ for NVENC), ${settingRange("quality")} (lower = better)`, def: String(QUALITY_OPTION.fallback) };
 
 /** `video --motion` when absent: no optical flow. */

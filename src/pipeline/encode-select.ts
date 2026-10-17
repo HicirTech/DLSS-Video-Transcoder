@@ -6,6 +6,7 @@
  * nvenc.ts and is a different set.
  */
 import type { EncodeSettings } from "../server/api-types.ts";
+import { nvencLimitExceeded } from "../server/output-size.ts";
 
 export type Codec = EncodeSettings["codec"];
 
@@ -47,7 +48,8 @@ export function nvencGpuArgs(gpu: number): string[] {
  * ffmpeg args for a one-frame lavfi encode to `-f null`. The probe has to
  * actually encode: NVENC failures surface at session open, not from
  * `-encoders` listing the name. 256x256 only proves the encoder exists — the
- * per-codec size caps are checked separately in video.ts. Success == exit 0.
+ * per-codec size caps are NVENC_MAX_SIDE's, which resolveEncodeCodec checks
+ * first. Success == exit 0.
  */
 export function buildNvencProbeArgs(codec: FfmpegNvencEncoder, gpu: number): string[] {
   return ["-v", "error", "-f", "lavfi", "-i", "color=size=256x256:rate=1", "-frames:v", "1", "-c:v", codec, ...nvencGpuArgs(gpu), "-f", "null", "-"];
@@ -75,13 +77,22 @@ export interface ResolvedCodec {
 }
 
 /**
- * Resolve the codec to encode with: a CPU codec as-is, an NVENC codec only if a
- * probe run succeeds here and now. The probe costs one ffmpeg spawn per call,
- * so callers resolve once per job and pass the result down.
+ * Resolve the codec to encode `size` frames with: a CPU codec as-is, an NVENC
+ * codec only if `size` is within its NVENC_MAX_SIDE and a probe run succeeds
+ * here and now. Past that size NVENC refuses to open, which ffmpeg reports only
+ * as a broken pipe once the frames start, so the CPU sibling takes it from the
+ * start. The probe costs one ffmpeg spawn per call, so callers resolve once per
+ * job and pass the result down.
  */
-export function resolveEncodeCodec(codec: Codec, ffmpeg: string, gpu: number): ResolvedCodec {
+export function resolveEncodeCodec(codec: Codec, ffmpeg: string, gpu: number, size: { width: number; height: number }): ResolvedCodec {
   if (!isNvenc(codec)) return { codec, note: null };
-  if (probeNvencViaFfmpeg(ffmpeg, codec, gpu)) return { codec, note: null };
   const cpu = cpuSiblingCodec(codec);
+  const limit = nvencLimitExceeded(codec, size);
+  if (limit !== null) {
+    const onGpu = FFMPEG_NVENC_ENCODERS.filter((other) => nvencLimitExceeded(other, size) === null);
+    const instead = onGpu.length ? `; ${onGpu.join(" or ")} would keep it on the GPU` : "";
+    return { codec: cpu, note: `${codec} encodes at most ${limit} pixels per side and this output is ${size.width}x${size.height}: encoding with ${cpu} (CPU) instead, which is slower${instead}` };
+  }
+  if (probeNvencViaFfmpeg(ffmpeg, codec, gpu)) return { codec, note: null };
   return { codec: cpu, note: `${codec} is not available on this machine; encoding with ${cpu} (CPU) instead` };
 }

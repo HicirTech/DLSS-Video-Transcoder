@@ -8,7 +8,7 @@
 import { existsSync } from "node:fs";
 import type { EncodeSettings, EngineKind, JobRequest, MotionKind, NrSettings, ScaleSettings } from "../server/api-types.ts";
 import { DEFAULT_ENCODE_SETTINGS, ENGINE_USES_MOTION } from "../server/api-types.ts";
-import { evenSize, resolveTargetSize } from "../server/output-size.ts";
+import { evenSize, nvencLimitExceeded, resolveTargetSize } from "../server/output-size.ts";
 import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngine, type Engine } from "./engine.ts";
 import { resolveEncodeCodec } from "./encode-select.ts";
@@ -97,19 +97,15 @@ export interface VideoJobResult {
  * pipe plus swscale. Null means take the rawvideo path.
  *
  * The gates are NVENC's own limits: 4:2:0 needs even dimensions, and the
- * encoder caps the frame size per codec. The driver reports the caps as
- * NV_ENC_CAPS_WIDTH_MAX / HEIGHT_MAX (nvEncodeAPI.h), but probeNvencCaps asks
- * for the H.264 GUID only and no caller reads the sizes it returns, so the caps
- * are fixed here. HEVC 8192 x 8192 is the size NVIDIA's NVENC Application Note (Video
- * Codec SDK 13.0, section 2, HEVC capabilities) lists; the note states no H.264
- * maximum, so 4096 x 4096 is this program's assumption. av1_nvenc falls through
- * to null: nvenc.ts's CODEC_GUID only carries the H.264 and HEVC GUIDs, so there
- * is no in-process AV1 encoder.
+ * encoder caps the frame size per codec (NVENC_MAX_SIDE, measured). av1_nvenc
+ * falls through to null: nvenc.ts's CODEC_GUID only carries the H.264 and HEVC
+ * GUIDs, so there is no in-process AV1 encoder.
  */
 export function nvencNativeTarget(codec: EncodeSettings["codec"], width: number, height: number): { codec: NvencSdkCodec; demux: string } | null {
   if (width % 2 !== 0 || height % 2 !== 0) return null;
-  if (codec === "h264_nvenc") return width <= 4096 && height <= 4096 ? { codec: "h264", demux: "h264" } : null;
-  if (codec === "hevc_nvenc") return width <= 8192 && height <= 8192 ? { codec: "hevc", demux: "hevc" } : null;
+  if (nvencLimitExceeded(codec, { width, height }) !== null) return null;
+  if (codec === "h264_nvenc") return { codec: "h264", demux: "h264" };
+  if (codec === "hevc_nvenc") return { codec: "hevc", demux: "hevc" };
   return null;
 }
 
@@ -192,7 +188,7 @@ async function prepareVideoJob(options: VideoJobOptions): Promise<VideoJob> {
   // Resolve the codec on that device before choosing a path: an NVENC request
   // that cannot run there degrades to its CPU sibling, and every path below
   // branches on the result.
-  const resolvedCodec = resolveEncodeCodec(requestedEncode.codec, ffmpeg, cudaOrdinal);
+  const resolvedCodec = resolveEncodeCodec(requestedEncode.codec, ffmpeg, cudaOrdinal, target);
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
   const encode: EncodeSettings = { ...requestedEncode, codec: resolvedCodec.codec };
   return { options, progress, ffmpeg, info, target, output, outputExisted, upscaling, renderWidth, renderHeight, session, cudaOrdinal, encode, completed };
@@ -309,6 +305,13 @@ async function runThreadedNvenc(
   counts.sceneCuts = result.sceneCuts;
 }
 
+/**
+ * How long an encoder whose pipe broke gets to exit on its own before it is killed. A chosen margin: ffmpeg
+ * prints why it stopped and exits at once (one whose encoder would not open exited with code 8 just after the
+ * write failed), so this only bounds an encoder that closed its input and kept running.
+ */
+const ENCODER_QUIT_WAIT_MS = 5000;
+
 /** Raw RGBA frames out to ffmpeg, which does the encode; the fallback for everything the NVENC paths cannot take. */
 async function runRawvideo(
   { options, progress, ffmpeg, info, output, cudaOrdinal, encode }: VideoJob,
@@ -355,10 +358,15 @@ async function runRawvideo(
     encoder.stdin.end();
   } catch (error) {
     // Both children are ours: kill them and wait, so the encoder has released
-    // the output file by the time runEngineJob's catch deletes it.
+    // the output file by the time runEngineJob's catch deletes it. A frame
+    // written after the encoder has quit fails as a bare EPIPE, which says
+    // nothing of why; the encoder is then left to finish quitting, and its own
+    // exit code and message are what the job reports.
     try { decoder.kill(); } catch {}
-    try { encoder.kill(); } catch {}
+    const encoderQuit = (error as { code?: unknown }).code === "EPIPE" ? await Promise.race([encoder.exited, Bun.sleep(ENCODER_QUIT_WAIT_MS).then(() => null)]) : null;
+    if (encoderQuit === null) try { encoder.kill(); } catch {}
     await Promise.allSettled([decoder.exited, encoder.exited]);
+    if (encoderQuit !== null && encoderQuit !== 0) throw new Error(ffmpegFailedMessage("encode", encoderQuit, await new Response(encoder.stderr).text()));
     throw error;
   }
   const [decodeExit, encodeExit] = await Promise.all([decoder.exited, encoder.exited]);

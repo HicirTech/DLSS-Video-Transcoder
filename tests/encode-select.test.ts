@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { buildNvencProbeArgs, cpuSiblingCodec, isNvenc, nvencGpuArgs, resolveEncodeCodec } from "../src/pipeline/encode-select.ts";
+import { buildNvencProbeArgs, cpuSiblingCodec, FFMPEG_NVENC_ENCODERS, isNvenc, nvencGpuArgs, resolveEncodeCodec } from "../src/pipeline/encode-select.ts";
+import { NVENC_MAX_SIDE } from "../src/server/api-types.ts";
+import { nvencLimitExceeded } from "../src/server/output-size.ts";
+
+const HD = { width: 1920, height: 1080 };
 import { encoderArgs } from "../src/pipeline/ffmpeg-args.ts";
 import { NVENC_PRESET } from "../src/pipeline/nvenc.ts";
 
@@ -72,14 +76,36 @@ describe("encode-select", () => {
 
   test("resolveEncodeCodec passes CPU codecs through without probing", () => {
     // A CPU codec returns as-is and never spawns ffmpeg, so a bogus path is fine.
-    expect(resolveEncodeCodec("h264", "C:/nonexistent/ffmpeg.exe", 0)).toEqual({ codec: "h264", note: null });
-    expect(resolveEncodeCodec("av1", "C:/nonexistent/ffmpeg.exe", 0)).toEqual({ codec: "av1", note: null });
+    expect(resolveEncodeCodec("h264", "C:/nonexistent/ffmpeg.exe", 0, HD)).toEqual({ codec: "h264", note: null });
+    expect(resolveEncodeCodec("av1", "C:/nonexistent/ffmpeg.exe", 0, { width: 16384, height: 8192 })).toEqual({ codec: "av1", note: null });
   });
 
   test("resolveEncodeCodec falls back to the CPU sibling when the NVENC probe cannot run", () => {
     // A bogus ffmpeg path makes the probe throw/fail, exercising the fallback branch.
-    const resolved = resolveEncodeCodec("hevc_nvenc", "C:/nonexistent/ffmpeg.exe", 0);
+    const resolved = resolveEncodeCodec("hevc_nvenc", "C:/nonexistent/ffmpeg.exe", 0, HD);
     expect(resolved.codec).toBe("hevc");
     expect(resolved.note).toContain("hevc_nvenc");
+  });
+
+  // NVENC will not open past these sizes; ffmpeg would only say "broken pipe" once the frames start.
+  test("past an NVENC encoder's longest side, resolveEncodeCodec takes the CPU sibling and names the GPU encoders that fit", () => {
+    // Decided before any probe: the bogus ffmpeg path is never run.
+    expect(resolveEncodeCodec("h264_nvenc", "C:/nonexistent/ffmpeg.exe", 0, { width: 7680, height: 4320 })).toEqual({
+      codec: "h264",
+      note: `h264_nvenc encodes at most ${NVENC_MAX_SIDE.h264_nvenc} pixels per side and this output is 7680x4320: encoding with h264 (CPU) instead, which is slower; hevc_nvenc or av1_nvenc would keep it on the GPU`,
+    });
+    expect(resolveEncodeCodec("hevc_nvenc", "C:/nonexistent/ffmpeg.exe", 0, { width: 2160, height: 16384 }).note).toBe(
+      `hevc_nvenc encodes at most ${NVENC_MAX_SIDE.hevc_nvenc} pixels per side and this output is 2160x16384: encoding with hevc (CPU) instead, which is slower`,
+    );
+  });
+
+  test("an NVENC encoder's limit is its longest side, and a CPU codec has none", () => {
+    for (const codec of FFMPEG_NVENC_ENCODERS) {
+      const side = NVENC_MAX_SIDE[codec]!;
+      expect(nvencLimitExceeded(codec, { width: side, height: side }), codec).toBeNull();
+      expect(nvencLimitExceeded(codec, { width: side + 2, height: 2 }), codec).toBe(side);
+      expect(nvencLimitExceeded(codec, { width: 2, height: side + 2 }), codec).toBe(side);
+    }
+    expect(nvencLimitExceeded("h264", { width: 16384, height: 16384 })).toBeNull();
   });
 });

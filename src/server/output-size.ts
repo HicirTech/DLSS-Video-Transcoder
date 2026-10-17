@@ -1,9 +1,9 @@
 /**
  * The output size a job writes: its scale setting applied to the source and rounded to even, and the limits
- * DLSS Super Resolution puts on it. It imports no Node module, so the web can bundle the
+ * DLSS Super Resolution and the NVENC encoders put on it. It imports no Node module, so the web can bundle the
  * same rule the pipeline and the NGX layer apply.
  */
-import { DLSS_SR_MAX_OUTPUT_SIDE, SR_FACTOR_MIN, type ScaleSettings } from "./api-types.ts";
+import { DLSS_SR_MAX_OUTPUT_SIDE, type EncodeSettings, NVENC_MAX_SIDE, SR_FACTOR_MIN, type ScaleSettings } from "./api-types.ts";
 
 /** Nearest even value, at least 2: 4:2:0 chroma subsampling cannot encode an odd dimension. */
 export function evenSize(value: number): number {
@@ -34,4 +34,13 @@ export function srOutputProblem(render: { width: number; height: number }, outpu
     return `DLSS Super Resolution writes at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side; ${output.width}x${output.height} is larger. Use a smaller factor or output size.`;
   }
   return null;
+}
+
+/**
+ * The longest side `codec`'s NVENC encoder takes (NVENC_MAX_SIDE) when `size` is larger than that, else null: such
+ * an output encodes with the codec's CPU sibling instead. A CPU codec has no such limit.
+ */
+export function nvencLimitExceeded(codec: EncodeSettings["codec"], size: { width: number; height: number }): number | null {
+  const limit = NVENC_MAX_SIDE[codec];
+  return limit !== undefined && Math.max(size.width, size.height) > limit ? limit : null;
 }
