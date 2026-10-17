@@ -111,6 +111,14 @@ export interface EncodeSettings {
 export const DEFAULT_ENCODE_SETTINGS: EncodeSettings = { codec: "h264_nvenc", quality: 20, container: "mp4", copyAudio: true };
 
 /**
+ * The longest side, in pixels, each NVENC encoder takes; a larger output encodes with the codec's CPU sibling
+ * instead (resolveEncodeCodec). Measured on an RTX 5090, NVENC API 13.1: NVENC reports NV_ENC_CAPS_WIDTH_MAX and
+ * HEIGHT_MAX of 4096 for H.264, and ffmpeg encodes 4096x4096 with h264_nvenc but not 4098x2160, and 8192x8192
+ * with hevc_nvenc and av1_nvenc but not 8208x4320.
+ */
+export const NVENC_MAX_SIDE: Readonly<Partial<Record<EncodeCodec, number>>> = { h264_nvenc: 4096, hevc_nvenc: 8192, av1_nvenc: 8192 };
+
+/**
  * What a video job does with the source's audio track in each container: mkv takes the track as it is, mp4
  * and mov get it re-encoded to AAC at AAC_KBPS. audioArgs (ffmpeg-args.ts) builds the ffmpeg side of it.
  */

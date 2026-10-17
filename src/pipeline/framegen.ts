@@ -72,7 +72,7 @@ export interface FrameGenOptions {
   dllDir?: string;
   /** Default DEFAULT_ENCODE_SETTINGS.quality. */
   quality?: number;
-  /** Output codec; default DEFAULT_ENCODE_SETTINGS.codec, which falls back to its CPU sibling when NVENC cannot start. */
+  /** Output codec; default DEFAULT_ENCODE_SETTINGS.codec, which falls back to its CPU sibling when NVENC cannot start or the output is past NVENC_MAX_SIDE. */
   codec?: EncodeSettings["codec"];
   /** Keep the source's audio track, when it has one; default DEFAULT_ENCODE_SETTINGS.copyAudio. */
   copyAudio?: boolean;
@@ -297,7 +297,7 @@ async function openEncodePipeline({ options, progress, ffmpeg, info, width, heig
   // otherwise ffmpeg needlessly demuxes/decodes the whole source again.
   const wantAudio = info.hasAudio && (options.copyAudio ?? DEFAULT_ENCODE_SETTINGS.copyAudio);
   // Probed on the device the encode will use, FRAMEGEN_CUDA_DEVICE (framegen-plan.ts says why).
-  const resolvedCodec = resolveEncodeCodec(options.codec ?? DEFAULT_ENCODE_SETTINGS.codec, ffmpeg, FRAMEGEN_CUDA_DEVICE);
+  const resolvedCodec = resolveEncodeCodec(options.codec ?? DEFAULT_ENCODE_SETTINGS.codec, ffmpeg, FRAMEGEN_CUDA_DEVICE, { width, height });
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
 
   let sink: EncodeSink;
