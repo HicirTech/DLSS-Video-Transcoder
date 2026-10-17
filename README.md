@@ -17,8 +17,8 @@ runtimes are version-switchable (DLSS-Swapper style).
 
 > **Status.** Runs on the project's RTX 5090. The **web UI** covers the whole pipeline — SR
 > upscaling, Neural Rendering, Frame Generation, DLSS version selection and browser upload. The
-> **command line** covers the probe, SR and NR on PNG images and on video, Frame Generation on video
-> and the version list. See [Feature status](#feature-status) below.
+> **command line** covers the probe, SR and NR on PNG images, any of SR, NR and Frame Generation on a
+> video in one pass, and the version list. See [Feature status](#feature-status) below.
 
 ---
 
@@ -57,7 +57,7 @@ command alike; the server stores uploads in its `uploads/` subfolder.
 | `probe` | Inspect GPU / driver / NGX core / `runtime/`; exits 0 only when neural rendering is ready. It does not test frame generation. |
 | `sr <in.png> [out.png]` | **DLSS Super Resolution (feature 1)** — real PNG upscaling. |
 | `nr <in.png> [out.png]` | **DLSS Neural Rendering (feature 18)** — enhance a PNG at the same size. |
-| `video <in> [out] --engine sr\|nr\|bypass` | **SR, NR or a plain copy on every frame of a video**, then encode — the web UI's video job. |
+| `video <in> [out] [--sr] [--nr] [--fg]` | **Any of SR, NR and Frame Generation on a video in one pass**, in that order, then encode — the web UI's video job. |
 | `fg <in.mp4> [out.mp4]` | **DLSS Frame Generation (feature 11)** — interpolate to higher frame rate. |
 | `versions` | List every installed DLSS runtime DLL per feature. |
 | `forwarder` | (Re)generate the `nvngx.dll` shim NGX requires. |
@@ -73,19 +73,27 @@ command alike; the server stores uploads in its `uploads/` subfolder.
 - **`nr`** — `--intensity F` (1, 0–2; no further effect above 1), `--style N` (0; Default / Natural / Cinematic),
   `--local-tone F` (1, 0–2), `--local-structure F` (1, 0–2), `--auto-mask`, `--warmup N` (4, 0–64; as for
   `sr`). `--preset`, `--skin-structure` and `--ui-correction` are accepted but ignored by `nvngx_dlssnr.dll` 310.8.2.0.
-- **`video`** — `--engine sr|nr|bypass` (required), `--factor N` (0.25–8; `sr` takes 1–8 and writes at most
-  8192 pixels per side) or `--size WxH` (default: the source size), `--motion none|flow` (none; flow gives
-  `sr` motion vectors), `--codec NAME` and `--quality N` (as for `fg`), `--container mp4|mkv|mov` (mp4),
-  `--no-audio`, the `nr` look options (`--engine nr` only), `--dlss-version VER` (a version of the engine's
-  own feature; not with bypass); writes `<input>.<engine>.<container>` by default. The command line goes
-  through the same request validation as `POST /api/jobs`.
+- **`video`** — one switch per step, run in this order whatever order they are given in: `--sr` upscales
+  every frame with DLSS Super Resolution, `--nr` enhances every frame at the output size with DLSS Neural
+  Rendering, `--fg` interpolates the result with DLSS Frame Generation. With none, the video is only
+  re-encoded. `--factor N` or `--size WxH` set the output size: with `--sr`, Super Resolution upscales to
+  it (1–8, at most 8192 pixels per side; 1.5 by default); without it, the decode resizes to it with lanczos
+  (0.25–8; default: the source size). Each step's options apply only with its switch, and the command
+  refuses them otherwise: `--motion none|flow` (none; flow gives Super Resolution motion vectors) and
+  `--sr-version VER` with `--sr`; the `nr` look options and `--nr-version VER` with `--nr`; `--fps`,
+  `--multiplier`, `--fg-path auto|native|cascade` (`fg`'s `--engine`) and `--fg-version VER` with `--fg`.
+  `--codec NAME` and `--quality N` (as for `fg`), `--container mp4|mkv|mov` (mp4; `--fg` writes mp4
+  only), `--no-audio`. Writes `<input>.<steps>.<container>` by default, e.g. `clip.sr-nr-fg.mp4`, or
+  `clip.resize.mp4` and `clip.copy.mp4` without a step. The command line goes through the same request
+  validation as `POST /api/jobs`.
 - **`fg`** — `--fps RATE` (a named rate from 23.976 to 480, or an exact `num/den`; default: source fps
   × `--multiplier`), `--multiplier N` (2, whole number 1–16; used when `--fps` is absent),
   `--engine auto|native|cascade` (auto, see below), `--codec NAME` (NVENC when available, else
   libx264), `--quality N` (0–51, lower = better, 20), `--dlss-version VER` (an installed Frame Generation
-  version; `310.7.129.0`, `310.7.0.0` and `310.6.0.0` were measured to load and run 2× on an RTX 5090)
+  version; `310.7.129.0`, `310.7.0.0` and `310.6.0.0` were measured to load and run 2× on an RTX 5090);
+  writes `<input>.fg.mp4` by default, the name `video --fg` gives it
 
-Frame generation (`fg` and the Path selector in the web UI): `auto` runs one native DLSS session when
+Frame generation (`fg`, `video --fg` and the Path selector in the web UI): `auto` runs one native DLSS session when
 output ÷ source is an exact integer from 2× up to the runtime's MultiFrameCountMax + 1 (measured: 6×
 with `nvngx_dlssg.dll` 310.7.129 on an RTX 5090) and, from 3× up, Windows hardware-accelerated GPU
 scheduling (HAGS) is on (Settings > System > Display > Graphics > Default graphics settings, then
@@ -95,12 +103,12 @@ way. `native` and `cascade` force a path, and `native` fails, writing no output,
 exact integer in range. A target at or below the source rate generates nothing: the video is only
 resampled. The output keeps the source duration and its first audio track (re-encoded to AAC, 192 kb/s).
 
-**Shared options.** `--adapter N` (GPU index from `probe`) applies to `probe`, `sr`, `nr` and `video`;
-`--runtime DIR` to `probe`, `sr`, `nr`, `video`, `fg` and `versions`. Every command except `help` rejects
-unknown flags; per-command `--help` lists all options with defaults. Frame generation has no GPU
-choice, in the CLI or the web UI: it takes the NVIDIA GPU with CUDA and the most VRAM, and its NVENC
-and NVOFA helpers use CUDA device 0, which on a machine with more than one NVIDIA GPU can be another
-device.
+**Shared options.** `--adapter N` (GPU index from `probe`) applies to `probe`, `sr`, `nr` and `video`, where
+it picks the GPU for Super Resolution and Neural Rendering; `--runtime DIR` to `probe`, `sr`, `nr`, `video`,
+`fg` and `versions`. Every command except `help` rejects unknown flags; per-command `--help` lists all
+options with defaults. Frame generation has no GPU choice, in the CLI or the web UI: it takes the NVIDIA
+GPU with CUDA and the most VRAM, and its NVENC and NVOFA helpers use CUDA device 0, which on a machine
+with more than one NVIDIA GPU can be another device; `video --fg` alone therefore refuses `--adapter`.
 
 **Exit status.** 0 when the command succeeds; 1 when the run fails (`probe`: neural rendering is not
 ready); 2 when the command line is wrong — an unknown command or option, a value an option does not
@@ -112,19 +120,24 @@ input.
 ## Web UI
 
 At **http://localhost:4080/** — no separate build step (Bun serves `web/index.html`).
-For front-end-only work: `bun run web/mock-server.ts` on port 3080, or append `?mock=1`. A setting the
-chosen job does not use is greyed out, with the reason in its section heading.
+For front-end-only work: `bun run web/mock-server.ts` on port 3080, or append `?mock=1`. Each step is a
+card with its own switch, numbered in the order the steps run, and shows its settings while it is on. Once
+the input is chosen, the form reads the source's size, rates, length, codec and audio, shows what each step
+makes of them, and sums the job up in a plan line above Run, with the name of the file it writes. A setting
+the job does not use, such as the resize beside Super Resolution, is greyed out with the reason.
 
-**Image tab** — PNG input only; SR upscale / Neural Rendering / bypass engine, DLSS version, output size
-(SR only enlarges, to at most 8192 pixels per side), NR look controls, before/after compare.  
-**Video tab** — the same engines on video with output size, optical-flow motion for Super Resolution,
-and NVENC encoding (H.264, CQ 20 by default; the CPU encoder when NVENC cannot start) or CPU encoding;
-or Frame Generation to 23.976–480 fps (auto / native / cascade) with its own DLSS version picker, which
-uses the codec, quality and audio settings, always writes an mp4 and does not use the engine, motion, size
-and neural-rendering settings.  
-**Jobs tab** — live job list with progress, log tail and cancel.  
-**Settings tab** — GPU for image and video jobs (stored by CUDA device UUID; frame generation ignores
-it), temporal warm-up (0–64 frames, default 4), stored settings reset.  
+**Image tab** — PNG input only; Super Resolution (only enlarges, to at most 8192 pixels per side; the
+source size runs DLAA) and Neural Rendering (look controls), each with its own DLSS version; a resize
+when Super Resolution is off; before/after compare.  
+**Video tab** — the same two steps, plus optical-flow motion for Super Resolution, then Frame
+Generation to 23.976–480 fps or a multiple of the source rate (auto / native / cascade) with its own DLSS
+version; a lanczos resize when Super Resolution is off, and NVENC encoding (H.264, CQ 20 by default) or CPU
+encoding. NVENC takes at most 4096 pixels per side for H.264 and 8192 for HEVC and AV1 (measured on an RTX
+5090); a larger output, or a GPU where NVENC cannot start, encodes the same format on the CPU instead, and the
+form says so before the job runs. With Frame Generation on, the output is always mp4.  
+**Jobs tab** — live job list with progress, the steps each job runs, log tail and cancel.  
+**Settings tab** — GPU for Super Resolution and Neural Rendering (stored by CUDA device UUID; frame
+generation ignores it), image warm-up passes (0–64, default 4), stored settings reset.  
 **Probe tab** — hardware/runtime check (adapters, CUDA device, optical-flow limits, DLLs, shim).
 
 ### Caveats
@@ -145,13 +158,20 @@ All JSON, same-origin base:
 | `GET /api/runtime` | Runtime report: the DLLs in the runtime folder, read without a probe |
 | `GET /api/tools` | ffmpeg / ffprobe / NVENC availability |
 | `GET /api/catalog` | DLL version catalog |
-| `GET /api/settings/defaults` | defaults |
+| `GET /api/media?path=<abs>` | what a job would read from the file: a PNG's size, or a video's size, nominal and average rate, length, frame count, codec and audio |
+| `GET /api/settings/defaults` | each step's defaults, and the resize, encode and warm-up defaults |
 | `GET /api/jobs` | list jobs |
 | `POST /api/jobs` | submit a job |
 | `GET /api/jobs/:id` · `POST /api/jobs/:id/cancel` | status / cancel |
 | `GET /api/file?path=<abs>` | raw bytes (previews; absolute path only) |
 | `POST /api/upload?name=<file name>` | the file's bytes as the request body, streamed to disk, any size → `{ path, name, size }` |
 | `WS /ws` | server→client `WsEvent` stream (`hello` / `job` / `log`) |
+
+A job request carries one object per step it runs — `superResolution`, `neuralRendering` and `frameGen`
+(video only), each with its settings and an optional DLL version folder — plus `resize` (only without
+Super Resolution), `encode` (video), `warmupFrames` (image) and `adapterUuid`. The steps run in that
+order; a request without one re-encodes the source. The fields of the one-engine API (`engine`, `motion`,
+`scale`, `settings`, `dllDir`) are refused by name.
 
 A job's `state` is `queued`, `running`, `done`, `failed` or `cancelled`. Cancelling a queued job ends it
 at once. A running job is asked to stop: it stays `running` with `cancelRequest: "pending"` until it has
@@ -182,10 +202,11 @@ The driver's NGX core `_nvngx.dll` is loaded from the installed driver, never co
 
 | Capability | CLI | Web UI |
 | --- | --- | --- |
-| DLSS SR upscaling (feature 1) | ✅ `sr` (PNG), `video --engine sr` | ✅ (`sr`) |
-| DLSS Neural Rendering (feature 18) | ✅ `nr` (PNG), `video --engine nr` | ✅ (`nr`, image & video) |
-| DLSS Frame Generation (feature 11) | ✅ `fg` | ✅ (video tab) |
-| DLSS version enumeration / selection | ✅ `versions` + `--dlss-version` | ✅ (picker) |
+| DLSS SR upscaling (feature 1) | ✅ `sr` (PNG), `video --sr` | ✅ (image & video) |
+| DLSS Neural Rendering (feature 18) | ✅ `nr` (PNG), `video --nr` | ✅ (image & video) |
+| DLSS Frame Generation (feature 11) | ✅ `fg`, `video --fg` | ✅ (video tab) |
+| SR, NR and Frame Generation in one job | ✅ `video --sr --nr --fg` | ✅ (image: SR + NR; video: all three) |
+| DLSS version enumeration / selection | ✅ `versions` + `--dlss-version`, `video --<step>-version` | ✅ (a picker per step) |
 | Browser file upload | — | ✅ (POST /api/upload) |
 | NR look controls | ✅ (`nr`, `video`) | ✅ |
 | NVENC GPU encode | ✅ (`fg` and `video` default when available) | ✅ (default when available) |
