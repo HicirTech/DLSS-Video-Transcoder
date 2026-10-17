@@ -3,20 +3,20 @@
  * dependency, so the Bun mock server (web/mock-server.ts) and the browser (`?mock=1`) share it.
  */
 import type { JobRequest, JobStatus, WsEvent } from "../../../src/server/api-types";
-import { CANCELLED_MESSAGE, JOB_LOG_LIMIT } from "../../../src/server/api-types";
+import { CANCELLED_MESSAGE, DEFAULT_ENCODE_SETTINGS, JOB_LOG_LIMIT, jobSteps, stepsSuffix } from "../../../src/server/api-types";
 
 export function timestamp(): string {
   return new Date().toISOString();
 }
 
+/** Where the server writes a job that names no output: next to the input, named after its steps. */
 function outputPathFor(request: JobRequest): string {
   const dot = request.input.lastIndexOf(".");
   const slash = Math.max(request.input.lastIndexOf("\\"), request.input.lastIndexOf("/"));
-  const hasExtension = dot > slash;
-  const stem = hasExtension ? request.input.slice(0, dot) : request.input;
-  const extension =
-    request.kind === "video" ? `.${request.encode?.container ?? "mp4"}` : hasExtension ? request.input.slice(dot) : ".png";
-  return `${stem}-nr${extension}`;
+  const stem = dot > slash ? request.input.slice(0, dot) : request.input;
+  const extension = request.kind === "video" ? `.${request.encode?.container ?? DEFAULT_ENCODE_SETTINGS.container}` : ".png";
+  const resized = request.superResolution === undefined && request.resize !== undefined && request.resize.mode !== "none";
+  return `${stem}.${stepsSuffix(jobSteps(request), resized)}${extension}`;
 }
 
 function cloneJob(job: JobStatus): JobStatus {
@@ -60,7 +60,7 @@ export class MockJobEngine {
       kind: request.kind,
       input: request.input,
       output: request.output && request.output.trim() !== "" ? request.output : outputPathFor(request),
-      engine: request.engine,
+      steps: jobSteps(request),
       state: "queued",
       cancelRequest: "none",
       progress: 0,
@@ -72,9 +72,7 @@ export class MockJobEngine {
       startedAt: null,
       finishedAt: null,
       error: null,
-      log: [
-        `[queue] ${request.kind} job accepted (engine=${request.engine}, motion=${request.motion}, scale=${request.scale.mode})`,
-      ],
+      log: [`[queue] ${request.kind} job accepted (steps: ${jobSteps(request).join(", ") || "none"})`],
     };
     this.jobs.set(id, job);
     this.emitJob(job);

@@ -2,7 +2,7 @@
 import type { ApiClient, JobEventSource } from "../api";
 import { ApiError } from "../errors";
 import { validateJobRequest } from "../../../src/server/validate";
-import { MOCK_PROBE, MOCK_TOOLS, mockCatalog, mockSettingsDefaults, mockUpload } from "./fixtures";
+import { MOCK_PROBE, MOCK_TOOLS, mockCatalog, mockMediaInfo, mockSettingsDefaults, mockUpload } from "./fixtures";
 import { MockJobEngine, timestamp } from "./job-engine";
 import { mockPreviewSvg } from "./preview-svg";
 import { createSeedJobs } from "./seed-jobs";
@@ -43,6 +43,10 @@ export function createMockBackend(): { client: ApiClient; events: JobEventSource
     uploadFile: async (file) => {
       await delay(150);
       return mockUpload(file);
+    },
+    media: async (path) => {
+      await delay(150);
+      return mockMediaInfo(path);
     },
     fileUrl: (path) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(mockPreviewSvg(path))}`,
   };

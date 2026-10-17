@@ -54,7 +54,7 @@ export interface VersionEntry {
 }
 
 export interface FeatureManifest {
-  /** FeatureDescriptor.key: how the web finds the versions of the DLL a job loads (settings-in-use.ts dllFeatureOf). */
+  /** FeatureDescriptor.key: how the web finds the versions of a step's DLL, since a step's key (StepKind) is its feature's. */
   key: FeatureKey;
   id: number;
   name: string;

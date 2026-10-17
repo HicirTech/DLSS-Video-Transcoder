@@ -15,8 +15,6 @@ import { SliderRow } from "./SliderRow";
 
 interface NrSettingsEditorProps {
   value: NrSettings;
-  /** The job ignores the look settings (unusedSettings); its section says why. */
-  disabled?: boolean;
   onChange: (next: NrSettings) => void;
 }
 
@@ -47,13 +45,13 @@ function formatSkin(value: number): string {
 
 /**
  * Look controls for DLSS neural rendering (feature 18): style, model preset and the strength
- * sliders. `warmupFrames` is edited in the Settings tab. A control the installed runtime
+ * sliders. An image job's warm-up passes are set in the Settings tab. A control the installed runtime
  * ignores (nrSettingIgnored, measured) is shown disabled rather than hidden, and the caption
  * that says so is built from the same list, so re-enabling it after a runtime update is a
  * change to NR_SETTINGS_IGNORED_BY_RUNTIME alone; UI correction has no counterpart in the
  * reference tool and is not offered here at all.
  */
-export function NrSettingsEditor({ value, disabled, onChange }: NrSettingsEditorProps) {
+export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
   const styleLabelId = useId();
   const presetLabelId = useId();
   const update = (patch: Partial<NrSettings>): void => onChange({ ...value, ...patch });
@@ -63,7 +61,7 @@ export function NrSettingsEditor({ value, disabled, onChange }: NrSettingsEditor
       <Stack spacing={2}>
         <Box>
           <Stack direction="row" spacing={2}>
-            <FormControl fullWidth disabled={disabled}>
+            <FormControl fullWidth>
               <InputLabel id={styleLabelId}>Style</InputLabel>
               <Select<NrSettings["style"]>
                 labelId={styleLabelId}
@@ -78,7 +76,7 @@ export function NrSettingsEditor({ value, disabled, onChange }: NrSettingsEditor
                 ))}
               </Select>
             </FormControl>
-            <FormControl fullWidth disabled={disabled || nrSettingIgnored("preset")}>
+            <FormControl fullWidth disabled={nrSettingIgnored("preset")}>
               <InputLabel id={presetLabelId}>Model preset</InputLabel>
               <Select<NrSettings["preset"]>
                 labelId={presetLabelId}
@@ -102,7 +100,7 @@ export function NrSettingsEditor({ value, disabled, onChange }: NrSettingsEditor
 
         <Box>
           <FormControlLabel
-            control={<Switch checked={value.autoMask} disabled={disabled} onChange={(_event, checked) => update({ autoMask: checked })} />}
+            control={<Switch checked={value.autoMask} onChange={(_event, checked) => update({ autoMask: checked })} />}
             label="Auto mask"
           />
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", ml: 4.5, mt: -0.5 }}>
@@ -118,7 +116,6 @@ export function NrSettingsEditor({ value, disabled, onChange }: NrSettingsEditor
           min={SETTING_RANGES.intensity.min}
           max={NR_INTENSITY_EFFECTIVE_MAX}
           marks={INTENSITY_MARKS}
-          disabled={disabled}
           hint={`Overall neural-rendering strength. 0 = original, ${DEFAULT_NR_SETTINGS.intensity} = default; the slider ends at ${NR_INTENSITY_EFFECTIVE_MAX}, the most the installed runtime responds to, while the API still accepts up to ${SETTING_RANGES.intensity.max}.`}
           onChange={(intensity) => update({ intensity })}
         />
@@ -128,7 +125,6 @@ export function NrSettingsEditor({ value, disabled, onChange }: NrSettingsEditor
           min={SETTING_RANGES.localTone.min}
           max={SETTING_RANGES.localTone.max}
           marks={TONE_MARKS}
-          disabled={disabled}
           hint="Contrast within small regions. 1 = neutral."
           onChange={(localTone) => update({ localTone })}
         />
@@ -138,7 +134,6 @@ export function NrSettingsEditor({ value, disabled, onChange }: NrSettingsEditor
           min={SETTING_RANGES.localStructure.min}
           max={SETTING_RANGES.localStructure.max}
           marks={STRUCTURE_MARKS}
-          disabled={disabled}
           hint="Fine detail / micro-structure. 1 = neutral."
           onChange={(localStructure) => update({ localStructure })}
         />
@@ -149,7 +144,7 @@ export function NrSettingsEditor({ value, disabled, onChange }: NrSettingsEditor
           max={SETTING_RANGES.skinStructure.max}
           marks={SKIN_MARKS}
           format={formatSkin}
-          disabled={disabled || nrSettingIgnored("skinStructure")}
+          disabled={nrSettingIgnored("skinStructure")}
           hint={`Detail strength on skin regions only. Leftmost = runtime default; 1 = neutral.${nrSettingIgnored("skinStructure") ? " Disabled: see the note above." : ""}`}
           onChange={(skinStructure) => update({ skinStructure: skinStructure < 0 ? SETTING_RANGES.skinStructure.min : skinStructure })}
         />

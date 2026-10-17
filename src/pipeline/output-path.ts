@@ -1,6 +1,6 @@
 /**
  * Where a job writes when its request names no output: next to the input, with
- * the engine (or tool) named between the stem and the extension.
+ * the steps (or tool) named between the stem and the extension.
  */
 import { basename, dirname, extname, join } from "node:path";
 

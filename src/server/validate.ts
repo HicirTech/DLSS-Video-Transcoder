@@ -9,9 +9,9 @@
 import { DEVICE_UUID_GROUP_LENGTHS, DEVICE_UUID_PATTERN } from "../native/device-uuid.ts";
 import { resolveTargetRate } from "../pipeline/framegen-plan.ts";
 import {
+  DLSS_SR_MAX_OUTPUT_SIDE,
   ENCODE_CODECS,
   ENCODE_CONTAINERS,
-  ENGINE_KINDS,
   FRAME_GEN_CONTAINER,
   FRAME_GEN_ENGINES,
   FRAME_GEN_GPU_CHOICE,
@@ -23,7 +23,9 @@ import {
   SETTING_RANGES,
   SR_FACTOR_MIN,
   type JobRequest,
+  type ScaleSettings,
 } from "./api-types.ts";
+import { takesGpuChoice } from "./settings-in-use.ts";
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -50,67 +52,86 @@ function first(...checks: Array<string | null>): string | null {
   return checks.find((c) => c !== null) ?? null;
 }
 
-function checkNrSettings(v: Record<string, unknown>): string | null {
+/** A step's version folder has to be a string; main.ts checks it against the catalog. */
+function checkDllDirType(step: Record<string, unknown>, path: string): string | null {
+  return step.dllDir === undefined || typeof step.dllDir === "string" ? null : `${path}.dllDir must be a string when present.`;
+}
+
+function checkScale(value: unknown, path: string): string | null {
+  if (!isObject(value)) return `${path} must be an object.`;
   return first(
-    checkEnum(v.preset, NR_PRESETS, "settings.preset"),
-    checkEnum(v.style, NR_STYLES, "settings.style"),
-    checkNumber(v.intensity, "intensity", "settings.intensity"),
-    checkNumber(v.localTone, "localTone", "settings.localTone"),
-    checkNumber(v.localStructure, "localStructure", "settings.localStructure"),
-    checkNumber(v.skinStructure, "skinStructure", "settings.skinStructure"),
-    checkNumber(v.warmupFrames, "warmupFrames", "settings.warmupFrames"),
-    checkBoolean(v.autoMask, "settings.autoMask"),
-    checkBoolean(v.uiCorrection, "settings.uiCorrection"),
+    checkEnum(value.mode, SCALE_MODES, `${path}.mode`),
+    checkNumber(value.factor, "factor", `${path}.factor`),
+    checkNumber(value.width, "width", `${path}.width`),
+    checkNumber(value.height, "height", `${path}.height`),
   );
 }
 
-function checkScale(v: Record<string, unknown>): string | null {
+function checkNrSettings(value: unknown, path: string): string | null {
+  if (!isObject(value)) return `${path} must be an object.`;
   return first(
-    checkEnum(v.mode, SCALE_MODES, "scale.mode"),
-    checkNumber(v.factor, "factor", "scale.factor"),
-    checkNumber(v.width, "width", "scale.width"),
-    checkNumber(v.height, "height", "scale.height"),
+    checkEnum(value.preset, NR_PRESETS, `${path}.preset`),
+    checkEnum(value.style, NR_STYLES, `${path}.style`),
+    checkNumber(value.intensity, "intensity", `${path}.intensity`),
+    checkNumber(value.localTone, "localTone", `${path}.localTone`),
+    checkNumber(value.localStructure, "localStructure", `${path}.localStructure`),
+    checkNumber(value.skinStructure, "skinStructure", `${path}.skinStructure`),
+    checkBoolean(value.autoMask, `${path}.autoMask`),
+    checkBoolean(value.uiCorrection, `${path}.uiCorrection`),
   );
 }
 
-function checkEncode(v: Record<string, unknown>): string | null {
-  return first(
-    checkEnum(v.codec, ENCODE_CODECS, "encode.codec"),
-    checkEnum(v.container, ENCODE_CONTAINERS, "encode.container"),
-    checkNumber(v.quality, "quality", "encode.quality"),
-    checkBoolean(v.copyAudio, "encode.copyAudio"),
+/**
+ * DLSS SR only enlarges and writes no side past DLSS_SR_MAX_OUTPUT_SIDE (srOutputProblem). A factor below
+ * SR_FACTOR_MIN and an exact size past that side are refused before the job queues; an output smaller than the
+ * source needs the source's size, so the job refuses it when it opens SR.
+ */
+function checkSuperResolution(step: unknown, kind: unknown): string | null {
+  if (!isObject(step)) return "superResolution must be an object when present.";
+  const problem = first(
+    checkScale(step.scale, "superResolution.scale"),
+    step.motion === undefined ? null : checkEnum(step.motion, MOTION_KINDS, "superResolution.motion"),
+    checkDllDirType(step, "superResolution"),
   );
+  if (problem) return problem;
+  const scale = step.scale as ScaleSettings; // checkScale has passed
+  if (scale.mode === "factor" && scale.factor < SR_FACTOR_MIN) {
+    return `Super Resolution only enlarges: superResolution.scale.factor must be at least ${SR_FACTOR_MIN} (got ${scale.factor}; 1 runs DLAA at the source size). Use resize without superResolution to shrink.`;
+  }
+  if (scale.mode === "size" && Math.max(scale.width, scale.height) > DLSS_SR_MAX_OUTPUT_SIDE) {
+    return `Super Resolution writes at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side (got ${scale.width}x${scale.height}).`;
+  }
+  // A still has no frames to estimate motion between, and the image job never reads it.
+  if (kind === "image" && step.motion === "flow") return 'superResolution.motion applies to video jobs only; omit it or set it to "none".';
+  return null;
 }
 
-function checkFrameGen(v: Record<string, unknown>): string | null {
-  if (v.multiplier === undefined && v.targetFps === undefined) return "frameGen needs targetFps or multiplier — otherwise the job has no output rate to aim for.";
-  if (v.multiplier !== undefined) {
-    const wrongMultiplier = checkNumber(v.multiplier, "multiplier", "frameGen.multiplier");
+function checkNeuralRendering(step: unknown): string | null {
+  if (!isObject(step)) return "neuralRendering must be an object when present.";
+  return first(checkNrSettings(step.settings, "neuralRendering.settings"), checkDllDirType(step, "neuralRendering"));
+}
+
+function checkFrameGen(step: unknown, kind: unknown): string | null {
+  // A still image has no frames to interpolate between.
+  if (kind !== "video") return "frameGen applies to video jobs only.";
+  if (!isObject(step)) return "frameGen must be an object when present.";
+  if (step.multiplier === undefined && step.targetFps === undefined) return "frameGen needs targetFps or multiplier — otherwise the job has no output rate to aim for.";
+  if (step.multiplier !== undefined) {
+    const wrongMultiplier = checkNumber(step.multiplier, "multiplier", "frameGen.multiplier");
     if (wrongMultiplier) return wrongMultiplier;
   }
-  if (v.targetFps !== undefined) {
-    if (typeof v.targetFps !== "string") return "frameGen.targetFps must be a string, e.g. \"120\" or \"60000/1001\".";
+  if (step.targetFps !== undefined) {
+    if (typeof step.targetFps !== "string") return "frameGen.targetFps must be a string, e.g. \"120\" or \"60000/1001\".";
     // Resolved here rather than at typeof: the planner owns which rates exist,
     // and rejecting a bad one now beats queueing a job that fails minutes later
     // inside the pipeline with a message about BigInt arithmetic.
     try {
-      resolveTargetRate(v.targetFps);
+      resolveTargetRate(step.targetFps);
     } catch (error) {
       return `frameGen.targetFps is not a rate this build can produce: ${(error as Error).message}`;
     }
   }
-  if (v.engine !== undefined) return checkEnum(v.engine, FRAME_GEN_ENGINES, "frameGen.engine");
-  return null;
-}
-
-/**
- * DLSS SR only enlarges: an output smaller than the source fails CreateFeature (srOutputProblem), so an sr
- * factor below SR_FACTOR_MIN is refused before the job queues. Frame generation ignores the engine and scale settings.
- */
-function checkSrFactor(v: Record<string, unknown>): string | null {
-  if (v.engine !== "sr" || v.frameGen !== undefined || !isObject(v.scale) || v.scale.mode !== "factor") return null;
-  if (typeof v.scale.factor !== "number" || v.scale.factor >= SR_FACTOR_MIN) return null;
-  return `Super Resolution only enlarges: scale.factor must be at least ${SR_FACTOR_MIN} for engine sr (got ${v.scale.factor}; 1 runs DLAA at the source size). Use nr or bypass to shrink.`;
+  return first(step.engine === undefined ? null : checkEnum(step.engine, FRAME_GEN_ENGINES, "frameGen.engine"), checkDllDirType(step, "frameGen"));
 }
 
 /** Frame generation writes FRAME_GEN_CONTAINER only, so a request must not ask for another container or extension. */
@@ -124,6 +145,32 @@ function checkFrameGenOutput(v: Record<string, unknown>): string | null {
   return null;
 }
 
+function checkEncode(value: unknown, kind: unknown): string | null {
+  // An image job writes a PNG and never reads encode settings.
+  if (kind !== "video") return "encode applies to video jobs only.";
+  if (!isObject(value)) return "encode must be an object when present.";
+  return first(
+    checkEnum(value.codec, ENCODE_CODECS, "encode.codec"),
+    checkEnum(value.container, ENCODE_CONTAINERS, "encode.container"),
+    checkNumber(value.quality, "quality", "encode.quality"),
+    checkBoolean(value.copyAudio, "encode.copyAudio"),
+  );
+}
+
+function checkAdapterUuid(v: Record<string, unknown>): string | null {
+  if (typeof v.adapterUuid !== "string" || !DEVICE_UUID_PATTERN.test(v.adapterUuid)) {
+    return `adapterUuid must be a CUDA device UUID as GET /api/probe lists it ("GPU-" followed by ${DEVICE_UUID_GROUP_LENGTHS.join("-")} hex digits).`;
+  }
+  // Frame generation picks its GPU in its host process (README, "Shared options"); the choice reaches only SR and NR.
+  if (!takesGpuChoice({ sr: v.superResolution !== undefined, nr: v.neuralRendering !== undefined, fg: v.frameGen !== undefined })) {
+    return `adapterUuid applies to Super Resolution and Neural Rendering; frame generation picks its GPU itself (${FRAME_GEN_GPU_CHOICE}). Omit it.`;
+  }
+  return null;
+}
+
+/** The request fields the step objects replaced: accepting one would run a different job than the client asked for. */
+const REPLACED_FIELDS = ["engine", "motion", "scale", "settings", "dllDir"] as const;
+
 /**
  * Validates a POST /api/jobs body. Returns null when it is a usable JobRequest,
  * otherwise a message naming the offending field and what it accepts — the
@@ -136,37 +183,20 @@ export function validateJobRequest(value: unknown): string | null {
   if (wrongKind) return wrongKind;
   if (typeof v.input !== "string" || v.input === "") return "input must be a non-empty absolute path.";
   if (v.output !== undefined && typeof v.output !== "string") return "output must be a string when present.";
-  const wrongEngine = checkEnum(v.engine, ENGINE_KINDS, "engine");
-  if (wrongEngine) return wrongEngine;
-  const wrongMotion = checkEnum(v.motion, MOTION_KINDS, "motion");
-  if (wrongMotion) return wrongMotion;
-  if (v.dllDir !== undefined) {
-    if (typeof v.dllDir !== "string") return "dllDir must be a string when present.";
-    // The bypass engine loads no DLL that a version folder could replace: accepting the field would ignore it
-    // without a word. A frame generation job ignores its engine and loads DLSS Frame Generation instead.
-    if (v.engine === "bypass" && v.frameGen === undefined) return "dllDir does not apply to the bypass engine, which loads no DLSS DLL; omit it.";
+  const replaced = REPLACED_FIELDS.filter((field) => field in v);
+  if (replaced.length) {
+    return `${replaced.join(", ")} ${replaced.length === 1 ? "is" : "are"} no longer part of a job: give each step its own object (superResolution, neuralRendering, frameGen) and resize for a plain resize.`;
   }
-  if (v.adapterUuid !== undefined) {
-    if (typeof v.adapterUuid !== "string" || !DEVICE_UUID_PATTERN.test(v.adapterUuid)) {
-      return `adapterUuid must be a CUDA device UUID as GET /api/probe lists it ("GPU-" followed by ${DEVICE_UUID_GROUP_LENGTHS.join("-")} hex digits).`;
-    }
-    // Frame generation picks its GPU in its host process (README, "Shared options"); a stored GPU choice cannot apply to it.
-    if (v.frameGen !== undefined) return `adapterUuid does not apply to frame generation, which picks its GPU itself (${FRAME_GEN_GPU_CHOICE}); omit it.`;
-  }
-  if (!isObject(v.settings)) return "settings must be an object.";
-  if (!isObject(v.scale)) return "scale must be an object.";
-  const problem = first(
-    checkNrSettings(v.settings),
-    checkScale(v.scale),
-    checkSrFactor(v),
-    v.encode === undefined ? null : isObject(v.encode) ? checkEncode(v.encode) : "encode must be an object when present.",
-    // A still image has no frames to interpolate between, and the image worker
-    // never reads frameGen, so accepting it would silently drop the request.
-    v.frameGen !== undefined && v.kind !== "video" ? "frameGen applies to video jobs only." : null,
-    v.frameGen === undefined ? null : isObject(v.frameGen) ? checkFrameGen(v.frameGen) : "frameGen must be an object when present.",
+  return first(
+    v.superResolution === undefined ? null : checkSuperResolution(v.superResolution, v.kind),
+    v.neuralRendering === undefined ? null : checkNeuralRendering(v.neuralRendering),
+    v.frameGen === undefined ? null : checkFrameGen(v.frameGen, v.kind),
     v.frameGen === undefined ? null : checkFrameGenOutput(v),
+    v.resize === undefined ? null : v.superResolution !== undefined ? "resize does not apply with superResolution, which sets the output size itself; omit it." : checkScale(v.resize, "resize"),
+    v.encode === undefined ? null : checkEncode(v.encode, v.kind),
+    v.warmupFrames === undefined ? null : v.kind !== "image" ? "warmupFrames applies to image jobs only." : checkNumber(v.warmupFrames, "warmupFrames", "warmupFrames"),
+    v.adapterUuid === undefined ? null : checkAdapterUuid(v),
   );
-  return problem;
 }
 
 /** Narrowing wrapper for callers that have already validated. */

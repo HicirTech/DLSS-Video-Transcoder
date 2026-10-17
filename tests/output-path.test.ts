@@ -10,6 +10,6 @@ test("the output sits next to the input, named stem.suffix.extension", () => {
 
 test("only the last extension of the input is replaced, and an input without one keeps its whole name", () => {
   const folder = join("some", "clips");
-  expect(defaultOutputPath(join(folder, "take.2.final.mov"), "bypass", ".mp4")).toBe(join(folder, "take.2.final.bypass.mp4"));
-  expect(defaultOutputPath(join(folder, "raw"), "dlssg", ".mp4")).toBe(join(folder, "raw.dlssg.mp4"));
+  expect(defaultOutputPath(join(folder, "take.2.final.mov"), "copy", ".mp4")).toBe(join(folder, "take.2.final.copy.mp4"));
+  expect(defaultOutputPath(join(folder, "raw"), "fg", ".mp4")).toBe(join(folder, "raw.fg.mp4"));
 });

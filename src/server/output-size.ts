@@ -44,3 +44,23 @@ export function nvencLimitExceeded(codec: EncodeSettings["codec"], size: { width
   const limit = NVENC_MAX_SIDE[codec];
   return limit !== undefined && Math.max(size.width, size.height) > limit ? limit : null;
 }
+
+/** What output size a step can write, beyond the API's own ranges (SETTING_RANGES). */
+export interface OutputSizeLimits {
+  /** The smallest factor. */
+  factorMin: number | null;
+  /** The longest side, in pixels. */
+  sideMax: number | null;
+  /** The limits in words, for the form's hint; null when there are none. */
+  note: string | null;
+}
+
+/** Super Resolution only enlarges and has a longest side (srOutputProblem); a resize takes the API's whole range. */
+export function outputSizeLimits(by: "sr" | "resize"): OutputSizeLimits {
+  if (by === "resize") return { factorMin: null, sideMax: null, note: null };
+  return {
+    factorMin: SR_FACTOR_MIN,
+    sideMax: DLSS_SR_MAX_OUTPUT_SIDE,
+    note: `Super Resolution only enlarges, from ${SR_FACTOR_MIN}× (DLAA at the source size), and writes at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side.`,
+  };
+}

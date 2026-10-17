@@ -1,13 +1,13 @@
 /**
- * DLSS Super Resolution frame engine: importing this module (as the worker does
- * when a job's engine is "sr") wires NGX feature 1 into `createEngine`.
+ * DLSS Super Resolution frame engine: importing this module (engine-loader.ts does,
+ * for a job that runs Super Resolution) wires NGX feature 1 into `createEngineChain`.
  *
  * This is the one engine whose output size differs from its input. The output
  * size is the job's own; only the DLSS quality mode is the one whose ratio is
  * nearest (qualityForSizes), as for the sr command.
  */
 import { RUNTIME_DIR } from "../paths.ts";
-import { registerSrEngine, type Engine, type EngineOptions } from "../pipeline/engine.ts";
+import { registerSrEngine, type Engine, type SrEngineOptions } from "../pipeline/engine.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
 import { qualityForSizes } from "./results.ts";
 import { DlssSrSession } from "./sr.ts";
@@ -23,10 +23,10 @@ class SrEngine implements Engine {
     session: GpuSession,
     readonly width: number,
     readonly height: number,
-    options: EngineOptions,
+    options: SrEngineOptions,
   ) {
-    this.outputWidth = options.outputWidth ?? width;
-    this.outputHeight = options.outputHeight ?? height;
+    this.outputWidth = options.outputWidth;
+    this.outputHeight = options.outputHeight;
     this.sr = DlssSrSession.open(session, {
       renderWidth: width,
       renderHeight: height,
@@ -50,4 +50,4 @@ class SrEngine implements Engine {
   }
 }
 
-registerSrEngine((_kind, session, options) => new SrEngine(session, options.width, options.height, options));
+registerSrEngine((session, options) => new SrEngine(session, options.width, options.height, options));

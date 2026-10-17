@@ -1,14 +1,14 @@
 /**
- * The neural frame engine: importing this module (as the worker does when a job's
- * engine is "nr") wires DLSS Neural Rendering — NGX feature 18 — into
- * `createEngine`.
+ * The neural frame engine: importing this module (engine-loader.ts does, for a job
+ * that runs Neural Rendering) wires DLSS Neural Rendering — NGX feature 18 — into
+ * `createEngineChain`.
  *
  * Feature 18 enhances each frame at the same size, which is what lets it satisfy
  * the pipeline's 1:1 working-size contract; true DLSS upscaling with a
  * render/output split is a separate engine, `sr`.
  */
 import { RUNTIME_DIR } from "../paths.ts";
-import { registerNeuralEngine, type Engine, type EngineOptions } from "../pipeline/engine.ts";
+import { registerNeuralEngine, type Engine, type NrEngineOptions } from "../pipeline/engine.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
 import { DlssNrSession } from "./nr-render.ts";
 
@@ -23,7 +23,7 @@ class NeuralEngine implements Engine {
     session: GpuSession,
     readonly width: number,
     readonly height: number,
-    options: EngineOptions,
+    options: NrEngineOptions,
   ) {
     this.outputWidth = width;
     this.outputHeight = height;
@@ -50,4 +50,4 @@ class NeuralEngine implements Engine {
   }
 }
 
-registerNeuralEngine((_kind, session, options) => new NeuralEngine(session, options.width, options.height, options));
+registerNeuralEngine((session, options) => new NeuralEngine(session, options.width, options.height, options));

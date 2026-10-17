@@ -13,7 +13,7 @@
  *   GET  /api/file?path=<abs path>  -> raw file bytes (previews of inputs/outputs; local paths only)
  *   POST /api/upload?name=<file name>  body: the file's bytes -> UploadResult (streamed to disk, any size; the path is usable as a job input)
  *   GET  /api/tools                 -> ToolsReport      (ffmpeg / ffprobe availability)
- *   GET  /api/catalog               -> RuntimeManifest  (installed DLSS runtime DLL versions; see JobRequest.dllDir)
+ *   GET  /api/catalog               -> RuntimeManifest  (installed DLSS runtime DLL versions; see each step's dllDir)
  *   GET  /api/media?path=<abs path> -> MediaInfo        (size, rate and length of a file a job would read; 404 when it is not a file, 400 when it cannot be read)
  * WebSocket:
  *   /ws  server -> client messages are WsEvent JSON; the client never needs to send anything.
@@ -25,8 +25,9 @@
 // messages list the values in.
 export const JOB_KINDS = ["image", "video"] as const;
 type JobKind = (typeof JOB_KINDS)[number];
-export const ENGINE_KINDS = ["sr", "nr", "bypass"] as const;
-export type EngineKind = (typeof ENGINE_KINDS)[number];
+/** The processing steps a job can run, in the order they run: Super Resolution, Neural Rendering, frame generation. */
+export const STEP_KINDS = ["sr", "nr", "fg"] as const;
+export type StepKind = (typeof STEP_KINDS)[number];
 export const MOTION_KINDS = ["none", "flow"] as const;
 export type MotionKind = (typeof MOTION_KINDS)[number];
 export const NR_PRESETS = [0, 1, 2, 3] as const;
@@ -70,8 +71,6 @@ export interface NrSettings {
   autoMask: boolean;
   /** Protect overlays / text / sharp UI edges from being re-rendered. Ignored by the installed runtime: see NR_SETTINGS_IGNORED_BY_RUNTIME. */
   uiCorrection: boolean;
-  /** Extra evaluations of the first frame so the temporal state settles (images use this). */
-  warmupFrames: number;
 }
 
 export const DEFAULT_NR_SETTINGS: NrSettings = {
@@ -83,8 +82,10 @@ export const DEFAULT_NR_SETTINGS: NrSettings = {
   skinStructure: -1,
   autoMask: false,
   uiCorrection: false,
-  warmupFrames: 4,
 };
+
+/** An image job's passes over its still before the kept one, so the temporal state of SR and NR settles (JobRequest.warmupFrames). */
+export const DEFAULT_WARMUP_FRAMES = 4;
 
 export interface ScaleSettings {
   /** none = keep source size, factor = multiply, size = explicit output size. */
@@ -132,12 +133,6 @@ export const FRAME_GEN_CONTAINER: EncodeContainer = "mp4";
 
 /** Frame generation's output/source rate when neither a target rate nor a multiplier is given (2 = double the fps). */
 export const DEFAULT_FRAME_GEN_MULTIPLIER = 2;
-
-/**
- * Whether an engine reads motion vectors: a video job computes optical flow only for one that does, and the
- * UI offers the motion choice only then. A Record, so a new engine has to say.
- */
-export const ENGINE_USES_MOTION: Record<EngineKind, boolean> = { sr: true, nr: false, bypass: false };
 
 /**
  * DLSS Super Resolution only enlarges: an output side shorter than the source's fails CreateFeature with
@@ -218,52 +213,88 @@ export function clampToRange(field: keyof typeof SETTING_RANGES, value: number):
   return Math.min(max, Math.max(min, integer ? Math.round(value) : value));
 }
 
+/** The Super Resolution step: DLSS SR upscales each frame to the output size. */
+export interface SuperResolutionStep {
+  /**
+   * The output size: the source size (mode none, which runs DLAA), the source times a factor of at least
+   * SR_FACTOR_MIN, or an exact size; each side rounded to even and at most DLSS_SR_MAX_OUTPUT_SIDE.
+   */
+  scale: ScaleSettings;
+  /** Video only, default none: flow estimates optical flow between frames and hands SR the motion vectors. */
+  motion?: MotionKind;
+  /** Absolute folder of a DLSS Super Resolution version from GET /api/catalog; omit to load the bundled DLL. */
+  dllDir?: string;
+}
+
+/** The Neural Rendering step: DLSS Neural Rendering (feature 18) enhances each frame at its size. */
+export interface NeuralRenderingStep {
+  settings: NrSettings;
+  /** Absolute folder of a DLSS Neural Rendering version from GET /api/catalog; omit to load the bundled DLL. */
+  dllDir?: string;
+}
+
+/**
+ * The frame generation step, video only and last: DLSS Frame Generation interpolates the processed frames to a
+ * higher rate. Give targetFps or multiplier (targetFps wins when both are present). The job writes
+ * FRAME_GEN_CONTAINER, so encode.container and an explicit output's extension have to be that.
+ */
+export interface FrameGenStep {
+  /** One of FRAME_GEN_FPS_CHOICES, or an exact "num/den" rate such as "60000/1001". */
+  targetFps?: string;
+  /** Output = source rate x multiplier (2 = double the fps), a whole number within SETTING_RANGES.multiplier. */
+  multiplier?: number;
+  /**
+   * auto (default): one native DLSSG session when target/source is an exact integer from 2 up to
+   * FRAME_GEN_NATIVE_MAXIMUM and, from 3x up, HAGS is on; otherwise a cascade of 2x stages. When
+   * the runtime disables every interval of a native multi-frame session, auto re-runs the job as
+   * a cascade. native / cascade force a path.
+   */
+  engine?: FrameGenEngine;
+  /** Absolute folder of a DLSS Frame Generation version from GET /api/catalog; omit to load the bundled DLL. */
+  dllDir?: string;
+}
+
+/**
+ * A job: decode, then each step that is present, in the order of STEP_KINDS, then encode. A job with no step
+ * re-encodes the source, resized when `resize` says so.
+ */
 export interface JobRequest {
   kind: JobKind;
   /** Absolute path on the machine running the server. */
   input: string;
-  /** Absolute output path; omitted = next to the input with a suffix. */
+  /** Absolute output path; omitted = next to the input, named after the steps that run (stepsSuffix), e.g. clip.sr-nr-fg.mp4. */
   output?: string;
-  engine: EngineKind;
-  motion: MotionKind;
-  settings: NrSettings;
-  scale: ScaleSettings;
+  superResolution?: SuperResolutionStep;
+  neuralRendering?: NeuralRenderingStep;
+  frameGen?: FrameGenStep;
+  /** A resize of the decoded frames, lanczos in a video's decode and bilinear for a still; Super Resolution sets the output size itself, so a job with it rejects this. */
+  resize?: ScaleSettings;
+  /** Video only; a video job without it encodes with DEFAULT_ENCODE_SETTINGS. */
   encode?: EncodeSettings;
+  /** Image only: passes over the still before the kept one, for each of SR and NR; default DEFAULT_WARMUP_FRAMES. */
+  warmupFrames?: number;
   /**
-   * Video only. When set, the job runs DLSS Frame Generation (interpolate to a
-   * higher frame rate) instead of the per-frame engine. The per-frame engine and
-   * scale settings are ignored in this mode; encode applies except its container,
-   * which has to be FRAME_GEN_CONTAINER, as does an explicit output's extension.
-   * Give either `targetFps` or `multiplier` (targetFps wins when both are present).
-   */
-  frameGen?: {
-    /** One of FRAME_GEN_FPS_CHOICES, or an exact "num/den" rate such as "60000/1001". */
-    targetFps?: string;
-    /** Convenience ratio when targetFps is absent: output = source rate x multiplier (2 = double the fps), a whole number within SETTING_RANGES.multiplier. */
-    multiplier?: number;
-    /**
-     * auto (default): one native DLSSG session when target/source is an exact integer from 2 up to
-     * FRAME_GEN_NATIVE_MAXIMUM and, from 3x up, HAGS is on; otherwise a cascade of 2x stages. When
-     * the runtime disables every interval of a native multi-frame session, auto re-runs the job as
-     * a cascade. native / cascade force a path.
-     */
-    engine?: FrameGenEngine;
-  };
-  /**
-   * Absolute folder of a specific DLSS DLL version to load (the "dir" of a version in
-   * GET /api/catalog); omit to use the bundled runtime DLL. Only the folders of the feature
-   * the job loads apply: DLSS Super Resolution's for the sr engine, DLSS Neural Rendering's
-   * for nr, DLSS Frame Generation's for a frameGen job. The bypass engine loads no DLL a
-   * version folder could replace, so a bypass job without frameGen rejects it.
-   */
-  dllDir?: string;
-  /**
-   * The GPU to run on, as the CUDA device UUID GET /api/probe lists per adapter
-   * (ProbeAdapter.cudaUuid); omit for the automatic choice (the NVIDIA adapter
-   * with the most VRAM that has a CUDA device). Image and video jobs only:
-   * frame generation picks its GPU in its host process (FRAME_GEN_GPU_CHOICE), so it rejects this.
+   * The GPU that Super Resolution and Neural Rendering run on, as the CUDA device UUID GET /api/probe lists
+   * per adapter (ProbeAdapter.cudaUuid); omit for the automatic choice (the NVIDIA adapter with the most VRAM
+   * that has a CUDA device). Frame generation picks its GPU in its host process (FRAME_GEN_GPU_CHOICE), so a
+   * job that runs frame generation alone rejects this.
    */
   adapterUuid?: string;
+}
+
+/** The steps `request` runs, in their order. */
+export function jobSteps(request: Pick<JobRequest, "superResolution" | "neuralRendering" | "frameGen">): StepKind[] {
+  const present: Record<StepKind, boolean> = { sr: request.superResolution !== undefined, nr: request.neuralRendering !== undefined, fg: request.frameGen !== undefined };
+  return STEP_KINDS.filter((step) => present[step]);
+}
+
+/**
+ * What a job's default output is named after, between the input's stem and the extension: its steps in order
+ * ("sr-nr-fg"), "resize" for a resize alone, "copy" for neither.
+ */
+export function stepsSuffix(steps: readonly StepKind[], resized: boolean): string {
+  if (steps.length) return steps.join("-");
+  return resized ? "resize" : "copy";
 }
 
 /** States in which a job still occupies the queue or the GPU, so a cancel can still reach it. */
@@ -300,7 +331,8 @@ export interface JobStatus {
   kind: JobKind;
   input: string;
   output: string | null;
-  engine: EngineKind;
+  /** The steps the job runs, in their order (jobSteps); empty for a plain re-encode. */
+  steps: StepKind[];
   state: JobState;
   cancelRequest: CancelRequest;
   /** 0..1 */
@@ -320,6 +352,12 @@ export interface JobStatus {
   log: string[];
 }
 
+/** What a Super Resolution step starts with on a form: 1.5x the source, no motion vectors. */
+export const DEFAULT_SR_STEP: Required<Pick<SuperResolutionStep, "scale" | "motion">> = { scale: { ...DEFAULT_SCALE_SETTINGS, mode: "factor" }, motion: "none" };
+
+/** What a frame generation step starts with on a form: 60 fps on the automatic path. */
+export const DEFAULT_FRAME_GEN_STEP: Required<Pick<FrameGenStep, "targetFps" | "engine">> = { targetFps: "60", engine: "auto" };
+
 /** Response of GET /api/media: what the server reads from a file before a job runs, so a form can show it and plan sizes. */
 export type MediaInfo =
   | { kind: "image"; width: number; height: number }
@@ -337,11 +375,14 @@ export type MediaInfo =
       hasAudio: boolean;
     };
 
-/** Response of GET /api/settings/defaults. */
+/** Response of GET /api/settings/defaults: what each step and the output start with. */
 export interface SettingsDefaults {
-  settings: NrSettings;
-  scale: ScaleSettings;
+  superResolution: SuperResolutionStep;
+  neuralRendering: NrSettings;
+  frameGen: FrameGenStep;
+  resize: ScaleSettings;
   encode: EncodeSettings;
+  warmupFrames: number;
 }
 
 /** Response of POST /api/upload: where the server stored the file, and what the client sent. */

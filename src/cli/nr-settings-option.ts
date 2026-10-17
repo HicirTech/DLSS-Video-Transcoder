@@ -2,10 +2,9 @@
 import { DEFAULT_NR_SETTINGS, NR_PRESETS, NR_STYLES, type NrSettings, SETTING_RANGES } from "../server/api-types.ts";
 import { enumOption, flag, numberOption } from "./args.ts";
 
-/** NrSettings from the look options; warmupFrames keeps its default for the caller to set. */
+/** NrSettings from the look options, each defaulting to DEFAULT_NR_SETTINGS. */
 export function nrSettingsOption(args: string[]): NrSettings {
   return {
-    ...DEFAULT_NR_SETTINGS,
     intensity: numberOption(args, "--intensity", { ...SETTING_RANGES.intensity, fallback: DEFAULT_NR_SETTINGS.intensity }),
     style: enumOption(args, "--style", NR_STYLES, DEFAULT_NR_SETTINGS.style),
     preset: enumOption(args, "--preset", NR_PRESETS, DEFAULT_NR_SETTINGS.preset),

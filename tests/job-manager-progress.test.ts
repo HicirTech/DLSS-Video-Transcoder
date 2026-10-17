@@ -4,17 +4,14 @@
  */
 import { describe, expect, test } from "bun:test";
 import { estimatedFrameProgress, frameProgress } from "../src/pipeline/frame-progress.ts";
-import { DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, type JobRequest } from "../src/server/api-types.ts";
+import { DEFAULT_NR_SETTINGS, type JobRequest } from "../src/server/api-types.ts";
 import { JobManager } from "../src/server/jobs.ts";
 import { FakeWorker } from "./fake-worker.ts";
 
 const IMAGE_REQUEST: JobRequest = {
   kind: "image",
   input: "W:/GPUVideoProcessor/1.png",
-  engine: "nr",
-  motion: "none",
-  settings: { ...DEFAULT_NR_SETTINGS },
-  scale: { ...DEFAULT_SCALE_SETTINGS },
+  neuralRendering: { settings: { ...DEFAULT_NR_SETTINGS } },
 };
 const VIDEO_REQUEST: JobRequest = { ...IMAGE_REQUEST, kind: "video", input: "W:/GPUVideoProcessor/2.mp4" };
 const FRAME_GENERATION_REQUEST: JobRequest = { ...VIDEO_REQUEST, frameGen: { targetFps: "60" } };

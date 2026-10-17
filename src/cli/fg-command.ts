@@ -1,6 +1,6 @@
 /** The `fg` command: DLSS Frame Generation, interpolating a video to a higher frame rate. */
 import { ENCODE_CODECS, FRAME_GEN_ENGINES } from "../server/api-types.ts";
-import { processFrameGen } from "../pipeline/framegen.ts";
+import { type FrameGenResult, processFrameGen } from "../pipeline/framegen.ts";
 import { resolveTargetRate } from "../pipeline/framegen-plan.ts";
 import { choiceOption, numberOption, option, positionalArgs, runtimeDirOption } from "./args.ts";
 import { commandSpec, FG_MULTIPLIER_OPTION, QUALITY_OPTION } from "./commands.ts";
@@ -42,11 +42,16 @@ export async function fgCommand(args: string[]): Promise<void> {
       if (frames === undefined) console.log(`  ${(f * 100).toFixed(0)}%  ${m}`);
     },
   });
-  const how = result.path === "Cascade" ? `${result.cascadeStages} cascade stage(s)` : result.path === "Native DLSSG" ? `native ${result.nativeMultiplier}x` : "resample";
-  console.log(
-    `DLSS Frame Generation (${how}): ${result.inputFrames} -> ${result.outputFrames} frames, ${result.sourceFps.toFixed(2)} -> ${result.targetFps} fps; ` +
-      `${result.generatedFrames} generated, ${result.copiedFrames} copied, ${result.sceneCuts} scene cut(s), max timing error ${result.maximumTemporalErrorSeconds.toFixed(4)} s, in ${result.ms} ms`,
-  );
+  console.log(frameGenSummary(result));
   console.log(`wrote ${result.output}`);
   process.exit(0);
+}
+
+/** What a frame generation run did, as the fg and video commands report it. */
+export function frameGenSummary(result: FrameGenResult): string {
+  const how = result.path === "Cascade" ? `${result.cascadeStages} cascade stage(s)` : result.path === "Native DLSSG" ? `native ${result.nativeMultiplier}x` : "resample";
+  return (
+    `DLSS Frame Generation (${how}): ${result.inputFrames} -> ${result.outputFrames} frames, ${result.sourceFps.toFixed(2)} -> ${result.targetFps} fps; ` +
+    `${result.generatedFrames} generated, ${result.copiedFrames} copied, ${result.sceneCuts} scene cut(s), max timing error ${result.maximumTemporalErrorSeconds.toFixed(4)} s, in ${result.ms} ms`
+  );
 }

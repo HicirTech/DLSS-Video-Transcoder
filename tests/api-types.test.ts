@@ -3,21 +3,30 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_ENCODE_SETTINGS,
   DEFAULT_FRAME_GEN_MULTIPLIER,
+  DEFAULT_FRAME_GEN_STEP,
   DEFAULT_NR_SETTINGS,
   DEFAULT_SCALE_SETTINGS,
+  DEFAULT_SR_STEP,
+  DEFAULT_WARMUP_FRAMES,
   ENCODE_CODECS,
   ENCODE_CONTAINERS,
+  FRAME_GEN_ENGINES,
+  MOTION_KINDS,
   NR_INTENSITY_EFFECTIVE_MAX,
   NR_PRESETS,
   NR_STYLES,
   NR_STYLE_LABELS,
   SCALE_MODES,
   SETTING_RANGES,
+  SR_FACTOR_MIN,
   type JobState,
   clampToRange,
   isActiveState,
   isTerminalState,
+  jobSteps,
+  stepsSuffix,
 } from "../src/server/api-types.ts";
+import { resolveTargetRate } from "../src/pipeline/framegen-plan.ts";
 
 describe("defaults", () => {
   // Listing every ranged field here is the point: a new range without a default fails to compile.
@@ -26,7 +35,7 @@ describe("defaults", () => {
     localTone: DEFAULT_NR_SETTINGS.localTone,
     localStructure: DEFAULT_NR_SETTINGS.localStructure,
     skinStructure: DEFAULT_NR_SETTINGS.skinStructure,
-    warmupFrames: DEFAULT_NR_SETTINGS.warmupFrames,
+    warmupFrames: DEFAULT_WARMUP_FRAMES,
     factor: DEFAULT_SCALE_SETTINGS.factor,
     width: DEFAULT_SCALE_SETTINGS.width,
     height: DEFAULT_SCALE_SETTINGS.height,
@@ -53,6 +62,32 @@ describe("defaults", () => {
     expect(SCALE_MODES).toContain(DEFAULT_SCALE_SETTINGS.mode);
     expect(ENCODE_CODECS).toContain(DEFAULT_ENCODE_SETTINGS.codec);
     expect(ENCODE_CONTAINERS).toContain(DEFAULT_ENCODE_SETTINGS.container);
+    expect(MOTION_KINDS).toContain(DEFAULT_SR_STEP.motion);
+    expect(FRAME_GEN_ENGINES).toContain(DEFAULT_FRAME_GEN_STEP.engine);
+  });
+
+  test("a Super Resolution step starts at a size Super Resolution writes, and frame generation at a rate the planner has", () => {
+    expect(DEFAULT_SR_STEP.scale.mode).toBe("factor");
+    expect(DEFAULT_SR_STEP.scale.factor).toBeGreaterThanOrEqual(SR_FACTOR_MIN);
+    expect(() => resolveTargetRate(DEFAULT_FRAME_GEN_STEP.targetFps)).not.toThrow();
+  });
+});
+
+describe("steps", () => {
+  test("jobSteps lists the steps a request carries in the order they run, whatever order the fields come in", () => {
+    const fg = { targetFps: "60" };
+    const sr = { scale: DEFAULT_SR_STEP.scale };
+    const nr = { settings: DEFAULT_NR_SETTINGS };
+    expect(jobSteps({ frameGen: fg, neuralRendering: nr, superResolution: sr })).toEqual(["sr", "nr", "fg"]);
+    expect(jobSteps({ frameGen: fg, superResolution: sr })).toEqual(["sr", "fg"]);
+    expect(jobSteps({})).toEqual([]);
+  });
+
+  test("a default output is named after the steps, a resize alone, or a copy", () => {
+    expect(stepsSuffix(["sr", "nr", "fg"], false)).toBe("sr-nr-fg");
+    expect(stepsSuffix(["nr"], true)).toBe("nr");
+    expect(stepsSuffix([], true)).toBe("resize");
+    expect(stepsSuffix([], false)).toBe("copy");
   });
 });
 
