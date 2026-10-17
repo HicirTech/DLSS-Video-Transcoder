@@ -3,7 +3,13 @@
  * chunks — an ffmpeg rawvideo pipe hands over whatever the OS buffered, with no
  * relation to frame boundaries. No FFI here, so a Worker can import it.
  */
-export class FrameReader {
+/** Where a frame loop takes its frames from: a decoder's pipe (FrameReader), or frames a job has processed further. */
+export interface FrameSource {
+  /** The next `frameBytes`-sized frame, or null once there are no more. */
+  next(frameBytes: number): Promise<Uint8Array | null>;
+}
+
+export class FrameReader implements FrameSource {
   private pending: Uint8Array[] = [];
   private pendingBytes = 0;
   private readonly reader: ReadableStreamDefaultReader<Uint8Array>;
