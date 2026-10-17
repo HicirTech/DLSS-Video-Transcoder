@@ -104,9 +104,35 @@ interface MuxCopySpec {
   container: EncodeSettings["container"];
   displayAspect: Rational | null;
   size: FrameSize;
+  /**
+   * Re-stamps packet N at exactly N / `retime`, for an output whose clock has to be exact (frame generation's,
+   * checked by verifyOutputVideo). The raw demuxer counts in 1/1200000 s and adds a rounded frame duration per
+   * packet, so a rate that tick does not divide drifts: at 7508/125 one packet of 182 lands 124 ticks after the
+   * last instead of 125. Exact while the rate's numerator is below those 1200000 ticks.
+   */
+  retime?: Rational;
   /** Output flags that come after the audio ones and before the container's own, such as -video_track_timescale. */
   extra?: readonly string[];
   output: string;
+}
+
+/**
+ * The setts bitstream filter that stamps packet N at N / `rate`, its duration one frame. Its expressions are in
+ * the input's time base (TB, the raw demuxer's), so each stamp is rounded once, from N rather than from the last
+ * packet, and the muxer's rescale into the track's 1/num ticks then lands on N x den exactly. The time base
+ * itself is left alone: the mp4 muxer derives the movie timescale from it, so a rate the demuxer already stamped
+ * evenly writes the same bytes as without the filter.
+ */
+function retimeFilter(rate: Rational): string {
+  const frame = `${rate.den}/(${rate.num}*TB)`;
+  return `setts=ts=N*${frame}:duration=${frame}`;
+}
+
+/** `args` with `filter` chained onto their -bsf:v, or given one: a second -bsf:v would replace the first. */
+function withBitstreamFilter(args: readonly string[], filter: string): string[] {
+  const at = args.indexOf("-bsf:v");
+  if (at < 0) return [...args, "-bsf:v", filter];
+  return args.map((arg, index) => (index === at + 1 ? `${arg},${filter}` : arg));
 }
 
 /**
@@ -119,12 +145,13 @@ interface MuxCopySpec {
  * video share a duration.
  */
 export function muxCopyArgs(spec: MuxCopySpec): string[] {
-  const { demux, frameRate, audioSource, container, displayAspect, size, extra = [], output } = spec;
+  const { demux, frameRate, audioSource, container, displayAspect, size, retime, extra = [], output } = spec;
+  const aspect = aspectArgs(displayAspect, size.width, size.height, demux);
   return [
     "-v", "error", "-y", "-f", demux, "-framerate", frameRate, "-i", "pipe:0",
     ...(audioSource === null ? [] : ["-i", audioSource]),
     "-map", "0:v:0", "-c:v", "copy",
-    ...aspectArgs(displayAspect, size.width, size.height, demux),
+    ...(retime ? withBitstreamFilter(aspect, retimeFilter(retime)) : aspect),
     ...audioArgs(audioSource !== null, container),
     ...extra, ...faststartArgs(container), output,
   ];
