@@ -66,7 +66,10 @@ function matchBlock(out: Float32Array, grids: GridPair, block: Block): void {
   }
 }
 
-/** Sum of absolute differences between `block` and `previous` displaced by (dx, dy); a sample off the grid costs 255. */
+/** SAD cost of a sample displaced off the grid: the largest possible 8-bit luma difference. */
+const OFF_GRID_COST = 255;
+
+/** Sum of absolute differences between `block` and `previous` displaced by (dx, dy); a sample off the grid costs OFF_GRID_COST. */
 function blockCost(grids: GridPair, block: Block, dx: number, dy: number): number {
   const { current, previous, w, h } = grids;
   const { bx, by, bxEnd, byEnd } = block;
@@ -74,14 +77,14 @@ function blockCost(grids: GridPair, block: Block, dx: number, dy: number): numbe
   for (let y = by; y < byEnd; y++) {
     const qy = y + dy;
     if (qy < 0 || qy >= h) {
-      cost += 255 * (bxEnd - bx); // off-frame penalty, whole row
+      cost += OFF_GRID_COST * (bxEnd - bx);
       continue;
     }
     const cRow = y * w;
     const qRow = qy * w;
     for (let x = bx; x < bxEnd; x++) {
       const qx = x + dx;
-      cost += qx < 0 || qx >= w ? 255 : Math.abs(current[cRow + x]! - previous[qRow + qx]!);
+      cost += qx < 0 || qx >= w ? OFF_GRID_COST : Math.abs(current[cRow + x]! - previous[qRow + qx]!);
     }
   }
   return cost;

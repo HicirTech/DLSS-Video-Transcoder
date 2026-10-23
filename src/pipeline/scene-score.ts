@@ -9,10 +9,14 @@ export function luma(r: number, g: number, b: number): number {
   return 0.299 * r + 0.587 * g + 0.114 * b;
 }
 
-/** Byte offsets of a sparse ~48x27 sample grid over an RGBA8 frame. */
+/** Sample-grid columns and rows: about this many samples whatever the resolution. */
+const SAMPLE_GRID_COLUMNS = 48;
+const SAMPLE_GRID_ROWS = 27;
+
+/** Byte offsets of a sparse sample grid of about SAMPLE_GRID_COLUMNS x SAMPLE_GRID_ROWS over an RGBA8 frame. */
 export function buildSampleOffsets(width: number, height: number): Int32Array {
-  const stepX = Math.max(1, Math.floor(width / 48));
-  const stepY = Math.max(1, Math.floor(height / 27));
+  const stepX = Math.max(1, Math.floor(width / SAMPLE_GRID_COLUMNS));
+  const stepY = Math.max(1, Math.floor(height / SAMPLE_GRID_ROWS));
   const offsets: number[] = [];
   for (let y = stepY >> 1; y < height; y += stepY) {
     for (let x = stepX >> 1; x < width; x += stepX) offsets.push((y * width + x) * 4);
