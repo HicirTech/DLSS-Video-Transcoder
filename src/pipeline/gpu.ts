@@ -25,6 +25,9 @@ export interface GpuOptions {
   debugLayer?: boolean;
 }
 
+/** The GPU a job runs on: one of the two at most, as GpuOptions documents them. */
+export type GpuSelection = Pick<GpuOptions, "adapterIndex" | "adapterUuid">;
+
 export interface GpuSession {
   readonly adapter: DxgiAdapter;
   readonly device: D3D12Device;
