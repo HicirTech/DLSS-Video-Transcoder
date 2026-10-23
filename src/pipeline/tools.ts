@@ -41,12 +41,13 @@ export function findTool(name: string): string | null {
   return null;
 }
 
-/** ffmpeg and ffprobe, or an error that names the job type that needs them and how to supply them. */
+/** ffmpeg and ffprobe, or an error that names the missing one, the job type that needs them and how to supply them. */
 export function requireFfmpegTools(purpose: string): { ffmpeg: string; ffprobe: string } {
   const ffmpeg = findTool("ffmpeg");
   const ffprobe = findTool("ffprobe");
   if (!ffmpeg || !ffprobe) {
-    throw new Error(`ffmpeg and ffprobe are required for ${purpose}; ${FFMPEG_SUPPLY_HINT}.`);
+    const missing = [...(ffmpeg ? [] : ["ffmpeg"]), ...(ffprobe ? [] : ["ffprobe"])];
+    throw new Error(`${missing.join(" and ")} ${missing.length === 1 ? "was" : "were"} not found; ffmpeg and ffprobe are required for ${purpose}: ${FFMPEG_SUPPLY_HINT}.`);
   }
   return { ffmpeg, ffprobe };
 }
