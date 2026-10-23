@@ -83,6 +83,8 @@ describe("decode worker abort", () => {
     await aborted;
     // The stand-in child writes its marker 18-30 ms after spawning (measured); 500 ms leaves a wide margin.
     await Bun.sleep(500);
+    // A worker that spawned the child anyway leaves it for afterEach to end, not running past the test.
+    if (existsSync(marker)) childPids.push(Number(readFileSync(marker, "utf8")));
     expect(existsSync(marker)).toBe(false);
     expect(seen).toEqual(["aborted"]);
   });
