@@ -42,7 +42,6 @@ const STRUCT_VER = {
   REGISTER_RESOURCE: STRUCT_VERSION(5),
   MAP_INPUT_RESOURCE: STRUCT_VERSION(4),
   CREATE_BITSTREAM_BUFFER: STRUCT_VERSION(1),
-  CAPS_PARAM: STRUCT_VERSION(1),
 } as const;
 
 // -- GUIDs (16-byte little-endian; guid() matches the SDK's raw layout) -------
@@ -78,17 +77,8 @@ const BUFFER_FORMAT_ABGR = 0x10000000; // RGBA bytes in memory -> NVENC "ABGR"
 const PIC_STRUCT_FRAME = 1;
 const PIC_FLAG_EOS = 0x8;
 
-/** NV_ENC_CAPS enum ordinals we query (see nvEncodeAPI.h enum _NV_ENC_CAPS). */
-const CAPS = {
-  WIDTH_MAX: 16,
-  HEIGHT_MAX: 17,
-  NUM_ENCODER_ENGINES: 49,
-  SUPPORT_YUV444: 33,
-} as const;
-
 /** Function-pointer indices in NV_ENCODE_API_FUNCTION_LIST (declaration order). */
 const FN = {
-  getEncodeCaps: 7,
   initializeEncoder: 11,
   createBitstreamBuffer: 14,
   destroyBitstreamBuffer: 15,
@@ -180,13 +170,13 @@ function openEncodeSession(context: bigint): { status: number; session: bigint }
  * refuses the query. The DLL returns it packed as (major << 4) | minor, so 13.1
  * comes back as 209.
  */
-export function nvencMaxSupportedVersion(): { major: number; minor: number; raw: number } | null {
+function nvencMaxSupportedVersion(): { major: number; minor: number } | null {
   try {
     const out = new Uint32Array(1);
     const st = nvencSymbols().NvEncodeAPIGetMaxSupportedVersion(out) as number;
     if (st !== OK) return null;
     const raw = out[0]!;
-    return { major: raw >> 4, minor: raw & 0xf, raw };
+    return { major: raw >> 4, minor: raw & 0xf };
   } catch {
     return null;
   }
