@@ -33,23 +33,23 @@ export function VersionSelect({ feature, value, onChange }: VersionSelectProps) 
     let active = true;
     api
       .catalog()
-      .then((c) => active && setCatalog(c))
-      .catch((e) => active && setError(errorMessage(e)));
+      .then((manifest) => active && setCatalog(manifest))
+      .catch((err: unknown) => active && setError(errorMessage(err)));
     return () => {
       active = false;
     };
   }, []);
 
-  const versions = catalog?.features.find((f) => f.key === feature)?.versions ?? [];
+  const versions = catalog?.features.find((entry) => entry.key === feature)?.versions ?? [];
 
   return (
     <FormControl sx={{ minWidth: 220 }}>
       <InputLabel id={labelId}>DLSS version</InputLabel>
       <Select<string> labelId={labelId} label="DLSS version" value={value} aria-describedby={helpId} onChange={(event) => onChange(event.target.value)}>
         <MenuItem value="">Bundled (default)</MenuItem>
-        {versions.map((v) => (
-          <MenuItem key={v.dir} value={v.dir}>
-            {v.version} ({v.source})
+        {versions.map((installed) => (
+          <MenuItem key={installed.dir} value={installed.dir}>
+            {installed.version} ({installed.source})
           </MenuItem>
         ))}
       </Select>
