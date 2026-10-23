@@ -149,7 +149,7 @@ describe("validateJobRequest", () => {
     );
     expect(validateJobRequest(request({ superResolution: sr({ scale: { ...shrink, factor: 1 } }) }))).toBeNull();
     expect(validateJobRequest(request({ superResolution: sr({ scale: { ...DEFAULT_SCALE_SETTINGS, mode: "size", width: 8194, height: 4096 } }) }))).toBe(
-      "Super Resolution writes at most 8192 pixels per side (got 8194x4096).",
+      "DLSS Super Resolution writes at most 8192 pixels per side; 8194x4096 is larger. Use a smaller factor or output size.",
     );
     // Without Super Resolution, a resize shrinks through ffmpeg.
     expect(validateJobRequest(request({ superResolution: undefined, resize: shrink }))).toBeNull();
