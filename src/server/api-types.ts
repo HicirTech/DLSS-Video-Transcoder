@@ -294,8 +294,8 @@ export interface JobRequest {
   warmupFrames?: number;
   /**
    * The GPU that Super Resolution and Neural Rendering run on, as the CUDA device UUID GET /api/probe lists
-   * per adapter (ProbeAdapter.cudaUuid); omit for the automatic choice (the NVIDIA adapter with the most VRAM
-   * that has a CUDA device). Frame generation picks its GPU in its host process (FRAME_GEN_GPU_CHOICE), so a
+   * per adapter (ProbeAdapter.cudaUuid); omit for the automatic choice (AUTO_GPU_CHOICE). Frame generation
+   * picks its GPU in its host process (FRAME_GEN_GPU_CHOICE), so a
    * job that runs frame generation alone rejects this.
    */
   adapterUuid?: string;
