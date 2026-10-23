@@ -81,7 +81,6 @@ export interface DlssgProbeLine {
   /** In-between frames the runtime claims per interval (native multiplier max = this + 1). */
   multiFrameCountMax: number;
   runtimeVersion: string;
-  workerVersion: string;
   detail: string;
 }
 
@@ -95,13 +94,12 @@ export function motionFieldBytes(width: number, height: number): number {
   return width * height * 2 * 2;
 }
 
-/** The line without its newline, with snake_case keys (multi_frame_count_max, runtime_version, worker_version). */
+/** The line without its newline, with snake_case keys (multi_frame_count_max, runtime_version). */
 export function encodeProbeLine(probe: DlssgProbeLine): string {
   return JSON.stringify({
     available: probe.available,
     multi_frame_count_max: probe.multiFrameCountMax,
     runtime_version: probe.runtimeVersion,
-    worker_version: probe.workerVersion,
     detail: probe.detail,
   });
 }
@@ -113,7 +111,6 @@ export function decodeProbeLine(line: string): DlssgProbeLine {
     available: Boolean(json.available),
     multiFrameCountMax: Number(json.multi_frame_count_max ?? 0),
     runtimeVersion: String(json.runtime_version ?? ""),
-    workerVersion: String(json.worker_version ?? ""),
     detail: String(json.detail ?? ""),
   };
 }
