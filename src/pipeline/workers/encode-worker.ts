@@ -11,6 +11,7 @@
  * elementary stream stays in display order, matching NVENC's no-B-frame config.
  */
 import { ffmpegFailedMessage } from "../ffmpeg-failure.ts";
+import { MuxSink } from "../mux-sink.ts";
 import { NvencEncoder, type NvencEncoderOptions } from "../nvenc.ts";
 import { type AbortedReply, type AbortRequest, answerAbort } from "../worker-abort.ts";
 
@@ -41,7 +42,7 @@ declare const self: Worker;
 const post = (message: EncodeOut): void => self.postMessage(message);
 
 let encoder: NvencEncoder | null = null;
-let sink: ReturnType<typeof Bun.spawn> | null = null;
+let sink: MuxSink | null = null;
 let chain: Promise<void> = Promise.resolve();
 /** No more work: set by a failure or an abort. */
 let stopped = false;
@@ -63,7 +64,7 @@ self.onmessage = (event: MessageEvent<EncodeIn>) => {
   if (msg.type === "open") {
     try {
       encoder = NvencEncoder.open(msg.enc);
-      sink = Bun.spawn([msg.ffmpeg, ...msg.sinkArgs], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
+      sink = MuxSink.spawn(msg.ffmpeg, msg.sinkArgs);
       post({ type: "opened" });
     } catch (error) {
       fail((error as Error).message ?? String(error));
@@ -71,25 +72,22 @@ self.onmessage = (event: MessageEvent<EncodeIn>) => {
   } else if (msg.type === "frame") {
     chain = chain.then(async () => {
       if (stopped || !encoder || !sink) return;
-      const pkt = encoder.encode(new Uint8Array(msg.buf));
-      const wrote = (sink.stdin as { write(b: Uint8Array): unknown }).write(pkt);
-      if (wrote instanceof Promise) await wrote;
+      const packet = encoder.encode(new Uint8Array(msg.buf));
+      await sink.write(packet);
       post({ type: "encoded", index: msg.index });
-    }).catch((error) => fail((error as Error).message ?? String(error)));
+    }).catch(async (error) => fail(sink ? await sink.failureOf(error) : (error as Error).message ?? String(error)));
   } else if (msg.type === "abort") {
     // Immediate, not chained: frames still queued are dropped, the file is
     // released for deletion, and the GPU encoder is closed on this thread.
     stopped = true;
-    void answerAbort(self, sink, closeEncoder);
+    void answerAbort(self, sink?.child ?? null, closeEncoder);
   } else if (msg.type === "finish") {
     chain = chain.then(async () => {
       if (stopped || !encoder || !sink) return;
       encoder.finish();
-      (sink.stdin as { end(): unknown }).end();
-      const err = (await new Response(sink.stderr as ReadableStream<Uint8Array>).text()).trim();
-      const code = await sink.exited;
+      const { code, stderr } = await sink.close();
       closeEncoder();
-      if (code !== 0) { fail(ffmpegFailedMessage("mux", code, err)); return; }
+      if (code !== 0) { fail(ffmpegFailedMessage("mux", code, stderr)); return; }
       post({ type: "done" });
     }).catch((error) => fail((error as Error).message ?? String(error)));
   }
