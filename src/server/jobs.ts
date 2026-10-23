@@ -2,7 +2,7 @@
  * In-memory job queue. One job runs at a time (one GPU), each in its own
  * worker so the HTTP server never blocks on native calls.
  */
-import { CANCELLED_MESSAGE, isTerminalState, jobSteps, type JobRequest, type JobStatus, trimJobLog, type WsEvent } from "./api-types.ts";
+import { CANCELLED_MESSAGE, CANCELLING_MESSAGE, isTerminalState, jobSteps, type JobRequest, type JobStatus, trimJobLog, type WsEvent } from "./api-types.ts";
 import { HOST_PROCESS_NAME } from "../pipeline/dlssg-host-launch.ts";
 import type { FrameTally } from "../pipeline/frame-progress.ts";
 import type { CancelMessage, RunMessage, WorkerMessage } from "../pipeline/worker.ts";
@@ -30,7 +30,6 @@ const CANCEL_GRACE_MS = ABORT_TIMEOUT_MS + 3000;
  */
 const FINISHING_GRACE_MS = 60_000;
 
-const CANCELLING_MESSAGE = "cancelling";
 const TOO_LATE_MESSAGE = "finishing: the cancel arrived after the last frame, so the job completes and keeps its output";
 
 /** Adds a line to a job's log, which keeps at most JOB_LOG_LIMIT lines (trimJobLog). */

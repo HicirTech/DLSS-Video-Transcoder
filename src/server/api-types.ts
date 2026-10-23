@@ -335,6 +335,8 @@ export function isTerminalState(state: JobState): boolean {
 
 /** JobStatus.message of a job that ended "cancelled". */
 export const CANCELLED_MESSAGE = "cancelled by user";
+/** The message of a running job between its cancel request and the end of its pipeline. */
+export const CANCELLING_MESSAGE = "cancelling";
 
 /** Most recent log lines kept per job: the server trims to it and so does the web feed. */
 export const JOB_LOG_LIMIT = 400;
