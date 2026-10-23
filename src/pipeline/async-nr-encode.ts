@@ -95,7 +95,9 @@ function closeSharedHandles(bufferHandles: readonly number[], fenceHandle: numbe
 
 /** Each step on its own, so one failure cannot strand the objects after it. */
 function releaseSharedPool(pool: SharedPool): void {
-  try { pool.submit.drain(); } catch { /* the queue may have faulted; release regardless */ }
+  try { pool.submit.drain(); } catch { /* timed out or faulted: idle decides below */ }
+  // A GPU still running a submit may use the pool, so the process exit releases it then. A removed device reads idle.
+  if (!pool.submit.idle) return;
   try { pool.submit.close(); } catch { /* */ }
   for (const resource of [...pool.buffers, ...pool.stagings, pool.fence]) {
     try { resource.release(); } catch { /* */ }
