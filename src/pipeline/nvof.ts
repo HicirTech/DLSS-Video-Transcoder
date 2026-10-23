@@ -150,7 +150,7 @@ interface NvofBuffer {
  * reference and output GPU buffers are allocated for that size and owned here
  * until close(). Feed a different resolution and you need a new session.
  */
-export class NvofSession {
+class NvofSession {
   private constructor(
     private readonly hOf: bigint,
     readonly width: number,
