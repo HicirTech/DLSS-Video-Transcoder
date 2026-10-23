@@ -124,7 +124,7 @@ class DisMotionEstimator implements MotionEstimator {
       throw new Error(`flow: frame is ${rgba.length} bytes, expected ${this.width * this.height * 4}`);
     }
     const samples = sparseLuma(rgba, this.offsets);
-    const gray = smallGray(rgba, this.width, this.height, this.flowW, this.flowH);
+    const gray = smallGray(rgba, { width: this.width, height: this.height }, { flowW: this.flowW, flowH: this.flowH });
 
     // Nothing to compare the first frame against, so it is a forced reset.
     if (!this.prevGray || !this.prevSamples) {
@@ -159,7 +159,7 @@ class DisMotionEstimator implements MotionEstimator {
    * with non-finite vectors zeroed (guides.py:52-63).
    */
   private toFull(small: Float32Array): { full: Float32Array; confidence: number } {
-    const full = resizeFlowBilinear(small, this.flowW, this.flowH, this.width, this.height);
+    const full = resizeFlowBilinear(small, { width: this.flowW, height: this.flowH }, { width: this.width, height: this.height });
     // resizeFlowBilinear leaves magnitudes in grid pixels.
     const kx = this.width / this.flowW;
     const ky = this.height / this.flowH;

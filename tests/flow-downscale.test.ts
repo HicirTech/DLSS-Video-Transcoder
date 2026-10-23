@@ -46,7 +46,7 @@ describe("smallGray", () => {
       [16, 9, 16, 9], // 1x1: a plain luma pass
     ] as const) {
       const rgba = noise(w, h, w * 31 + h);
-      expect(smallGray(rgba, w, h, fw, fh)).toEqual(referenceSmallGray(rgba, w, h, fw, fh));
+      expect(smallGray(rgba, { width: w, height: h }, { flowW: fw, flowH: fh })).toEqual(referenceSmallGray(rgba, w, h, fw, fh));
     }
   });
 
@@ -58,7 +58,7 @@ describe("smallGray", () => {
       [7, 5, 4, 3], // upscale-ish: blocks clamp to a single pixel
     ] as const) {
       const rgba = noise(w, h, w * 17 + h);
-      expect(smallGray(rgba, w, h, fw, fh)).toEqual(referenceSmallGray(rgba, w, h, fw, fh));
+      expect(smallGray(rgba, { width: w, height: h }, { flowW: fw, flowH: fh })).toEqual(referenceSmallGray(rgba, w, h, fw, fh));
     }
   });
 
@@ -71,6 +71,6 @@ describe("smallGray", () => {
       rgba[i * 4 + 3] = 255;
     }
     const expected = 0.299 * 10 + 0.587 * 20 + 0.114 * 30;
-    for (const value of smallGray(rgba, 8, 8, 4, 4)) expect(value).toBeCloseTo(expected, 5);
+    for (const value of smallGray(rgba, { width: 8, height: 8 }, { flowW: 4, flowH: 4 })) expect(value).toBeCloseTo(expected, 5);
   });
 });

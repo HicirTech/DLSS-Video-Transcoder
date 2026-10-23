@@ -56,12 +56,12 @@ test("flowGridSize caps the long side near MAX_FLOW_LONG_SIDE, rounds even, clam
 
 test("resizeFlowBilinear is identity when sizes match", () => {
   const flow = new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]); // 2x2 x,y
-  const out = resizeFlowBilinear(flow, 2, 2, 2, 2);
+  const out = resizeFlowBilinear(flow, { width: 2, height: 2 }, { width: 2, height: 2 });
   expect(Array.from(out)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
 });
 
 test("smallGray reduces to a plain luma pass when the grid matches the source", () => {
-  const gray = smallGray(solid(2, 1, 255, 0, 0), 2, 1, 2, 1);
+  const gray = smallGray(solid(2, 1, 255, 0, 0), { width: 2, height: 1 }, { flowW: 2, flowH: 1 });
   expect(gray[0]).toBeCloseTo(0.299 * 255, 4);
 });
 
