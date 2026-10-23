@@ -11,6 +11,7 @@ import { DlssgSession } from "./dlssg.ts";
 import type { TimedFrame } from "./nearest-timestamp-writer.ts";
 import { type Rational, ratAdd, ratMul, ratSub, rational } from "./rational.ts";
 import { ABORT_TIMEOUT_MS } from "./worker-abort.ts";
+import type { GuideFlow, GuideOpen, GuideOut, GuidePack, GuidePrepare, PackerOpen } from "./workers/framegen-guide-worker.ts";
 
 /** A frame after its stage's guide worker ran: what the native evaluation needs. */
 export interface PreparedFrame {
@@ -19,24 +20,6 @@ export interface PreparedFrame {
   /** Packed R16G16_FLOAT motion, or null for zero motion (reset / duplicate). */
   half: Uint16Array | null;
   reset: boolean;
-}
-
-interface GuideReply {
-  type: "prepared";
-  id: number;
-  reset: boolean;
-  segment: number;
-  previousTsNum: bigint | null;
-  previousTsDen: bigint | null;
-  small: ArrayBuffer | null;
-  half: ArrayBuffer | null;
-  sceneCuts: number;
-}
-
-interface PackReply {
-  type: "packed";
-  id: number;
-  half: ArrayBuffer;
 }
 
 /** A frame the guide thread has analysed; its grid flow still needs packing unless the guide packed inline. */
@@ -58,8 +41,8 @@ export class Stage {
   /** Why this stage fell back to the CPU matcher, when it did. */
   flowReason: string | null = null;
   private nextIndex = 0;
-  private waiter: { frame: TimedFrame; resolve: (a: AnalyzedFrame) => void; reject: (e: Error) => void } | null = null;
-  private packWaiter: { analyzed: AnalyzedFrame; resolve: (p: PreparedFrame) => void; reject: (e: Error) => void } | null = null;
+  private waiter: { id: number; frame: TimedFrame; resolve: (a: AnalyzedFrame) => void; reject: (e: Error) => void } | null = null;
+  private packWaiter: { id: number; analyzed: AnalyzedFrame; resolve: (p: PreparedFrame) => void; reject: (e: Error) => void } | null = null;
   private failed: Error | null = null;
 
   constructor(
@@ -70,7 +53,7 @@ export class Stage {
     private readonly zeros: Uint16Array,
   ) {
     guide.onmessage = (event: MessageEvent) => {
-      const m = event.data as GuideReply | { type: "error"; message: string } | { type: "opened" | "closed" };
+      const m = event.data as GuideOut;
       if (m.type === "prepared") {
         const w = this.waiter;
         this.waiter = null;
@@ -90,7 +73,7 @@ export class Stage {
     guide.addEventListener("error", (e) => this.fail(new Error(`frame-generation guide worker crashed: ${(e as ErrorEvent).message}`)));
     if (packer) {
       packer.onmessage = (event: MessageEvent) => {
-        const m = event.data as PackReply | { type: "error"; message: string } | { type: "opened" | "closed" };
+        const m = event.data as GuideOut;
         if (m.type === "packed") {
           const w = this.packWaiter;
           this.packWaiter = null;
@@ -118,8 +101,8 @@ export class Stage {
   prepare(frame: TimedFrame, id: number): Promise<AnalyzedFrame> {
     if (this.failed) return Promise.reject(this.failed);
     return new Promise<AnalyzedFrame>((resolve, reject) => {
-      this.waiter = { frame, resolve, reject };
-      this.guide.postMessage({ type: "prepare", id, rgba: frame.rgba, segment: frame.segment, tsNum: frame.timestamp.num, tsDen: frame.timestamp.den });
+      this.waiter = { id, frame, resolve, reject };
+      this.guide.postMessage({ type: "prepare", id, rgba: frame.rgba, segment: frame.segment, tsNum: frame.timestamp.num, tsDen: frame.timestamp.den } satisfies GuidePrepare);
     });
   }
 
@@ -130,9 +113,9 @@ export class Stage {
     const packer = this.packer;
     if (!packer) return Promise.reject(new Error("frame-generation stage got unpacked flow but has no packer thread"));
     return new Promise<PreparedFrame>((resolve, reject) => {
-      this.packWaiter = { analyzed, resolve, reject };
+      this.packWaiter = { id, analyzed, resolve, reject };
       const buffer = analyzed.small!.buffer as ArrayBuffer;
-      packer.postMessage({ type: "pack", id, small: buffer }, [buffer]);
+      packer.postMessage({ type: "pack", id, small: buffer } satisfies GuidePack, [buffer]);
     });
   }
 
@@ -194,7 +177,7 @@ async function releaseGuideThread(guide: Worker): Promise<void> {
     };
     const timer = setTimeout(done, GUIDE_CLOSE_TIMEOUT_MS);
     guide.onmessage = (event: MessageEvent) => {
-      if ((event.data as { type?: string }).type === "closed") done();
+      if ((event.data as GuideOut).type === "closed") done();
     };
     try {
       guide.postMessage({ type: "close" });
@@ -209,14 +192,12 @@ async function releaseGuideThread(guide: Worker): Promise<void> {
   }
 }
 
-type OpenGuide = { type: "open"; width: number; height: number; detectSourceCuts: boolean; packInline: boolean } | { type: "open-packer"; width: number; height: number };
-
 /**
  * Start a guide-side worker in either role and wait until it is ready (its NVOFA session included).
  * `createWorker` starts the thread; tests hand in a stand-in.
  */
 export async function openGuideWorker(
-  open: OpenGuide,
+  open: GuideOpen | PackerOpen,
   createWorker: (script: URL) => Worker = (script) => new Worker(script.href),
 ): Promise<{ worker: Worker; flow: "nvof" | "cpu" | "pack"; flowReason: string | null }> {
   const role = open.type === "open" ? "guide" : "packer";
