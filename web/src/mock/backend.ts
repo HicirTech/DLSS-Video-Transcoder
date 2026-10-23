@@ -1,8 +1,9 @@
 /* The `?mock=1` backend: answers every API call in the browser from mock data and the in-memory job engine. */
 import type { ApiClient, JobEventSource } from "../api";
 import { ApiError } from "../errors";
+import { settingsDefaults } from "../../../src/server/api-types";
 import { validateJobRequest } from "../../../src/server/validate";
-import { MOCK_PROBE, MOCK_TOOLS, mockCatalog, mockMediaInfo, mockSettingsDefaults, mockUpload } from "./fixtures";
+import { MOCK_PROBE, MOCK_TOOLS, mockCatalog, mockMediaInfo, mockUpload } from "./fixtures";
 import { MockJobEngine, timestamp } from "./job-engine";
 import { mockPreviewSvg } from "./preview-svg";
 import { createSeedJobs } from "./seed-jobs";
@@ -20,7 +21,7 @@ export function createMockBackend(): { client: ApiClient; events: JobEventSource
       return { ...structuredClone(MOCK_PROBE), generatedAt: timestamp() };
     },
     runtime: async () => structuredClone(MOCK_PROBE.runtime),
-    settingsDefaults: async () => mockSettingsDefaults(),
+    settingsDefaults: async () => settingsDefaults(),
     tools: async () => structuredClone(MOCK_TOOLS),
     catalog: async () => mockCatalog(),
     listJobs: async () => engine.list(),

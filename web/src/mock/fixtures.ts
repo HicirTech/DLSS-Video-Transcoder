@@ -1,19 +1,11 @@
 /*
- * Static mock answers for the read-only endpoints: hardware probe, tools, runtime catalog, upload, media
- * info and settings defaults. No DOM dependency, so the Bun mock server (web/mock-server.ts) and the browser
+ * Static mock answers for the read-only endpoints: hardware probe, tools, runtime catalog, upload and media
+ * info. No DOM dependency, so the Bun mock server (web/mock-server.ts) and the browser
  * (`?mock=1`) share them.
  */
 import { FEATURES, type FeatureKey } from "../../../src/ngx/features";
 import type { RuntimeManifest, VersionEntry } from "../../../src/ngx/runtime-catalog";
-import type { MediaInfo, ProbeReport, SettingsDefaults, ToolsReport, UploadResult } from "../../../src/server/api-types";
-import {
-  DEFAULT_ENCODE_SETTINGS,
-  DEFAULT_FRAME_GEN_STEP,
-  DEFAULT_NR_SETTINGS,
-  DEFAULT_SCALE_SETTINGS,
-  DEFAULT_SR_STEP,
-  DEFAULT_WARMUP_FRAMES,
-} from "../../../src/server/api-types";
+import type { MediaInfo, ProbeReport, ToolsReport, UploadResult } from "../../../src/server/api-types";
 
 const RUNTIME_FOLDER = "C:\\Tools\\neural-render\\runtime";
 const DRIVER_STORE = "C:\\Windows\\System32\\DriverStore\\FileRepository\\nvlti.inf_amd64_3f1c2b7e9d0a4c55";
@@ -278,13 +270,3 @@ export function mockMediaInfo(path: string): MediaInfo {
   return { kind: "video", width: 1920, height: 1080, fps: "30000/1001", nominalFps: "30000/1001", frames: 2880, durationSeconds: 96.096, codec: "h264", hasAudio: true };
 }
 
-export function mockSettingsDefaults(): SettingsDefaults {
-  return {
-    superResolution: structuredClone(DEFAULT_SR_STEP),
-    neuralRendering: { ...DEFAULT_NR_SETTINGS },
-    frameGen: { ...DEFAULT_FRAME_GEN_STEP },
-    resize: { ...DEFAULT_SCALE_SETTINGS },
-    encode: { ...DEFAULT_ENCODE_SETTINGS },
-    warmupFrames: DEFAULT_WARMUP_FRAMES,
-  };
-}

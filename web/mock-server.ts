@@ -8,10 +8,10 @@
  */
 import index from "./index.html";
 import type { JobRequest, WsEvent } from "../src/server/api-types";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, isActiveState } from "../src/server/api-types";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, isActiveState, settingsDefaults } from "../src/server/api-types";
 import { MAX_REQUEST_BODY_BYTES, uploadFileName } from "../src/server/upload";
 import { asJobRequest, validateJobRequest } from "../src/server/validate";
-import { MOCK_PROBE, MOCK_TOOLS, mockCatalog, mockMediaInfo, mockSettingsDefaults, mockUpload } from "./src/mock/fixtures";
+import { MOCK_PROBE, MOCK_TOOLS, mockCatalog, mockMediaInfo, mockUpload } from "./src/mock/fixtures";
 import { MockJobEngine } from "./src/mock/job-engine";
 import { mockPreviewSvg } from "./src/mock/preview-svg";
 import { createSeedJobs } from "./src/mock/seed-jobs";
@@ -61,7 +61,7 @@ const server = Bun.serve({
       if (!path) return failure(404, "File not found. The 'path' query parameter must be an absolute path to an existing file.");
       return json(mockMediaInfo(path));
     },
-    "/api/settings/defaults": () => json(mockSettingsDefaults()),
+    "/api/settings/defaults": () => json(settingsDefaults()),
     "/api/tools": () => json(MOCK_TOOLS),
     "/api/jobs": {
       GET: () => json(engine.list()),
