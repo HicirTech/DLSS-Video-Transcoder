@@ -1,5 +1,5 @@
 /**
- * The FGS1/FGR1/FGF2/FGO2 messages against golden bytes written out by hand from the layout
+ * The FGS2/FGR1/FGF3/FGO2 messages against golden bytes written out by hand from the layout
  * the host reads, so a moved field or a big-endian write fails here rather than on the GPU; and
  * the `--probe` line's snake_case keys.
  */
@@ -30,19 +30,22 @@ function hex(text: string): Uint8Array {
   return Uint8Array.from(text.trim().split(/\s+/), (pair) => parseInt(pair, 16));
 }
 
-const FGS1 = "46 47 53 31";
+const FGS2 = "46 47 53 32";
 const FGR1 = "46 47 52 31";
-const FGF2 = "46 47 46 32";
+const FGF3 = "46 47 46 33";
 const FGO2 = "46 47 4f 32";
 /** The frame magics of the protocol whose pixels followed the messages on the pipe. */
 const FGF1 = "46 47 46 31";
 const FGO1 = "46 47 4f 31";
+/** The setup and frame header magics of the layouts that still carried fields nothing read. */
+const FGS1 = "46 47 53 31";
+const FGF2 = "46 47 46 32";
 
-describe("FGS1 setup", () => {
-  const setup = { width: 1280, height: 720, frameCount: 3734, generatedCount: 1 };
-  const golden = hex(`${FGS1}  00 05 00 00  d0 02 00 00  96 0e 00 00  01 00 00 00`);
+describe("FGS2 setup", () => {
+  const setup = { width: 1280, height: 720, generatedCount: 1 };
+  const golden = hex(`${FGS2}  00 05 00 00  d0 02 00 00  01 00 00 00`);
 
-  test("encodes magic, width, height, frameCount, generatedCount as little-endian u32", () => {
+  test("encodes magic, width, height, generatedCount as little-endian u32", () => {
     expect(encodeSetup(setup)).toEqual(golden);
     expect(golden.byteLength).toBe(SETUP_BYTES);
   });
@@ -52,7 +55,11 @@ describe("FGS1 setup", () => {
   });
 
   test("rejects another message's magic", () => {
-    expect(() => decodeSetup(hex(`${FGF2} ${"00 ".repeat(16)}`))).toThrow("DLSSG setup: bad request magic");
+    expect(() => decodeSetup(hex(`${FGF3} ${"00 ".repeat(12)}`))).toThrow("DLSSG setup: bad request magic");
+  });
+
+  test("rejects the previous layout's magic, so a peer that still sends a frame count is not served", () => {
+    expect(() => decodeSetup(hex(`${FGS1} ${"00 ".repeat(12)}`))).toThrow("DLSSG setup: bad request magic");
   });
 });
 

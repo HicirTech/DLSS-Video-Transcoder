@@ -241,9 +241,6 @@ export interface DlssgOptions {
 /** The way out when a session asks for more in-between frames than the runtime makes, whichever side notices. */
 const USE_LOWER_MULTIPLIER = "Use a lower multiplier.";
 
-/** The frame count the setup message declares (DlssgSetup.frameCount): none, since dlssg-host.ts serves until its stdin ends. */
-const UNDECLARED_FRAME_COUNT = 0;
-
 /**
  * Why setup was refused. Status 2 means the request exceeded the runtime's MultiFrameCountMax
  * (HostStatus.tooManyGenerated); any other status is reported as it is, with what the host wrote to stderr.
@@ -387,7 +384,7 @@ export class DlssgSession {
     // frames than the runtime supports gets.
     try {
       const reader = new FrameReader(proc.stdout);
-      const setup = encodeSetup({ width: opts.width, height: opts.height, frameCount: UNDECLARED_FRAME_COUNT, generatedCount: opts.generatedCount });
+      const setup = encodeSetup({ width: opts.width, height: opts.height, generatedCount: opts.generatedCount });
       try {
         proc.stdin.write(setup);
         await proc.stdin.flush();

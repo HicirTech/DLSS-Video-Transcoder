@@ -1,23 +1,20 @@
 /**
- * The protocol the DLSS Frame Generation host process (dlssg-host.ts) speaks on stdout and stdin:
- * the one JSON line `--probe` prints, and under `--serve` one FGS1 setup answered by FGR1, then one
- * FGF2 per real frame answered by FGO2. The pixels and motion going in and the generated frames
- * coming out are not on the pipes but in the shared memory named on the host's command line
- * (dlssg-shared-layout.ts); a message only says whose turn it is to use them. Pure encode and
- * decode; the I/O stays with each side.
+ * The messages the DLSS Frame Generation host (dlssg-host.ts) speaks on stdout and stdin: the `--probe` JSON line,
+ * and the FGS2/FGR1 setup and FGF3/FGO2 frame messages of `--serve`, as pure encode and decode. The frame data is
+ * not on the pipes but in the shared memory of dlssg-shared-layout.ts; a message only says whose turn it is to use it.
  */
 
-// Each magic is its four ASCII characters read as a little-endian u32, so a hex dump of the
-// stream shows "FGS1", "FGR1", "FGF2" and "FGO2". The frame messages are "2" because their payload
-// travels in shared memory: a peer that still expects it on the pipe fails on the first magic
-// instead of misreading the stream.
-const SETUP_MAGIC = 0x31534746;
+// Each magic is its four ASCII characters read as a little-endian u32, so a hex dump of the stream shows "FGS2",
+// "FGR1", "FGF3" and "FGO2". A message's number goes up whenever its layout changes (the frame messages when their
+// payload moved to shared memory, the setup and the frame header when they lost fields nothing read), so a peer
+// built for an older layout fails on the first magic instead of misreading the stream.
+const SETUP_MAGIC = 0x32534746;
 const SETUP_REPLY_MAGIC = 0x31524746;
 const FRAME_MAGIC = 0x32464746;
 const FRAME_RESULT_MAGIC = 0x324f4746;
 
-/** FGS1: magic, width, height, frameCount, generatedCount, each a u32. */
-export const SETUP_BYTES = 20;
+/** FGS2: magic, width, height, generatedCount, each a u32. */
+export const SETUP_BYTES = 16;
 /** FGR1: magic, status, maximum, reserved, each a u32. */
 export const SETUP_REPLY_BYTES = 16;
 /** FGF2: magic, index, reset, padding (u32 each), then the timestamp numerator and denominator (i64 each). */
@@ -28,8 +25,6 @@ export const FRAME_RESULT_BYTES = 16;
 export interface DlssgSetup {
   width: number;
   height: number;
-  /** Real frames the parent will send, or 0 when it does not say; dlssg-host.ts ignores it and serves until stdin ends. */
-  frameCount: number;
   /** In-between frames per interval = native multiplier - 1. */
   generatedCount: number;
 }
@@ -143,7 +138,7 @@ function encodeWords(words: readonly number[]): Uint8Array {
 }
 
 export function encodeSetup(setup: DlssgSetup): Uint8Array {
-  return encodeWords([SETUP_MAGIC, setup.width, setup.height, setup.frameCount, setup.generatedCount]);
+  return encodeWords([SETUP_MAGIC, setup.width, setup.height, setup.generatedCount]);
 }
 
 export function decodeSetup(bytes: Uint8Array): DlssgSetup {
@@ -152,8 +147,7 @@ export function decodeSetup(bytes: Uint8Array): DlssgSetup {
   return {
     width: view.getUint32(4, true),
     height: view.getUint32(8, true),
-    frameCount: view.getUint32(12, true),
-    generatedCount: view.getUint32(16, true),
+    generatedCount: view.getUint32(12, true),
   };
 }
 
