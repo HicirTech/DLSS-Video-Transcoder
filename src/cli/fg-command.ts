@@ -1,10 +1,13 @@
 /** The `fg` command: DLSS Frame Generation, interpolating a video to a higher frame rate. */
-import { ENCODE_CODECS, FRAME_GEN_ENGINES } from "../server/api-types.ts";
+import { ENCODE_CODECS, FRAME_GEN_CONTAINER, FRAME_GEN_ENGINES } from "../server/api-types.ts";
 import { type FrameGenResult, processFrameGen } from "../pipeline/framegen.ts";
 import { resolveTargetRate } from "../pipeline/framegen-plan.ts";
 import { choiceOption, numberOption, option, positionalArgs, runtimeDirOption } from "./args.ts";
 import { commandSpec, FG_MULTIPLIER_OPTION, QUALITY_OPTION } from "./commands.ts";
 import { dlssVersionOption } from "./dlss-version-option.ts";
+import { interruptSignal } from "./interrupt.ts";
+import { outputArgument } from "./output-argument.ts";
+import { printProgress } from "./progress.ts";
 import { usageError } from "./usage-error.ts";
 
 /**
@@ -30,7 +33,7 @@ export async function fgCommand(args: string[]): Promise<void> {
   const runtimeDir = runtimeDirOption(args);
   const result = await processFrameGen({
     input,
-    output: positional[1],
+    output: outputArgument(positional[1], { container: FRAME_GEN_CONTAINER, command: "fg", writes: "the container frame generation writes", switchable: false }),
     targetFps: targetFpsOption(args),
     multiplier: numberOption(args, "--multiplier", FG_MULTIPLIER_OPTION),
     engine: choiceOption(args, "--engine", FRAME_GEN_ENGINES),

@@ -2,7 +2,6 @@
  * The `video` command: builds the video job the web UI would send from the command line, checks it with the
  * server's validateJobRequest and runs it in this process.
  */
-import { extname } from "node:path";
 import { loadEngines } from "../pipeline/engine-loader.ts";
 import type { ProgressReporter } from "../pipeline/frame-progress.ts";
 import { frameGenJobOptions, processFrameGen } from "../pipeline/framegen.ts";
@@ -33,6 +32,8 @@ import { commandSpec, FG_MULTIPLIER_OPTION, QUALITY_OPTION, VIDEO_STEP_OPTS } fr
 import { stepVersionOption } from "./dlss-version-option.ts";
 import { frameGenSummary, targetFpsOption } from "./fg-command.ts";
 import { nrSettingsOption } from "./nr-settings-option.ts";
+import { outputArgument } from "./output-argument.ts";
+import { printProgress } from "./progress.ts";
 import { usageError } from "./usage-error.ts";
 
 export async function videoCommand(args: string[]): Promise<void> {
@@ -85,7 +86,13 @@ export function videoRequest(args: string[], runtimeDir: string): JobRequest {
   const request: JobRequest = {
     kind: "video",
     input,
-    output: outputArgument(positional[1], encode.container),
+    output: outputArgument(positional[1], {
+      container: encode.container,
+      command: "video",
+      writes: `the container this job writes (--container, default ${DEFAULT_ENCODE_SETTINGS.container})`,
+      // With --fg, --container takes FRAME_GEN_CONTAINER only, so suggesting another would lead to the next refusal.
+      switchable: !steps.fg,
+    }),
     superResolution: steps.sr
       ? { scale: size ?? DEFAULT_SR_STEP.scale, motion: choiceOption(args, "--motion", MOTION_KINDS) ?? DEFAULT_SR_STEP.motion, dllDir: stepVersionOption(args, runtimeDir, "sr") }
       : undefined,
@@ -127,18 +134,6 @@ function encodeOption(args: string[]): EncodeSettings {
     container: choiceOption(args, "--container", ENCODE_CONTAINERS) ?? DEFAULT_ENCODE_SETTINGS.container,
     copyAudio: !flag(args, "--no-audio"),
   };
-}
-
-/**
- * The output path, when one is given, must end in the container's extension: ffmpeg picks the muxer from the
- * name, while the audio codec and the mux flags follow --container, so a mismatch writes neither as asked.
- */
-function outputArgument(output: string | undefined, container: EncodeSettings["container"]): string | undefined {
-  if (output === undefined) return undefined;
-  const extension = extname(output).slice(1).toLowerCase();
-  if (extension === container) return output;
-  const named = (ENCODE_CONTAINERS as readonly string[]).includes(extension) ? ` or add --container ${extension}` : "";
-  usageError(`output ${output} must end in .${container}, the container this job writes (--container, default ${DEFAULT_ENCODE_SETTINGS.container}); rename it${named}`, "video");
 }
 
 /**
