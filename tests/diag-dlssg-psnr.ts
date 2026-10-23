@@ -81,7 +81,12 @@ try {
   let dropped: Uint8Array[] = [];
   for (let sourceIndex = 0; keptFrameLimit === 0 || counts.kept < keptFrameLimit; sourceIndex++) {
     const frame = await reader.next(frameBytes);
-    if (!frame) break;
+    if (!frame) {
+      // The decoder's stdout is read to its end here, so its exit is due: a failed decode is no finished clip.
+      const exitCode = await decoder.exited;
+      if (exitCode !== 0) throw new Error(`ffmpeg exited ${exitCode} while decoding ${input}`);
+      break;
+    }
     if (sourceIndex % sourceStep !== 0) {
       dropped.push(frame);
       continue;
