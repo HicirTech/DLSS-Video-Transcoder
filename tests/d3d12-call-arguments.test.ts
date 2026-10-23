@@ -11,7 +11,9 @@ import {
 // Stand-in resource addresses: the fake command list only compares them, nothing dereferences them.
 const DESTINATION = 0x7ff612345000;
 const SOURCE = 0x7ff612346000;
-const FOOTPRINT = { offset: 512, format: DXGI_FORMAT_R8G8B8A8_UNORM, width: 1280, height: 720, rowPitch: 5120 };
+const WIDTH = 1280;
+const HEIGHT = 720;
+const FOOTPRINT = { offset: 512, format: DXGI_FORMAT_R8G8B8A8_UNORM, width: WIDTH, height: HEIGHT, rowPitch: 5120 };
 // Copies and barriers are recorded for this long while garbage is allocated around them, so a collection can
 // land between building a struct and the native read; every struct the fake list receives must be intact.
 const RUN_MILLISECONDS = 2000;
@@ -66,8 +68,9 @@ test("D3D12 command-list structs reach native code intact under allocation press
   const listObject = new BigUint64Array([BigInt(ptr(vtable))]);
   try {
     const list = new D3D12GraphicsCommandList(ptr(listObject), "fake command list");
-    const destination = new D3D12Resource(DESTINATION, "destination", "texture2d", 1280, 720, DXGI_FORMAT_R8G8B8A8_UNORM, 0, D3D12_RESOURCE_STATE_COPY_DEST);
-    const source = new D3D12Resource(SOURCE, "source", "texture2d", 1280, 720, DXGI_FORMAT_R8G8B8A8_UNORM, 0, D3D12_RESOURCE_STATE_COPY_DEST);
+    const texture = { kind: "texture2d", width: WIDTH, height: HEIGHT, format: DXGI_FORMAT_R8G8B8A8_UNORM, sizeInBytes: WIDTH * HEIGHT * 4, initialState: D3D12_RESOURCE_STATE_COPY_DEST } as const;
+    const destination = new D3D12Resource(DESTINATION, { ...texture, label: "destination" });
+    const source = new D3D12Resource(SOURCE, { ...texture, label: "source" });
 
     const garbage: Uint8Array[] = [];
     const deadline = performance.now() + RUN_MILLISECONDS;
