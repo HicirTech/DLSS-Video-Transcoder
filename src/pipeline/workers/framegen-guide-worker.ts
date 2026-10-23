@@ -1,20 +1,7 @@
 /**
- * Guide-side worker for frame generation, in one of two roles:
- *
- *   - guide ("open"): owns one stage's motion-guide history — the optical-flow
- *     estimator with its own NVOFA session on this thread, the previous frame's
- *     segment/timestamp, and the scene-cut counter.
- *   - packer ("open-packer"): upsamples a stage's grid flow to render
- *     resolution, scales it and packs it as R16G16_FLOAT halves.
- *
- * Only the last cascade stage — 2^(stages-1) evaluations per source frame, the
- * bottleneck — is given a separate packer worker so its analysis and packing
- * overlap; earlier stages pack inline (packInline), because more busy threads
- * than the machine has cores only adds contention.
- *
- * Frames arrive as SharedArrayBuffer-backed RGBA (no copy); flow and packed
- * fields go back as transferred ArrayBuffers. The history is only correct
- * because the coordinator sends one request at a time, in stream order.
+ * Guide-side worker for frame generation: either owns one stage's motion-guide history (flow estimator with its own
+ * NVOFA session, previous segment and timestamp, scene-cut count) or, as a packer, upsamples a stage's grid flow and
+ * packs it as R16G16_FLOAT.
  */
 import { createMotionEstimator, type MotionEstimator } from "../flow.ts";
 import { flowGridSize } from "../flow-grid.ts";
@@ -75,6 +62,7 @@ const post = (message: GuideOut, transfer: Transferable[] = []): void => self.po
 
 let estimator: MotionEstimator | null = null;
 let detectSourceCuts = false;
+// Correct only because the coordinator sends one prepare at a time, in stream order.
 let previous: { segment: number; tsNum: bigint; tsDen: bigint } | null = null;
 let sceneCuts = 0;
 let packInline = false;

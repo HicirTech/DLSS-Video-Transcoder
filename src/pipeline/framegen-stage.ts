@@ -188,8 +188,9 @@ export async function releaseStageParts({ session, guide, packer }: { session: D
 /**
  * How long to wait for a guide thread to report its NVOFA session released
  * before terminating it anyway. A thread wedged inside a driver call must not
- * hold up the rest of the teardown; leaking one session at process exit is the
- * lesser cost, and the process is ending in that case regardless.
+ * hold up the rest of the teardown, which close() fits inside ABORT_TIMEOUT_MS.
+ * Terminating it leaves its session allocated on the CUDA primary context until
+ * the process exits: in the server, until it is restarted.
  */
 const GUIDE_CLOSE_TIMEOUT_MS = 2000;
 

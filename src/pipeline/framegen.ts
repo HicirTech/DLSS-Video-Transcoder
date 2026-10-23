@@ -1,22 +1,6 @@
 /**
- * Video frame generation to an exact target frame rate: ffmpeg decode -> the job's
- * Super Resolution and Neural Rendering, when it runs them -> one or more DLSSG
- * stages -> a nearest-timestamp writer -> encode, coordinated here.
- *
- * Two paths (chosen in framegen-plan.ts):
- *
- *   - Native DLSSG: one session generating m-1 frames per interval, m = target
- *     / source an exact integer the runtime supports. m >= 3 needs HAGS.
- *   - Cascade: 2x stages chained IN MEMORY — stage k interpolates between the
- *     frames stage k-1 produced, so no intermediate encode — reaching a
- *     2^stages grid. This is what reaches 4x/8x on runtimes that only do 2x,
- *     and any non-integer ratio (30 -> 144).
- *
- * What sets the output length is explained at NearestTimestampWriter
- * (framegen-plan.ts). The muxed file is verified (frame count + rate) before
- * the job reports success.
- *
- * Ported from the reference project's frame_interpolation package.
+ * Runs one frame-generation job end to end: decode, the job's Super Resolution and Neural Rendering steps, the
+ * DLSSG stages framegen-plan.ts chooses, nearest-timestamp placement, encode and a check of the muxed output.
  */
 import { existsSync } from "node:fs";
 import {
@@ -163,9 +147,9 @@ export interface FrameGenResult {
   /** Largest distance between an output instant and the frame chosen for it. */
   maximumTemporalErrorSeconds: number;
   hagsEnabled: boolean;
-  /** "overlapped" (threads + concurrent stages) or "sequential" (fallback for frames too large for the buffer limit). */
+  /** "overlapped" (threads + concurrent stages) or "sequential" (fallback for frames too large for the buffer limit, or forced by NR_FRAMEGEN_SEQUENTIAL=1). */
   mode: "overlapped" | "sequential";
-  /** Peak bytes of frames in flight, or null when the run used the sequential fallback, which keeps no credit ledger. */
+  /** Peak bytes of frames in flight, or null when the run used the sequential runner, which keeps no credit ledger. */
   peakBufferBytes: number | null;
   ms: number;
 }
@@ -189,7 +173,7 @@ class FrameGenDisabledError extends Error {
   }
 }
 
-/** Runtimes (dlssgRuntimeKey) whose host has refused a native multi-frame session in this process; "auto" skips the fail-fast probe for those. */
+/** Runtimes (dlssgRuntimeKey) whose host has refused a native multi-frame session in this process; "auto" starts their later jobs as a cascade instead of trying a native session again. */
 const nativeMultiFrameRefused = new Set<string>();
 
 /** Where this job's host loads DLSS Frame Generation from. */
@@ -457,12 +441,13 @@ async function openStages({ options, progress, width, height, plan }: FrameGenJo
   if (plan.path === "Native DLSSG") generatedCounts.push(plan.generatedPerInterval);
   else if (plan.path === "Cascade") for (let stage = 0; stage < plan.cascadeStages; stage++) generatedCounts.push(1);
   // Open every stage's host process and guide thread concurrently: each
-  // brings up its own D3D12/NGX or CUDA/NVOFA context, ~1 s of fixed cost
+  // brings up its own D3D12/NGX or CUDA/NVOFA context, a fixed start-up cost
   // that would otherwise be paid stage by stage.
   const openStage = async (index: number, generatedCount: number): Promise<Stage> => {
-    // Only the last stage — 2^(stages-1) evaluations per source frame, the
-    // bottleneck — gets a packer thread; the others pack inline so the machine
-    // is not oversubscribed.
+    // Only the last stage gets a packer thread: it is the bottleneck, as the
+    // single stage of a native run or, in a cascade, the one doing 2^(stages-1)
+    // evaluations per source frame. The others pack inline, since more busy
+    // threads than cores only adds contention.
     const packInline = index !== generatedCounts.length - 1;
     const results = await Promise.allSettled([
       DlssgSession.open(dlssgRuntimeOf(options), { width, height, generatedCount, sharedFrames: true, signal: options.signal }),
@@ -586,8 +571,6 @@ function finishFrameGen(
     maximumTemporalErrorSeconds: ratToNumber(writer.maxError),
     hagsEnabled: caps.hagsEnabled,
     mode,
-    // null when the sequential runner ran: it keeps no credit ledger, so there
-    // is no high-water mark to report.
     peakBufferBytes: peak === null ? null : peak * frameBytes,
     ms: Math.round(performance.now() - started),
   };

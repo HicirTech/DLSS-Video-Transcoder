@@ -107,7 +107,7 @@ export interface InterpolationPlan {
   cascadeStages: number;
   /** Worst-case distance between an output instant and the fine-grid frame chosen for it. */
   maximumTemporalError: Rational;
-  /** In-between frames requested from the host per session interval (generated_count). */
+  /** In-between frames the whole path adds per source interval: the native session's generated_count (m - 1), gridMultiplier - 1 for a cascade (each stage's session requests 1), 0 for resampling. */
   generatedPerInterval: number;
 }
 

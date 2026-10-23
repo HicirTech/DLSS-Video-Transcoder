@@ -10,7 +10,8 @@ import { formatRational, parseRational, ratCmp, ratToNumber, type Rational, tryP
 /**
  * ffprobe's view of a written file. `frames` counts packets rather than trusting
  * a container header, `avgRate` is frames over container duration, and `rate` is
- * ffprobe's base-rate guess (r_frame_rate), kept for diagnostics.
+ * ffprobe's base rate (r_frame_rate), which verifyOutputVideo requires to equal
+ * the target exactly.
  */
 function probeOutputVideo(ffprobe: string, path: string): { frames: number; rate: Rational; avgRate: Rational; timeBase: string } {
   const proc = Bun.spawnSync([ffprobe, "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries", "stream=nb_read_packets,r_frame_rate,avg_frame_rate,time_base", "-of", "json", path], { stdout: "pipe", stderr: "pipe" });
@@ -27,7 +28,7 @@ function probeOutputVideo(ffprobe: string, path: string): { frames: number; rate
   };
 }
 
-/** Average rate is frames over container duration, so its final-frame rounding is allowed this much drift. */
+/** Average rate is frames over container duration, so its final-frame rounding is allowed this relative drift (0.1 %). */
 const AVERAGE_RATE_TOLERANCE = 1e-3;
 
 /** Deletes an output that failed verification; the verification error is the one worth reporting, not an unlink's. */

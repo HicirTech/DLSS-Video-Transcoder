@@ -2,13 +2,6 @@
  * Encode-stage worker for frame generation: owns the NVENC encoder and the
  * mux/encode ffmpeg child, encoding each finished output frame on the GPU (or
  * passing the raw RGBA through for the CPU codecs) into ffmpeg's stdin.
- *
- * It is a worker because `NvencEncoder.encode` is a synchronous FFI call
- * costing ~3.2 ms per output frame, which on the coordinator thread stalls the
- * loop feeding the guide threads and the DLSSG host processes. NVENC's CUDA
- * context is therefore created here, on the thread that uses it. Frames arrive
- * as SharedArrayBuffer-backed RGBA, so posting them costs nothing; display
- * order holds because every request is appended to a single promise chain.
  */
 import { ffmpegFailedMessage } from "../ffmpeg-failure.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "../framegen-device.ts";
@@ -50,6 +43,7 @@ let proc: ReturnType<typeof Bun.spawn> | null = null;
 let sink: { write(b: Uint8Array): unknown; end(): unknown } | null = null;
 let stderrText = "";
 let stderrDrained: Promise<void> = Promise.resolve();
+// Every request is appended to this one chain, so frames reach ffmpeg in display order.
 let chain: Promise<void> = Promise.resolve();
 let stopped = false;
 
