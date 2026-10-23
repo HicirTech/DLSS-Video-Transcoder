@@ -97,11 +97,6 @@ function refusalStatus(error: unknown): number {
   return error.reason === "tooManyGenerated" ? HostStatus.tooManyGenerated : HostStatus.unavailable;
 }
 
-/** A GPU still running a submit whose wait timed out may still use the session, so the process exit releases it then. */
-function closeUnlessBusy(session: GpuSession): void {
-  if (session.gpu.idle) session.close();
-}
-
 function openFeature(setup: DlssgSetup, runtime: DlssgRuntimeOptions): GeneratorOpening {
   let session: GpuSession;
   try {
@@ -118,13 +113,13 @@ function openFeature(setup: DlssgSetup, runtime: DlssgRuntimeOptions): Generator
         try {
           feature.close();
         } finally {
-          closeUnlessBusy(session);
+          session.close();
         }
       },
     };
     return { outcome: "opened", generator };
   } catch (error) {
-    closeUnlessBusy(session);
+    session.close();
     return { outcome: "refused", status: refusalStatus(error), reason: (error as Error).message };
   }
 }
