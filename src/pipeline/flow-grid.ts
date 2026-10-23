@@ -20,8 +20,10 @@ export function flowGridSize(width: number, height: number): { flowW: number; fl
 }
 
 /**
- * Box-average downscale RGBA8 -> Float32 luma at (flowW, flowH), reproducing
- * cvtColor(RGBA2GRAY) + resize(INTER_AREA).
+ * Box-average downscale RGBA8 -> Float32 luma at (flowW, flowH). Approximates guides.py's
+ * resize(INTER_AREA) + cvtColor(RGBA2GRAY): at an integer ratio it equals that up to
+ * the reference's uint8 rounding; at a fractional ratio each output averages a
+ * floor-aligned whole-pixel box instead of INTER_AREA's partial-pixel weights.
  */
 export function smallGray(rgba: Uint8Array, frame: { width: number; height: number }, grid: { flowW: number; flowH: number }): Float32Array {
   const { width, height } = frame;
