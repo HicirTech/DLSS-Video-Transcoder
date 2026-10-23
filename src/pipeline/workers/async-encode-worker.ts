@@ -73,7 +73,7 @@ function releaseEncoder(): void {
     encoder = null;
     for (const buffer of imported) { try { releaseD3D12Buffer(buffer); } catch { /* keep releasing the rest */ } }
     imported = [];
-    if (extSem !== 0n) { try { destroyExternalSemaphore(extSem); } catch { /* */ } }
+    if (extSem !== 0n) { try { destroyExternalSemaphore(extSem); } catch { /* a throw here would mask encoder.close()'s error and skip clearing extSem */ } }
     extSem = 0n;
   }
 }
