@@ -90,6 +90,19 @@ export function channelsFor(colorType: PngColorType): number {
   }
 }
 
+/** Largest value the specification allows in a 4-byte unsigned field (image width and height, chunk length): 2^31-1. */
+const PNG_MAX_U31 = 0x7fffffff;
+
+/** The IHDR rule on image dimensions, for the decoder and the encoder alike: whole numbers from 1 to 2^31-1. */
+export function requireValidDimensions({ width, height }: { width: number; height: number }): void {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    throw new PngError(`invalid image dimensions ${width}x${height}`);
+  }
+  if (width > PNG_MAX_U31 || height > PNG_MAX_U31) {
+    throw new PngError(`image dimensions ${width}x${height} exceed the 2^31-1 limit`);
+  }
+}
+
 /** True when the specification allows `bitDepth` for `colorType` (also narrows `colorType`). */
 function isSupportedFormat(colorType: number, bitDepth: number): colorType is PngColorType {
   switch (colorType) {
@@ -115,10 +128,7 @@ function parseIhdr(bytes: Uint8Array, dataStart: number, length: number): PngHea
   const compressionMethod = bytes[dataStart + 10];
   const filterMethod = bytes[dataStart + 11];
   const interlaceMethod = bytes[dataStart + 12];
-  if (width === 0 || height === 0) throw new PngError(`invalid image dimensions ${width}x${height}`);
-  if (width > 0x7fffffff || height > 0x7fffffff) {
-    throw new PngError(`image dimensions ${width}x${height} exceed the 2^31-1 limit`);
-  }
+  requireValidDimensions({ width, height });
   if (!isSupportedFormat(colorType, bitDepth)) {
     throw new PngError(`unsupported colour type ${colorType} / bit depth ${bitDepth} combination`);
   }
@@ -203,7 +213,7 @@ export function parseChunks(bytes: Uint8Array): ParsedFile {
       throw new PngError(`corrupt chunk type at byte ${pos + 4}`);
     }
     const name = chunkTypeName(typeCode);
-    if (length > 0x7fffffff) throw new PngError(`chunk "${name}" declares an invalid length ${length}`);
+    if (length > PNG_MAX_U31) throw new PngError(`chunk "${name}" declares an invalid length ${length}`);
     if (dataEnd + 4 > bytes.length) {
       throw new PngError(`truncated file: chunk "${name}" needs ${dataEnd + 4 - bytes.length} more bytes`);
     }
