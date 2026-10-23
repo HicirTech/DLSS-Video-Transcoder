@@ -119,7 +119,7 @@ export function probeNvof(ordinal: number): NvofCaps {
       if (outGridSizes.length === 0) throw new Error("nvOFGetCaps reported no output grid sizes");
       return { status: "ok", detail: "ok", limits, outGridSizes };
     } finally {
-      fn(FN.destroy, { args: [FFIType.u64], returns: FFIType.i32 })(hOf);
+      destroyInstance(hOf);
     }
   } catch (error) {
     return { status: "unavailable", detail: (error as Error).message };
@@ -209,7 +209,6 @@ class NvofSession {
     const getStride = fn(FN.getStride, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 });
     const createBuf = fn(FN.createBuf, { args: [FFIType.u64, FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 });
     const destroyBuf = fn(FN.destroyBuf, { args: [FFIType.u64], returns: FFIType.i32 });
-    const destroy = fn(FN.destroy, { args: [FFIType.u64], returns: FFIType.i32 });
     const created: bigint[] = [];
 
     try {
@@ -248,7 +247,7 @@ class NvofSession {
       });
     } catch (error) {
       for (const handle of created.reverse()) try { destroyBuf(handle); } catch { /* best effort */ }
-      try { destroy(hOf); } catch { /* best effort */ }
+      try { destroyInstance(hOf); } catch { /* best effort */ }
       throw error;
     }
   }
