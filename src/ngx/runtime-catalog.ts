@@ -87,8 +87,11 @@ export function parseVersionFromDirName(name: string): string | null {
   return match ? match[1]! : null;
 }
 
-function toSizeMB(bytes: number): number {
-  return Math.round((bytes / (1024 * 1024)) * 100) / 100;
+const BYTES_PER_MB = 1024 * 1024;
+
+/** A file size in MB, rounded to two decimals: the catalog and the probe's runtime inventory both report it so. */
+export function toSizeMB(bytes: number): number {
+  return Math.round((bytes / BYTES_PER_MB) * 100) / 100;
 }
 
 /** PE version info is authoritative; the folder-name hint covers DLLs stripped of it. */
