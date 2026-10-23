@@ -8,6 +8,7 @@ import {
   D3D12_RESOURCE_STATE_COMMON,
   DXGI_FORMAT_R8G8B8A8_UNORM,
   linearLayout,
+  packRows,
   type D3D12Resource,
   type D3D12GraphicsCommandList,
 } from "../native/d3d12.ts";
@@ -137,9 +138,7 @@ export class DlssNrSession {
     const expected = this.width * this.height * 4;
     if (colorRgba.byteLength !== expected) throw new Error(`DLSS NR: expected ${expected} color bytes, got ${colorRgba.byteLength}`);
     const layout = linearLayout(this.width, this.height, DXGI_FORMAT_R8G8B8A8_UNORM);
-    const target = viewNative(staging.map({ begin: 0, end: 0 }), layout.totalBytes);
-    if (layout.rowPitch === layout.rowBytes) target.set(colorRgba);
-    else for (let y = 0; y < this.height; y++) target.set(colorRgba.subarray(y * layout.rowBytes, (y + 1) * layout.rowBytes), y * layout.rowPitch);
+    packRows(viewNative(staging.map({ begin: 0, end: 0 }), layout.totalBytes), colorRgba, layout, this.height);
     staging.unmap();
     list.transition(this.color, D3D12_RESOURCE_STATE_COPY_DEST);
     list.copyTextureRegion(
