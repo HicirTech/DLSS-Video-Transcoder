@@ -112,12 +112,11 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
   if (!isPng(bytes)) throw new Error(`${options.input}: image jobs currently accept PNG input only. Convert the file to PNG and try again.`);
   const decoded = decodePng(bytes);
   const sr = options.superResolution;
-  const nr = options.neuralRendering;
   const target = resolveTargetSize(decoded.width, decoded.height, sr?.scale ?? options.resize ?? DEFAULT_SCALE_SETTINGS);
   // SR's limits need the source size, so they are checked here, before the GPU opens.
   const srProblem = sr ? srOutputProblem(decoded, target) : null;
   if (srProblem) throw new Error(srProblem);
-  const steps = jobSteps({ superResolution: sr, neuralRendering: nr });
+  const steps = jobSteps({ superResolution: sr, neuralRendering: options.neuralRendering });
   // The SR engine upscales inside DLSS, so feed it the source frame and let it
   // write the larger output. Without SR the frame is resized to the target first.
   const upscaling = sr !== undefined;
@@ -136,8 +135,10 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
     const engine = createEngineChain(session, {
       width: renderWidth,
       height: renderHeight,
-      sr: sr ? { outputWidth: target.width, outputHeight: target.height, dllDir: sr.dllDir } : undefined,
-      nr: nr ? { settings: nr.settings, dllDir: nr.dllDir } : undefined,
+      outputWidth: target.width,
+      outputHeight: target.height,
+      superResolution: sr,
+      neuralRendering: options.neuralRendering,
       runtimeDir: options.runtimeDir,
       appDataPath: options.appDataPath,
     });

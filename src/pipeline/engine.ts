@@ -13,7 +13,7 @@ import {
   DXGI_FORMAT_R8G8B8A8_UNORM,
   type D3D12Resource,
 } from "../native/d3d12.ts";
-import type { NrSettings } from "../server/api-types.ts";
+import type { NeuralRenderingStep, NrSettings, SuperResolutionStep } from "../server/api-types.ts";
 import type { GpuSession } from "./gpu.ts";
 
 export interface FrameInput {
@@ -123,10 +123,12 @@ export interface EngineChainOptions {
   /** The size of the frames the chain is fed: the source's when SR runs, else the decoded size. */
   width: number;
   height: number;
-  /** Super Resolution's output size and version folder, when the step runs. */
-  sr?: { outputWidth: number; outputHeight: number; dllDir?: string };
-  /** Neural Rendering's look and version folder, when the step runs: after SR, at SR's output size. */
-  nr?: { settings: NrSettings; dllDir?: string };
+  /** The size Super Resolution writes; read only when it runs. */
+  outputWidth: number;
+  outputHeight: number;
+  superResolution?: SuperResolutionStep;
+  /** Runs after SR when both do, at SR's output size. */
+  neuralRendering?: NeuralRenderingStep;
   runtimeDir?: string;
   appDataPath?: string;
 }
@@ -138,14 +140,14 @@ export interface EngineChainOptions {
 export function createEngineChain(session: GpuSession, options: EngineChainOptions): Engine {
   const runtime = { runtimeDir: options.runtimeDir, appDataPath: options.appDataPath };
   let sr: Engine | null = null;
-  if (options.sr) {
+  if (options.superResolution) {
     if (!srFactory) throw new Error("SR engine is not registered; load it through engine-loader.ts before creating it");
-    sr = srFactory(session, { ...runtime, dllDir: options.sr.dllDir, width: options.width, height: options.height, outputWidth: options.sr.outputWidth, outputHeight: options.sr.outputHeight });
+    sr = srFactory(session, { ...runtime, dllDir: options.superResolution.dllDir, width: options.width, height: options.height, outputWidth: options.outputWidth, outputHeight: options.outputHeight });
   }
-  if (!options.nr) return sr ?? new BypassEngine(session, options.width, options.height);
+  if (!options.neuralRendering) return sr ?? new BypassEngine(session, options.width, options.height);
   try {
     if (!neuralFactory) throw new Error("Neural engine is not registered; load it through engine-loader.ts before creating it");
-    const nr = neuralFactory(session, { ...runtime, dllDir: options.nr.dllDir, width: sr?.outputWidth ?? options.width, height: sr?.outputHeight ?? options.height, settings: options.nr.settings });
+    const nr = neuralFactory(session, { ...runtime, dllDir: options.neuralRendering.dllDir, width: sr?.outputWidth ?? options.width, height: sr?.outputHeight ?? options.height, settings: options.neuralRendering.settings });
     return sr ? new ChainEngine(sr, nr) : nr;
   } catch (error) {
     sr?.close(); // opened above, and nothing else holds it yet
