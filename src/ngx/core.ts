@@ -118,12 +118,8 @@ export class NgxCore {
     return new NgxCore({ ...chosen, path }, NativeModule.load(path));
   }
 
-  address(exportName: string): number {
+  private address(exportName: string): number {
     return this.module.requireProc(exportName);
-  }
-
-  hasExport(exportName: string): boolean {
-    return this.module.proc(exportName) !== 0;
   }
 
   /**

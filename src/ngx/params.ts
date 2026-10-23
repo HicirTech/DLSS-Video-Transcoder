@@ -144,10 +144,6 @@ export class NgxParameters {
     return ngxOk(result) ? Number(out.value) : null;
   }
 
-  reset(): void {
-    vtableMethod(this.ptr, this.slots.reset, { args: [], returns: FFIType.void })(this.ptr);
-  }
-
   /**
    * Confirm which overload order the loaded core uses by writing a float through
    * one layout's `Set(float)` slot and reading it back through its `Get(float*)`
