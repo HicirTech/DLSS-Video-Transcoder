@@ -163,7 +163,7 @@ describe("video", () => {
 describe("fg", () => {
   test("a missing input asks for the fg help page", async () => {
     const error = await usageErrorOf(() => fgCommand([]));
-    expect(error.message).toBe("missing <input.mp4>");
+    expect(error.message).toBe("missing <input>");
     expect(error.command).toBe("fg");
   });
 

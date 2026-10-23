@@ -110,7 +110,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     options: [
       { flag: "--out PATH", desc: "where to write the generated shim DLL", def: "<repo>/runtime/caller/nvngx.dll" },
     ],
-    notes: ["Only needed to (re)build the shim by hand; sr/nr build it automatically when missing."],
+    notes: ["Only needed to (re)build the shim by hand: probe, sr, nr, fg and video write it into <runtime>/caller whenever it is missing or differs from the freshly built DLL."],
   },
   {
     name: "sr",
@@ -173,9 +173,9 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "fg",
     summary: "DLSS Frame Generation (NGX feature 11): interpolate a video to a higher frame rate.",
-    usage: "bun run src/cli.ts fg <input.mp4> [output.mp4] [options]",
+    usage: "bun run src/cli.ts fg <input> [output.mp4] [options]",
     args: [
-      { name: "input.mp4", desc: "source video (any format ffmpeg can decode)" },
+      { name: "input", desc: "source video (any format ffmpeg can decode)" },
       { name: "output.mp4", desc: "destination; defaults to <input>.fg.mp4 next to the input, the name a video job with frame generation alone gives it" },
     ],
     options: [
