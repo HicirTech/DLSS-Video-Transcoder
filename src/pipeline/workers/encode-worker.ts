@@ -29,7 +29,7 @@ interface EncodeFinish { type: "finish" }
 /** What the main thread sends the encode worker. */
 type EncodeIn = EncodeOpen | EncodeFrame | EncodeFinish | AbortRequest;
 /** What it answers. */
-type EncodeOut =
+export type EncodeOut =
   | { type: "opened" }
   | { type: "encoded"; index: number }
   | { type: "done" }
