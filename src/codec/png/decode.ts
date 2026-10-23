@@ -88,10 +88,10 @@ export function decodePng(bytes: Uint8Array): RgbaImage {
 function concatenateIdat(bytes: Uint8Array, parsed: ParsedFile): Uint8Array {
   // All IDAT payloads together form one zlib stream.
   const compressed = new Uint8Array(parsed.idatLength);
-  let cp = 0;
+  let written = 0;
   for (const [start, end] of parsed.idat) {
-    compressed.set(bytes.subarray(start, end), cp);
-    cp += end - start;
+    compressed.set(bytes.subarray(start, end), written);
+    written += end - start;
   }
   return compressed;
 }
