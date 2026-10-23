@@ -142,6 +142,8 @@ export class DlssSrSession {
   }
 
   close(): void {
+    // A submit whose wait timed out may still run the feature on these resources, so they are left to the process exit.
+    if (!this.session.gpu.idle) return;
     this.core.releaseFeature(this.handle);
     this.core.destroyParameters(this.params);
     this.color.release();
