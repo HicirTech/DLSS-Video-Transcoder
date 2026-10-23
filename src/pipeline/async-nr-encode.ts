@@ -2,14 +2,6 @@
  * GPU-resident async pipeline for DLSS Neural Rendering + NVENC: a decode
  * worker, DLSS on the main thread and an encode worker, with no CPU copy of a
  * frame between DLSS and NVENC.
- *
- * The main thread records DLSS eval plus a copy of the result into a shared
- * D3D12 buffer slot, submits it without waiting and signals a shared fence; the
- * encode worker imports pool and fence into CUDA, waits that fence value and
- * encodes the slot straight from GPU memory. DLSS runs on D3D12 compute and
- * NVENC on the separate encoder units, so frame i+1's DLSS overlaps frame i's
- * encode. A slot only becomes free again when the encode worker acks it, which
- * bounds memory to POOL_SLOTS frames.
  */
 import { AsyncSubmit } from "../native/async-submit.ts";
 import { D3D12_HEAP_TYPE_UPLOAD, type D3D12Fence, type D3D12Resource } from "../native/d3d12.ts";
@@ -22,7 +14,7 @@ import type { GpuSession } from "./gpu.ts";
 import { WorkerPairRun, startWorkerPair } from "./worker-pair-run.ts";
 import type { AsyncEncodeFrame, AsyncEncodeOpen, AsyncEncodeOut } from "./workers/async-encode-worker.ts";
 
-/** Shared buffer slots, and so the most frames in flight between DLSS and NVENC. */
+/** Shared buffer slots, and so the most frames in flight between DLSS and NVENC: a slot is free again only after the encode worker acks it. */
 const POOL_SLOTS = 4;
 
 export interface AsyncNrEncodeParams {

@@ -2,16 +2,6 @@
  * Threaded video encode pipeline: an ffmpeg decode worker, `engine.process` on
  * the main thread and a CUDA/NVENC encode worker, with frames moving between
  * them as transferred ArrayBuffers.
- *
- * The stages need separate threads because the synchronous FFI calls (DLSS eval,
- * NVENC encode) never yield: on one thread the decode pipe cannot drain and the
- * encoder cannot run while DLSS is working, so wall time is the sum of the three
- * stages instead of the slowest one. The engine stays on the main thread because
- * D3D12/NGX objects may only be used from the thread that created them.
- *
- * One decode and one encode worker, both FIFO, keep frames in display order,
- * which is what NVENC's no-B-frame config expects. A credit window bounds frames
- * in flight (decode->main->encode) and so memory use to ~CREDIT_WINDOW frames.
  */
 import { throwIfAborted } from "./cancel.ts";
 import type { Engine } from "./engine.ts";
@@ -20,7 +10,7 @@ import type { ProgressReporter } from "./frame-progress.ts";
 import { WorkerPairRun, startWorkerPair } from "./worker-pair-run.ts";
 import type { EncodeFrame, EncodeOpen } from "./workers/encode-worker.ts";
 
-/** Max frames in flight across the whole pipeline: the decode worker's initial credit. */
+/** Max frames in flight across the whole pipeline (decode -> main -> encode): the decode worker's initial credit, which bounds memory to ~CREDIT_WINDOW frames. */
 const CREDIT_WINDOW = 8;
 
 export interface ThreadedEncodeParams {
@@ -46,6 +36,15 @@ export interface ThreadedEncodeParams {
   createWorker?: (script: URL) => Worker;
 }
 
+/**
+ * The stages need separate threads because the synchronous FFI calls (DLSS eval,
+ * NVENC encode) never yield: on one thread the decode pipe cannot drain and the
+ * encoder cannot run while DLSS is working, so wall time is the sum of the three
+ * stages instead of the slowest one. The engine stays on the main thread because
+ * D3D12/NGX objects may only be used from the thread that created them. One
+ * decode and one encode worker, both FIFO, keep frames in display order, which is
+ * what NVENC's no-B-frame config expects.
+ */
 export function runThreadedEncode(p: ThreadedEncodeParams): Promise<FrameCounts> {
   throwIfAborted(p.signal);
   const progress = p.onProgress ?? (() => {});
