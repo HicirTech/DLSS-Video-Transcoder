@@ -11,7 +11,7 @@
  */
 import { writeFileSync } from "node:fs";
 
-const [mode = "", first = ""] = process.argv.slice(2);
+const [mode = "", modeArgument = ""] = process.argv.slice(2);
 
 /** The fields the runner checks, and enough else to be told apart. */
 function report(extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -31,19 +31,23 @@ async function printLine(value: unknown): Promise<void> {
 }
 
 if (mode === "report") {
-  blockFor(Number(first));
+  const busyMs = Number(modeArgument);
+  blockFor(busyMs);
   console.log("a stray line from native code");
   await printLine(report());
 } else if (mode === "big") {
   await printLine(report({ ngxCoreExports: Array.from({ length: 200_000 }, (_, index) => `export_${index}`) }));
 } else if (mode === "error") {
-  await printLine({ error: first });
+  const message = modeArgument;
+  await printLine({ error: message });
   process.exit(1);
 } else if (mode === "silent") {
   console.log("a stray line from native code");
-  process.exit(Number(first));
+  const exitCode = Number(modeArgument);
+  process.exit(exitCode);
 } else if (mode === "hang") {
-  writeFileSync(first, String(process.pid));
+  const markerFile = modeArgument;
+  writeFileSync(markerFile, String(process.pid));
   blockFor(60_000);
 }
 process.exit(0);
