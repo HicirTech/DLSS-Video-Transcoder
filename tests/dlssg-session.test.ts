@@ -118,6 +118,8 @@ describe("DlssgSession against a host process", () => {
     await sendFrame(session, 0);
     const first = await sendFrame(session, 1);
     const second = await sendFrame(session, 2);
+    expect(first).toHaveLength(GENERATED_COUNT);
+    expect(second).toHaveLength(GENERATED_COUNT);
     for (const [position, frame] of first.entries()) expect(frame.every((value) => value === generatedByte(1, position + 1))).toBe(true);
     for (const [position, frame] of second.entries()) expect(frame.every((value) => value === generatedByte(2, position + 1))).toBe(true);
   }, TEST_TIMEOUT_MS);
@@ -127,8 +129,12 @@ describe("DlssgSession against a host process", () => {
     const shared = await openSession(servingHost([]), { sharedFrames: true });
     opened.push(plain, shared);
     for (const session of [plain, shared]) await sendFrame(session, 0);
-    expect((await sendFrame(plain, 1)).every((frame) => frame.buffer instanceof ArrayBuffer)).toBe(true);
-    expect((await sendFrame(shared, 1)).every((frame) => frame.buffer instanceof SharedArrayBuffer)).toBe(true);
+    const plainFrames = await sendFrame(plain, 1);
+    const sharedFrames = await sendFrame(shared, 1);
+    expect(plainFrames).toHaveLength(GENERATED_COUNT);
+    expect(sharedFrames).toHaveLength(GENERATED_COUNT);
+    expect(plainFrames.every((frame) => frame.buffer instanceof ArrayBuffer)).toBe(true);
+    expect(sharedFrames.every((frame) => frame.buffer instanceof SharedArrayBuffer)).toBe(true);
   }, TEST_TIMEOUT_MS);
 
   test("a disabled interval is counted and returns no frames", async () => {
