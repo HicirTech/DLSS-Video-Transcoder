@@ -114,7 +114,7 @@ export function ratAbs(r: Rational): Rational {
   return r.num < 0n ? { num: -r.num, den: r.den } : r;
 }
 
-/** r as a JS number (lossy; for display and float-only consumers such as ffmpeg -r). */
+/** r as a JS number (lossy; for estimates, tolerances and display only, never for anything passed to ffmpeg). */
 export function ratToNumber(r: Rational): number {
   return Number(r.num) / Number(r.den);
 }
