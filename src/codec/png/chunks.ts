@@ -60,7 +60,7 @@ export function writeChunkInto(out: Uint8Array, pos: number, typeCode: number, d
 // ---------------------------------------------------------------------------
 
 /** The fields of the IHDR chunk. */
-interface PngHeader {
+export interface PngHeader {
   width: number;
   height: number;
   /** Bits per sample, or per palette index for colour type 3: 1, 2, 4, 8 or 16. */

@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { decodePng } from "../src/codec/png/decode.ts";
 import { encodePng } from "../src/codec/png/encode.ts";
 import { PngError } from "../src/codec/png/types.ts";
-import { IEND, chunk, concat, idat, ihdr, png, randomImage } from "./png-reference.ts";
+import { IEND, buildImageData, chunk, concat, idat, ihdr, png, randomImage } from "./png-reference.ts";
 
 describe("errors", () => {
   const valid = encodePng(randomImage(4, 4, 1));
@@ -106,7 +106,14 @@ describe("errors", () => {
   });
 
   test("invalid filter type byte", () => {
-    expect(() => decodePng(png(ihdr(1, 2, 8, 6), idat(concat([[0, 1, 2, 3, 4, 5, 1, 2, 3, 4]])), IEND))).toThrow(/filter type 5 on scanline 1/);
+    expect(() => decodePng(png(ihdr(1, 2, 8, 6), idat(concat([[0, 1, 2, 3, 4, 5, 1, 2, 3, 4]])), IEND))).toThrow(/filter type 5 on scanline 1$/);
+  });
+
+  test("an invalid filter type byte in an interlaced image names its Adam7 pass", () => {
+    // 8x8 RGBA: pass 1 is one filter byte and one 4-byte pixel, so pass 2's first filter byte is byte 5.
+    const data = buildImageData({ width: 8, height: 8, bitDepth: 8, channels: 4, interlaced: true, samples: () => [1, 2, 3, 4] });
+    data[5] = 5;
+    expect(() => decodePng(png(ihdr(8, 8, 8, 6, 1), idat(data), IEND))).toThrow(/filter type 5 on scanline 0 of Adam7 pass 2$/);
   });
 
   test("corrupt zlib stream", () => {
