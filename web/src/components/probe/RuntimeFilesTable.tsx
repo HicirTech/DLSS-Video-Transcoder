@@ -9,6 +9,7 @@ interface RuntimeFilesTableProps {
   files: RuntimeFile[];
 }
 
+/** The DLSS runtime files the probe looked for in its folder, and whether each is present. */
 export function RuntimeFilesTable({ folder, files }: RuntimeFilesTableProps) {
   return (
     <>

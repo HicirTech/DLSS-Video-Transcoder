@@ -45,11 +45,8 @@ function formatSkin(value: number): string {
 
 /**
  * Look controls for DLSS neural rendering (feature 18): style, model preset and the strength
- * sliders. An image job's warm-up passes are set in the Settings tab. A control the installed runtime
- * ignores (nrSettingIgnored, measured) is shown disabled rather than hidden, and the caption
- * that says so is built from the same list, so re-enabling it after a runtime update is a
- * change to NR_SETTINGS_IGNORED_BY_RUNTIME alone; UI correction has no counterpart in the
- * reference tool and is not offered here at all.
+ * sliders. A control the installed runtime ignores (nrSettingIgnored) is shown disabled rather
+ * than hidden; uiCorrection, which it also ignores, gets no control here.
  */
 export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
   const styleLabelId = useId();

@@ -42,6 +42,7 @@ function audioSwitchLabel(container: EncodeSettings["container"]): string {
   return AUDIO_IN_CONTAINER[container] === "copy" ? "Copy the source audio track" : `Keep the source audio, re-encoded to AAC ${AAC_KBPS} kb/s`;
 }
 
+/** How a video job encodes its output: codec (flagging an NVENC one the output size exceeds), quality, container and the source audio track. */
 export function EncodeSettingsEditor({ value, fixedContainer, outputSize, onChange }: EncodeSettingsEditorProps) {
   const codecLabelId = useId();
   const codecHelpId = useId();

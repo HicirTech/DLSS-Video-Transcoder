@@ -1,3 +1,4 @@
+/** Browser entry point: mounts App under the MUI theme in #root. */
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { CssBaseline, ThemeProvider } from "@mui/material";

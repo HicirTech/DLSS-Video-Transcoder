@@ -53,6 +53,7 @@ export function formatTime(iso: string | null): string {
   return formatTimestamp(iso, (date) => date.toLocaleTimeString());
 }
 
+/** Date and time in the browser's locale; "-" when the timestamp is missing, the input itself when it does not parse. */
 export function formatDateTime(iso: string | null): string {
   return formatTimestamp(iso, (date) => date.toLocaleString());
 }
