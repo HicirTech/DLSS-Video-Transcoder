@@ -257,10 +257,11 @@ describe("dlssg-host serve loop", () => {
 
   test("a mapping smaller than the setup's frames need is refused before the generator opens", async () => {
     const host = startHost();
-    expect(await host.setup({ width: 64, height: 64 })).toEqual({ outcome: "refused", status: HostStatus.sharedMemoryFailed });
+    const oversized = { width: 64, height: 64 };
+    expect(await host.setup(oversized)).toEqual({ outcome: "refused", status: HostStatus.sharedMemoryFailed });
     const end = await host.finish();
     expect(end.stderr).toContain(`MapViewOfFile failed for shared memory "${host.mappingName}"`);
-    expect(end.stderr).toContain("the mapping may be smaller than the 81920 bytes asked for");
+    expect(end.stderr).toContain(`the mapping may be smaller than the ${sharedFrameLayout({ ...oversized, generatedCount: GENERATED_COUNT }).totalBytes} bytes asked for`);
     expect(end.stderr).not.toContain("noise from console.info at setup");
     expect(end.exitCode).toBe(1);
   }, TEST_TIMEOUT_MS);

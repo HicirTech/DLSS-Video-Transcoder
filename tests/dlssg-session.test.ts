@@ -63,13 +63,13 @@ function isReleased(name: string): boolean {
  * A host that answers the setup ready, then answers the first frame header with a result claiming one
  * generated frame more than the session has room for, and exits shortly after.
  */
-const READY_THEN_TOO_MANY_FRAMES = `const input = Bun.stdin.stream().getReader(); await input.read(); process.stdout.write(new Uint8Array(new Uint32Array([0x31524746, 0, 5, 0]).buffer)); await input.read(); process.stdout.write(new Uint8Array(new Uint32Array([0x324f4746, 0, ${GENERATED_COUNT + 1}, 0]).buffer)); setTimeout(() => process.exit(0), 300);`;
+const READY_THEN_TOO_MANY_FRAMES = `const input = Bun.stdin.stream().getReader(); await input.read(); process.stdout.write(new Uint8Array([${encodeSetupReply({ outcome: "ready", maximum: GENERATED_COUNT + 2 })}])); await input.read(); process.stdout.write(new Uint8Array([${encodeFrameResult({ outcome: "generated", frameCount: GENERATED_COUNT + 1 })}])); setTimeout(() => process.exit(0), 300);`;
 
 /** A host that writes `stderr`, reads the setup and answers it with 16 bytes that are no setup reply. */
 const GARBAGE_SETUP_REPLY = `const input = Bun.stdin.stream().getReader(); await input.read(); console.error("garbage sender"); process.stdout.write(new Uint8Array(16).fill(0x41)); setTimeout(() => process.exit(0), 300);`;
 
 /** A host that answers the setup ready, then answers the first frame header with 16 bytes that are no frame reply. */
-const READY_THEN_GARBAGE_FRAME_REPLY = `const input = Bun.stdin.stream().getReader(); await input.read(); process.stdout.write(new Uint8Array(new Uint32Array([0x31524746, 0, 5, 0]).buffer)); await input.read(); console.error("garbage sender"); process.stdout.write(new Uint8Array(16).fill(0x41)); setTimeout(() => process.exit(0), 300);`;
+const READY_THEN_GARBAGE_FRAME_REPLY = `const input = Bun.stdin.stream().getReader(); await input.read(); process.stdout.write(new Uint8Array([${encodeSetupReply({ outcome: "ready", maximum: GENERATED_COUNT + 2 })}])); await input.read(); console.error("garbage sender"); process.stdout.write(new Uint8Array(16).fill(0x41)); setTimeout(() => process.exit(0), 300);`;
 
 /** A host that never answers anything, as one wedged in D3D12 or NGX bring-up would. */
 const SILENT_HOST = "setInterval(() => {}, 1000)";
@@ -184,13 +184,13 @@ describe("DlssgSession against a host process", () => {
     expect(isReleased(launched[0]!)).toBe(true);
   }, TEST_TIMEOUT_MS);
 
-  test("status 2 becomes the lower-multiplier message, quoting what the host said", async () => {
-    expect(await failure(openSession(servingHost(["--refuse", "2"])))).toMatch(/cannot generate 3 in-between frame\(s\) per source frame \(4x\) \(exit code 1\); it said: .*scripted refusal\. Use a lower multiplier\./);
+  test("the too-many-generated status becomes the lower-multiplier message, quoting what the host said", async () => {
+    expect(await failure(openSession(servingHost(["--refuse", String(HostStatus.tooManyGenerated)])))).toMatch(/cannot generate 3 in-between frame\(s\) per source frame \(4x\) \(exit code 1\); it said: .*scripted refusal\. Use a lower multiplier\./);
   }, TEST_TIMEOUT_MS);
 
   test("any other refusal status is reported as it is, quoting what the host said", async () => {
-    const message = await failure(openSession(servingHost(["--refuse", "3"])));
-    expect(message).toStartWith(`DLSS Frame Generation could not be set up: ${HOST_PROCESS_NAME} refused with status 3 (exit code 1); it said: `);
+    const message = await failure(openSession(servingHost(["--refuse", String(HostStatus.setupFailed)])));
+    expect(message).toStartWith(`DLSS Frame Generation could not be set up: ${HOST_PROCESS_NAME} refused with status ${HostStatus.setupFailed} (exit code 1); it said: `);
     expect(message).toMatch(/scripted refusal\. Check the fake\.$/);
   }, TEST_TIMEOUT_MS);
 
@@ -199,7 +199,7 @@ describe("DlssgSession against a host process", () => {
     opened.push(session);
     await sendFrame(session, 0);
     const message = await failure(sendFrame(session, 1));
-    expect(message).toStartWith(`DLSS Frame Generation failed while processing frame 1: ${HOST_PROCESS_NAME} replied status 5 (exit code 1); it said: `);
+    expect(message).toStartWith(`DLSS Frame Generation failed while processing frame 1: ${HOST_PROCESS_NAME} replied status ${HostStatus.generationFailed} (exit code 1); it said: `);
     expect(message).toMatch(/scripted failure at source frame 1 .*\. Check the fake\.$/);
   }, TEST_TIMEOUT_MS);
 
