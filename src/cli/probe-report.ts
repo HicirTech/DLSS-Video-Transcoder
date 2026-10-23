@@ -1,6 +1,5 @@
 /** Renders a probe report as the human summary the `probe` command prints. */
-import type { runProbe } from "../ngx/probe.ts";
-import { opticalFlowGridFits, type ProbeAdapter, type ProbeOpticalFlow } from "../server/api-types.ts";
+import { opticalFlowGridFits, type ProbeAdapter, type ProbeOpticalFlow, type ProbeReport } from "../server/api-types.ts";
 
 /**
  * One line on the hardware optical-flow engine. The limits are the engine's own
@@ -17,7 +16,7 @@ function opticalFlowLine(flow: ProbeOpticalFlow): string {
   return `ok on CUDA device ${flow.cudaOrdinal}; input ${l.widthMin}..${l.widthMax} x ${l.heightMin}..${l.heightMax} px; output grids ${flow.outGridSizes.join(", ")}; the pipeline feeds it a ${grid.minSide}..${grid.maxLongSide} px grid, which ${fits ? "fits" : "does NOT fit"}`;
 }
 
-export function printProbe(report: Awaited<ReturnType<typeof runProbe>>): void {
+export function printProbe(report: ProbeReport): void {
   const lines: string[] = [];
   lines.push(`Neural Render probe  (${report.generatedAt})`);
   lines.push(`Bun ${report.platform.bun} on ${report.platform.os}`);
