@@ -15,6 +15,8 @@ import { flowGridSize } from "./flow-grid.ts";
 
 const NV_OF_API_VERSION = 0x20; // (major 2 << 4) | minor 0
 const OK = 0;
+/** NVOFA flow vectors are S10.5 fixed point: 5 fractional bits, so 32 steps per pixel. */
+const FLOW_FRACTION_STEPS = 32;
 
 /** NV_OF_CAPS enum values we query. */
 const CAPS = { OUT_GRID: 0, WIDTH_MIN: 4, HEIGHT_MIN: 5, WIDTH_MAX: 6, HEIGHT_MAX: 7 } as const;
@@ -255,8 +257,9 @@ class NvofSession {
   /**
    * Compute optical flow from `currentGray` to `previousGray` (GRAYSCALE8, tightly
    * packed width*height). Returns the raw flow field as interleaved int16 (x, y)
-   * in S10.5 fixed point (divide by 32 for pixels), length width*height*2.
-   * Synchronous: it blocks on cudaSynchronize before reading the result back.
+   * in S10.5 fixed point (divide by FLOW_FRACTION_STEPS for pixels), length
+   * width*height*2. Synchronous: it blocks on cudaSynchronize before reading the
+   * result back.
    */
   computeFlow(currentGray: Uint8Array, previousGray: Uint8Array, disableTemporalHints: boolean): Int16Array {
     const w = this.width;
@@ -324,7 +327,7 @@ function nvofBackend(session: NvofSession): FlowBackend {
       }
       const raw = session.computeFlow(cur, prev, sequenceStart);
       const out = new Float32Array(n * 2);
-      for (let i = 0; i < n * 2; i++) out[i] = raw[i]! / 32; // S10.5 -> pixels
+      for (let i = 0; i < n * 2; i++) out[i] = raw[i]! / FLOW_FRACTION_STEPS;
       return out;
     },
     close: () => session.close(),
