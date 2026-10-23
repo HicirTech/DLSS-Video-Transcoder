@@ -96,8 +96,7 @@ export function FrameGenEditor({ value, onChange }: FrameGenEditorProps) {
       </Stack>
       <FormHelperText id={helpId}>
         DLSS Frame Generation runs last, on the frames the steps before it made, and keeps the source duration; a rate
-        at or below the source's generates nothing and only resamples. Path Auto: {FRAME_GEN_AUTO_PATH}. Always writes
-        MP4.
+        at or below the source's generates nothing and only resamples. Path Auto: {FRAME_GEN_AUTO_PATH}.
       </FormHelperText>
     </Stack>
   );
