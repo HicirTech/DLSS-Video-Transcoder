@@ -149,7 +149,7 @@ describe("DlssgSession against a host process", () => {
   }, TEST_TIMEOUT_MS);
 
   test("a maximum below the request is refused here with the lower-multiplier message", async () => {
-    expect(await failure(openSession(servingHost(["--maximum", "2"])))).toMatch(/can generate at most 2 in-between frame\(s\) per source frame; 3 was requested\. Use a lower multiplier\./);
+    expect(await failure(openSession(servingHost(["--maximum", "2"])))).toMatch(/can generate at most 2 in-between frame\(s\) per source frame \(3x\); 3 \(4x\) was requested\. Use 3x or less\./);
   }, TEST_TIMEOUT_MS);
 
   test("a setup reply that does not decode is reported with the host's stderr and the hint", async () => {
@@ -178,7 +178,7 @@ describe("DlssgSession against a host process", () => {
   }, TEST_TIMEOUT_MS);
 
   test("status 2 becomes the lower-multiplier message, quoting what the host said", async () => {
-    expect(await failure(openSession(servingHost(["--refuse", "2"])))).toMatch(/cannot generate 3 in-between frame\(s\) per source frame \(exit code 1\); it said: .*scripted refusal\. Use a lower multiplier\./);
+    expect(await failure(openSession(servingHost(["--refuse", "2"])))).toMatch(/cannot generate 3 in-between frame\(s\) per source frame \(4x\) \(exit code 1\); it said: .*scripted refusal\. Use a lower multiplier\./);
   }, TEST_TIMEOUT_MS);
 
   test("any other refusal status is reported as it is, quoting what the host said", async () => {

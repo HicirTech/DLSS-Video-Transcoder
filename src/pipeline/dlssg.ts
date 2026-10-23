@@ -250,7 +250,7 @@ const UNDECLARED_FRAME_COUNT = 0;
  */
 async function setupRefusal(child: HostChild, status: number, requested: number): Promise<Error> {
   if (status === HostStatus.tooManyGenerated) {
-    return new Error(`${await withHostReport(child, `This GPU/runtime cannot generate ${requested} in-between frame(s) per source frame`)}. ${USE_LOWER_MULTIPLIER}`);
+    return new Error(`${await withHostReport(child, `This GPU/runtime cannot generate ${requested} in-between frame(s) per source frame (${requested + 1}x)`)}. ${USE_LOWER_MULTIPLIER}`);
   }
   return new Error(`${await withHostReport(child, `DLSS Frame Generation could not be set up: ${HOST_PROCESS_NAME} refused with status ${status}`)}. ${child.host.hint}`);
 }
@@ -291,7 +291,7 @@ class FrameMemory {
     try {
       return new FrameMemory(SharedMemory.create(name, layout.totalBytes), layout, options.sharedFrames ?? false);
     } catch (error) {
-      throw new Error(`DLSS Frame Generation could not create the ${layout.totalBytes}-byte shared memory its frames travel in: ${(error as Error).message}`);
+      throw new Error(`DLSS Frame Generation could not create the ${layout.totalBytes}-byte shared memory its frames travel in: ${(error as Error).message}. Free memory, or use a smaller output size or a lower multiplier.`);
     }
   }
 
@@ -403,7 +403,11 @@ export class DlssgSession {
       const reply = await decodeReply(child, replyBytes, decodeSetupReply, "a setup reply");
       if (reply.outcome === "refused") throw await setupRefusal(child, reply.status, opts.generatedCount);
       const { maximum } = reply;
-      if (opts.generatedCount > maximum) throw new Error(`This GPU/runtime can generate at most ${maximum} in-between frame(s) per source frame; ${opts.generatedCount} was requested. ${USE_LOWER_MULTIPLIER}`);
+      if (opts.generatedCount > maximum) {
+        throw new Error(
+          `This GPU/runtime can generate at most ${maximum} in-between frame(s) per source frame (${maximum + 1}x); ${opts.generatedCount} (${opts.generatedCount + 1}x) was requested. Use ${maximum + 1}x or less.`,
+        );
+      }
       return new DlssgSession(child, reader, frames, maximum);
     } catch (error) {
       try { proc.kill(); } catch { /* already gone */ }
