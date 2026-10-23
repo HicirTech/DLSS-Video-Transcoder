@@ -6,7 +6,7 @@
  * IDXGIAdapter1::GetDesc1 = 10.
  */
 import { dlopen, FFIType } from "bun:ffi";
-import { ComObject, checkHresult } from "./com.ts";
+import { ComObject, DXGI_ERROR_NOT_FOUND, checkHresult } from "./com.ts";
 import { NativeStruct, OutPointer, guid, hex32 } from "./memory.ts";
 
 const dxgi = dlopen("dxgi.dll", {
@@ -15,7 +15,6 @@ const dxgi = dlopen("dxgi.dll", {
 
 export const IID_IDXGIFactory1 = guid("{770aae78-f26f-4dba-a829-253c83d1b387}");
 
-const DXGI_ERROR_NOT_FOUND = 0x887a0002 | 0;
 const DXGI_ADAPTER_FLAG_SOFTWARE = 2;
 export const VENDOR_NVIDIA = 0x10de;
 
