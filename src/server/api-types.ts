@@ -474,6 +474,7 @@ export interface RuntimeFile {
   role: string;
   present: boolean;
   path: string | null;
+  /** File size in MB, rounded to two decimals; null when the file could not be read. */
   sizeMB: number | null;
   version: string | null;
   /** Export names found in the DLL, when present. */
