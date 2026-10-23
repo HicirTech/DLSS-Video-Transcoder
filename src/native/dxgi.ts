@@ -113,7 +113,7 @@ export class DxgiFactory extends ComObject {
         adapters.push(new DxgiAdapter(adapterPtr, info));
       }
     } catch (error) {
-      for (const a of adapters) a.release(); // don't leak already-enumerated adapters on a mid-loop failure
+      for (const adapter of adapters) adapter.release(); // don't leak already-enumerated adapters on a mid-loop failure
       throw error;
     }
     return adapters;

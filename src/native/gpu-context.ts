@@ -156,14 +156,14 @@ export class GpuContext {
   }
 
   private ensureUpload(size: number): D3D12Resource {
-    let buf = this.uploadRing[this.uploadCursor];
-    if (!buf || buf.sizeInBytes < size) {
-      buf?.release();
-      buf = this.device.createBuffer(size, D3D12_HEAP_TYPE_UPLOAD, `upload staging ${this.uploadCursor}`);
-      this.uploadRing[this.uploadCursor] = buf;
+    let staging = this.uploadRing[this.uploadCursor];
+    if (!staging || staging.sizeInBytes < size) {
+      staging?.release();
+      staging = this.device.createBuffer(size, D3D12_HEAP_TYPE_UPLOAD, `upload staging ${this.uploadCursor}`);
+      this.uploadRing[this.uploadCursor] = staging;
     }
     this.uploadCursor++;
-    return buf;
+    return staging;
   }
 
   private ensureReadback(size: number): D3D12Resource {
