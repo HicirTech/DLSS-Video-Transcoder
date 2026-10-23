@@ -14,15 +14,43 @@
  * enough to satisfy ASLR. The call stubs carry x64 unwind data (.pdata), so a
  * stack walk or exception dispatch that passes through one reaches its caller.
  */
+import { IMAGE_DOS_SIGNATURE, IMAGE_NT_OPTIONAL_HDR64_MAGIC, IMAGE_NT_SIGNATURE } from "../native/pe.ts";
 
-import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
-import { rename } from "node:fs/promises";
-
-const IMAGE_DOS_SIGNATURE = 0x5a4d;
-const IMAGE_NT_SIGNATURE = 0x00004550;
+// Field offsets and flags: IMAGE_DOS_HEADER, IMAGE_FILE_HEADER, IMAGE_OPTIONAL_HEADER64, IMAGE_SECTION_HEADER and
+// IMAGE_EXPORT_DIRECTORY in winnt.h ("PE format", learn.microsoft.com/windows/win32/debug/pe-format).
 const SECTION_ALIGNMENT = 0x1000;
 const FILE_ALIGNMENT = 0x200;
-const DEFAULT_IMAGE_BASE = 0x180000000n;
+const IMAGE_BASE = 0x180000000n;
+const DOS_HEADER_BYTES = 64;
+const COFF_HEADER_BYTES = 20;
+const OPTIONAL_HEADER_BYTES = 240; // PE32+ optional header with its 16 data directories
+const DATA_DIRECTORY_COUNT = 16;
+const SECTION_HEADER_BYTES = 40;
+const EXPORT_DIRECTORY_BYTES = 40;
+const IMAGE_FILE_MACHINE_AMD64 = 0x8664;
+const IMAGE_FILE_EXECUTABLE_IMAGE = 0x0002;
+const IMAGE_FILE_LARGE_ADDRESS_AWARE = 0x0020;
+const IMAGE_FILE_DLL = 0x2000;
+const IMAGE_SUBSYSTEM_WINDOWS_CUI = 3; // a DLL loads fine with it
+const IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE = 0x0040;
+const IMAGE_DLLCHARACTERISTICS_NX_COMPAT = 0x0100;
+const IMAGE_SCN_CNT_CODE = 0x20;
+const IMAGE_SCN_CNT_INITIALIZED_DATA = 0x40;
+const IMAGE_SCN_MEM_DISCARDABLE = 0x02000000;
+const IMAGE_SCN_MEM_EXECUTE = 0x20000000;
+const IMAGE_SCN_MEM_READ = 0x40000000;
+const IMAGE_SCN_MEM_WRITE = 0x80000000;
+const EXPORT_DIRECTORY_INDEX = 0;
+// IMAGE_DIRECTORY_ENTRY_EXCEPTION: data directory 3, at PE32+ optional header offset 136 (PE format).
+const EXCEPTION_DIRECTORY_INDEX = 3;
+const BASERELOC_DIRECTORY_INDEX = 5;
+
+/** The .data slots fwd_set_slots fills, one 8-byte NGX target each. */
+const SLOT = { create: 0, evaluate: 1, release: 2 } as const;
+const SLOT_COUNT = 3;
+const SLOT_BYTES = 8;
+/** Init_ProjectID's three stack arguments: the most any forwarded NGX call passes. */
+const MAX_STACK_ARGS = 3;
 
 /**
  * The shim's exports. fwd_create, fwd_evaluate and fwd_release each call the
@@ -47,8 +75,6 @@ const UNWIND_INFO_VERSION = 1;
 const UWOP_ALLOC_SMALL = 2;
 /** Largest UWOP_ALLOC_SMALL allocation: OpInfo * 8 + 8 with a 4-bit OpInfo. */
 const ALLOC_SMALL_MAX = 128;
-// IMAGE_DIRECTORY_ENTRY_EXCEPTION: data directory 3, at PE32+ optional header offset 136 (PE format).
-const EXCEPTION_DIRECTORY_INDEX = 3;
 
 /** A non-leaf function the unwinder has to describe: `sub rsp, frameBytes` as its whole prolog. */
 interface CallThunkFrame {
@@ -113,7 +139,7 @@ class TextBuilder {
 
   constructor(
     readonly textRva: number,
-    readonly slotRva: number[],
+    readonly slotRva: readonly number[],
   ) {}
 
   get rva(): number {
@@ -151,9 +177,9 @@ class TextBuilder {
   /** fwd_set_slots(rcx=create, rdx=evaluate, r8=release). */
   emitSetSlots(): number {
     const at = this.rva;
-    this.ripStore([0x48, 0x89, 0x0d], 0); // mov [rip+slot0], rcx
-    this.ripStore([0x48, 0x89, 0x15], 1); // mov [rip+slot1], rdx
-    this.ripStore([0x4c, 0x89, 0x05], 2); // mov [rip+slot2], r8
+    this.ripStore([0x48, 0x89, 0x0d], SLOT.create); // mov [rip+slot0], rcx
+    this.ripStore([0x48, 0x89, 0x15], SLOT.evaluate); // mov [rip+slot1], rdx
+    this.ripStore([0x4c, 0x89, 0x05], SLOT.release); // mov [rip+slot2], r8
     this.push(0xc3); // ret
     return at;
   }
@@ -211,106 +237,115 @@ class TextBuilder {
   }
 }
 
-export interface ForwarderLayout {
-  bytes: Uint8Array;
-  imageBase: bigint;
-  exports: { name: string; rva: number }[];
+/** Where one table of the image lives: an IMAGE_DATA_DIRECTORY. */
+interface DataDirectory {
+  rva: number;
+  size: number;
 }
 
-export function buildForwarderDll(options: { imageBase?: bigint } = {}): ForwarderLayout {
-  const imageBase = options.imageBase ?? DEFAULT_IMAGE_BASE;
-  const textRva = 0x1000;
-  const dataRva = 0x2000;
-  const pdataRva = 0x3000;
-  const relocRva = 0x4000;
-  const slotRva = [dataRva, dataRva + 8, dataRva + 16];
+interface TextSection {
+  bytes: Uint8Array;
+  entryRva: number;
+  exportDirectory: DataDirectory;
+  exports: { name: string; rva: number }[];
+  callThunks: CallThunkFrame[];
+}
 
-  // --- .text: entry point, stubs, then the export directory ---
+/** The .text section: the entry point and the stubs, then the export directory with its tables and strings. */
+function buildTextSection(textRva: number, slotRva: readonly number[]): TextSection {
   const text = new TextBuilder(textRva, slotRva);
-  const dllMainRva = text.emitDllMain();
-  const createRva = text.emitCallThunk(0, 3);
-  const evaluateRva = text.emitCallThunk(1, 3);
-  const releaseRva = text.emitCallThunk(2, 3);
-  const setSlotsRva = text.emitSetSlots();
-  text.padTo(16);
-
-  // Exported RVAs keyed by the names in FORWARDER_EXPORTS (EAT order).
-  const eatRva: Record<string, number> = {
-    fwd_create: createRva,
-    fwd_evaluate: evaluateRva,
-    fwd_release: releaseRva,
-    fwd_set_slots: setSlotsRva,
+  const entryRva = text.emitDllMain();
+  const eatRva: Record<ForwarderExportName, number> = {
+    fwd_create: text.emitCallThunk(SLOT.create, MAX_STACK_ARGS),
+    fwd_evaluate: text.emitCallThunk(SLOT.evaluate, MAX_STACK_ARGS),
+    fwd_release: text.emitCallThunk(SLOT.release, MAX_STACK_ARGS),
+    fwd_set_slots: text.emitSetSlots(),
   };
+  text.padTo(16);
   const names = [...FORWARDER_EXPORTS].sort(); // GetProcAddress binary-searches names
 
   const count = names.length;
   const exportDirRva = textRva + text.length;
-  const eatTableRva = exportDirRva + 40;
+  const eatTableRva = exportDirRva + EXPORT_DIRECTORY_BYTES;
   const namePtrRva = eatTableRva + count * 4;
   const ordinalsRva = namePtrRva + count * 4;
   const stringsRva = ordinalsRva + count * 2;
 
   const strings: number[] = [];
-  const stringRva = (offset: number): number => stringsRva + offset;
-  const dllNameOffset = strings.length;
-  for (const c of "nvngx.dll") strings.push(c.charCodeAt(0));
-  strings.push(0);
-  const nameOffsets = names.map((name) => {
-    const offset = strings.length;
-    for (const c of name) strings.push(c.charCodeAt(0));
+  const addString = (value: string): number => {
+    const rva = stringsRva + strings.length;
+    for (const c of value) strings.push(c.charCodeAt(0));
     strings.push(0);
-    return offset;
-  });
-
+    return rva;
+  };
+  const dllNameRva = addString("nvngx.dll");
+  const nameRvas = names.map(addString);
   const exportEndRva = stringsRva + strings.length;
-  const exportSize = exportEndRva - exportDirRva;
-  const textVirtualSize = exportEndRva - textRva;
 
-  const textBytes = new Uint8Array(textVirtualSize);
-  textBytes.set(text.toArray(), 0);
-  const tv = new DataView(textBytes.buffer);
-  const w32 = (rva: number, value: number) => tv.setUint32(rva - textRva, value >>> 0, true);
-  const w16 = (rva: number, value: number) => tv.setUint16(rva - textRva, value & 0xffff, true);
+  const bytes = new Uint8Array(exportEndRva - textRva);
+  bytes.set(text.toArray(), 0);
+  const textView = new DataView(bytes.buffer);
+  const writeU32At = (rva: number, value: number) => textView.setUint32(rva - textRva, value >>> 0, true);
+  const writeU16At = (rva: number, value: number) => textView.setUint16(rva - textRva, value & 0xffff, true);
 
-  // IMAGE_EXPORT_DIRECTORY
-  w32(exportDirRva + 12, stringRva(dllNameOffset));
-  w32(exportDirRva + 16, 1); // ordinal base
-  w32(exportDirRva + 20, count); // number of functions
-  w32(exportDirRva + 24, count); // number of names
-  w32(exportDirRva + 28, eatTableRva);
-  w32(exportDirRva + 32, namePtrRva);
-  w32(exportDirRva + 36, ordinalsRva);
-  for (let i = 0; i < count; i++) {
-    w32(eatTableRva + i * 4, eatRva[names[i]!]!);
-    w32(namePtrRva + i * 4, stringRva(nameOffsets[i]!));
-    w16(ordinalsRva + i * 2, i); // name i -> EAT index i
+  // IMAGE_EXPORT_DIRECTORY: Name @12, Base @16, NumberOfFunctions @20, NumberOfNames @24, AddressOfFunctions @28,
+  // AddressOfNames @32, AddressOfNameOrdinals @36.
+  writeU32At(exportDirRva + 12, dllNameRva);
+  writeU32At(exportDirRva + 16, 1); // ordinal base
+  writeU32At(exportDirRva + 20, count);
+  writeU32At(exportDirRva + 24, count);
+  writeU32At(exportDirRva + 28, eatTableRva);
+  writeU32At(exportDirRva + 32, namePtrRva);
+  writeU32At(exportDirRva + 36, ordinalsRva);
+  names.forEach((name, index) => {
+    writeU32At(eatTableRva + index * 4, eatRva[name]);
+    writeU32At(namePtrRva + index * 4, nameRvas[index]!);
+    writeU16At(ordinalsRva + index * 2, index); // name i -> EAT index i
+  });
+  bytes.set(strings, stringsRva - textRva);
+
+  return {
+    bytes,
+    entryRva,
+    exportDirectory: { rva: exportDirRva, size: exportEndRva - exportDirRva },
+    exports: names.map((name) => ({ name, rva: eatRva[name] })),
+    callThunks: text.callThunks,
+  };
+}
+
+/**
+ * A .reloc section of one empty block: DYNAMIC_BASE needs a table to point at, and the code is position independent
+ * (RIP-relative slot access, exports as RVAs, no imports, no absolute addresses), so ASLR needs no fixup.
+ */
+function emptyRelocBlock(pageRva: number): Uint8Array {
+  const bytes = new Uint8Array(8);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, pageRva, true); // page RVA
+  view.setUint32(4, 8, true); // block size = header only (no fixups)
+  return bytes;
+}
+
+interface ImageSection {
+  name: string;
+  rva: number;
+  bytes: Uint8Array;
+  characteristics: number;
+}
+
+/** The PE file: DOS, COFF and optional headers, the data directories and section headers, then each section's bytes. */
+function assembleImage(image: { sections: ImageSection[]; entryRva: number; directories: Record<number, DataDirectory> }): Uint8Array {
+  const { sections } = image;
+  const headerSize = align(DOS_HEADER_BYTES + 4 + COFF_HEADER_BYTES + OPTIONAL_HEADER_BYTES + sections.length * SECTION_HEADER_BYTES, FILE_ALIGNMENT);
+  const rawSizes = sections.map((section) => align(section.bytes.length, FILE_ALIGNMENT));
+  const rawPointers: number[] = [];
+  let fileSize = headerSize;
+  for (const rawSize of rawSizes) {
+    rawPointers.push(fileSize);
+    fileSize += rawSize;
   }
-  textBytes.set(strings, stringsRva - textRva);
-
-  // --- .data: three 8-byte slots, zero-initialised ---
-  const dataBytes = new Uint8Array(24);
-
-  // --- .pdata: unwind data for the call stubs ---
-  const pdata = buildPdata(text.callThunks, pdataRva);
-
-  // --- .reloc: a single empty block, so DYNAMIC_BASE has a table to point at ---
-  const relocBytes = new Uint8Array(8);
-  new DataView(relocBytes.buffer).setUint32(0, textRva, true); // page RVA
-  new DataView(relocBytes.buffer).setUint32(4, 8, true); // block size = header only (no fixups)
-
-  // --- assemble the file ---
-  const sectionCount = 4;
-  const headerSize = align(64 + 4 + 20 + 240 + sectionCount * 40, FILE_ALIGNMENT);
-  const textRaw = align(textBytes.length, FILE_ALIGNMENT);
-  const dataRaw = align(dataBytes.length, FILE_ALIGNMENT);
-  const pdataRaw = align(pdata.bytes.length, FILE_ALIGNMENT);
-  const relocRaw = align(relocBytes.length, FILE_ALIGNMENT);
-  const textPtr = headerSize;
-  const dataPtr = textPtr + textRaw;
-  const pdataPtr = dataPtr + dataRaw;
-  const relocPtr = pdataPtr + pdataRaw;
-  const fileSize = relocPtr + relocRaw;
-  const sizeOfImage = align(relocRva + relocBytes.length, SECTION_ALIGNMENT);
+  const rawSizeWhere = (flag: number): number => sections.reduce((sum, section, index) => ((section.characteristics & flag) !== 0 ? sum + rawSizes[index]! : sum), 0);
+  const code = sections.find((section) => (section.characteristics & IMAGE_SCN_CNT_CODE) !== 0)!;
+  const last = sections[sections.length - 1]!;
 
   const file = new Uint8Array(fileSize);
   const view = new DataView(file.buffer);
@@ -321,185 +356,88 @@ export function buildForwarderDll(options: { imageBase?: bigint } = {}): Forward
 
   // IMAGE_DOS_HEADER: e_magic, and e_lfanew naming the NT headers right after the 64-byte DOS header
   u16(0, IMAGE_DOS_SIGNATURE);
-  u32(0x3c, 0x40); // e_lfanew -> PE signature right after the 64-byte DOS header
-
-  // PE signature + COFF header
-  const pe = 0x40;
+  u32(0x3c, DOS_HEADER_BYTES);
+  const pe = DOS_HEADER_BYTES;
   u32(pe, IMAGE_NT_SIGNATURE);
 
   // IMAGE_FILE_HEADER
   const coff = pe + 4;
-  u16(coff + 0, 0x8664); // Machine = AMD64
-  u16(coff + 2, sectionCount); // NumberOfSections
-  u16(coff + 16, 240); // SizeOfOptionalHeader
-  u16(coff + 18, 0x2022); // EXECUTABLE | LARGE_ADDRESS_AWARE | DLL
+  u16(coff + 0, IMAGE_FILE_MACHINE_AMD64); // Machine
+  u16(coff + 2, sections.length); // NumberOfSections
+  u16(coff + 16, OPTIONAL_HEADER_BYTES); // SizeOfOptionalHeader
+  u16(coff + 18, IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL); // Characteristics
 
-  // Optional header (PE32+)
-  const opt = coff + 20;
-  u16(opt + 0, 0x20b);
-  u8(opt + 2, 14); // linker version major
-  u32(opt + 4, textRaw); // SizeOfCode
-  u32(opt + 8, dataRaw + pdataRaw + relocRaw); // SizeOfInitializedData
-  u32(opt + 16, dllMainRva); // AddressOfEntryPoint
-  u32(opt + 20, textRva); // BaseOfCode
-  u64(opt + 24, imageBase);
-  u32(opt + 32, SECTION_ALIGNMENT);
-  u32(opt + 36, FILE_ALIGNMENT);
+  // IMAGE_OPTIONAL_HEADER64
+  const opt = coff + COFF_HEADER_BYTES;
+  u16(opt + 0, IMAGE_NT_OPTIONAL_HDR64_MAGIC); // Magic
+  u8(opt + 2, 14); // MajorLinkerVersion
+  u32(opt + 4, rawSizeWhere(IMAGE_SCN_CNT_CODE)); // SizeOfCode
+  u32(opt + 8, rawSizeWhere(IMAGE_SCN_CNT_INITIALIZED_DATA)); // SizeOfInitializedData
+  u32(opt + 16, image.entryRva); // AddressOfEntryPoint
+  u32(opt + 20, code.rva); // BaseOfCode
+  u64(opt + 24, IMAGE_BASE); // ImageBase
+  u32(opt + 32, SECTION_ALIGNMENT); // SectionAlignment
+  u32(opt + 36, FILE_ALIGNMENT); // FileAlignment
   u16(opt + 40, 6); // MajorOperatingSystemVersion
   u16(opt + 48, 6); // MajorSubsystemVersion
-  u32(opt + 56, sizeOfImage);
-  u32(opt + 60, headerSize);
-  u16(opt + 68, 3); // Subsystem = Windows CUI (loads fine for a DLL)
-  u16(opt + 70, 0x140); // DYNAMIC_BASE | NX_COMPAT
+  u32(opt + 56, align(last.rva + last.bytes.length, SECTION_ALIGNMENT)); // SizeOfImage
+  u32(opt + 60, headerSize); // SizeOfHeaders
+  u16(opt + 68, IMAGE_SUBSYSTEM_WINDOWS_CUI); // Subsystem
+  u16(opt + 70, IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE | IMAGE_DLLCHARACTERISTICS_NX_COMPAT); // DllCharacteristics
   u64(opt + 72, 0x100000n); // SizeOfStackReserve
   u64(opt + 80, 0x1000n); // SizeOfStackCommit
   u64(opt + 88, 0x100000n); // SizeOfHeapReserve
   u64(opt + 96, 0x1000n); // SizeOfHeapCommit
-  u32(opt + 108, 16); // NumberOfRvaAndSizes
-  const dirs = opt + 112;
-  u32(dirs + 0 * 8, exportDirRva); // Export table
-  u32(dirs + 0 * 8 + 4, exportSize);
-  u32(dirs + EXCEPTION_DIRECTORY_INDEX * 8, pdataRva); // Exception table: the RUNTIME_FUNCTION array
-  u32(dirs + EXCEPTION_DIRECTORY_INDEX * 8 + 4, pdata.tableBytes);
-  u32(dirs + 5 * 8, relocRva); // Base relocation table
-  u32(dirs + 5 * 8 + 4, relocBytes.length);
-
-  // Section headers
-  const sectionBase = opt + 240;
-  const writeSection = (
-    index: number,
-    name: string,
-    virtualSize: number,
-    virtualAddress: number,
-    rawSize: number,
-    rawPtr: number,
-    characteristics: number,
-  ): void => {
-    const base = sectionBase + index * 40;
-    for (let i = 0; i < 8; i++) u8(base + i, i < name.length ? name.charCodeAt(i) : 0);
-    u32(base + 8, virtualSize);
-    u32(base + 12, virtualAddress);
-    u32(base + 16, rawSize);
-    u32(base + 20, rawPtr);
-    u32(base + 36, characteristics);
-  };
-  writeSection(0, ".text", textBytes.length, textRva, textRaw, textPtr, 0x60000020); // CODE|EXECUTE|READ
-  writeSection(1, ".data", dataBytes.length, dataRva, dataRaw, dataPtr, 0xc0000040); // INIT|READ|WRITE
-  writeSection(2, ".pdata", pdata.bytes.length, pdataRva, pdataRaw, pdataPtr, 0x40000040); // INIT|READ
-  writeSection(3, ".reloc", relocBytes.length, relocRva, relocRaw, relocPtr, 0x42000040); // INIT|READ|DISCARDABLE
-
-  file.set(textBytes, textPtr);
-  file.set(dataBytes, dataPtr);
-  file.set(pdata.bytes, pdataPtr);
-  file.set(relocBytes, relocPtr);
-
-  return {
-    bytes: file,
-    imageBase,
-    exports: names.map((name) => ({ name, rva: eatRva[name]! })),
-  };
-}
-
-const inflightWrites = new Map<string, Promise<{ path: string; wrote: boolean; size: number }>>();
-let tmpSeq = 0;
-
-/**
- * Whether `error`, from replacing the shim at `path`, means Windows would not touch a DLL that a
- * process has mapped (EBUSY, EPERM or EACCES; with a loaded shim a rename over it failed with EPERM
- * and a write into it with EBUSY, on Windows 11 with Bun 1.4.2). The shim in place exports the same
- * four functions (an emission from before the unwind data only lacks it), so the run keeps it
- * instead of failing and the new one is written once nothing has the old one loaded. Any other
- * error is real.
- */
-function keepsLoadedShim(error: unknown, path: string): boolean {
-  const code = (error as { code?: string }).code;
-  return (code === "EBUSY" || code === "EPERM" || code === "EACCES") && existsSync(path);
-}
-
-/** The temp file is gone after a rename and a leftover one is harmless, so a failed removal is ignored. */
-function removeTempFile(tmp: string): void {
-  try { unlinkSync(tmp); } catch { /* ignore */ }
-}
-
-/**
- * Write the shim to `path` unless an identical file is already there. Concurrent
- * writes to the same path in this process are coalesced (two first-run
- * `/api/probe` requests would otherwise both write it), and the write goes
- * through a temp file + rename so a concurrent loader never maps a half-written
- * DLL. A shim that is loaded stays as it is and reports `wrote: false` (keepsLoadedShim).
- */
-export function writeForwarder(path: string): Promise<{ path: string; wrote: boolean; size: number }> {
-  const existing = inflightWrites.get(path);
-  if (existing) return existing;
-  const p = doWriteForwarder(path).finally(() => inflightWrites.delete(path));
-  inflightWrites.set(path, p);
-  return p;
-}
-
-async function doWriteForwarder(path: string): Promise<{ path: string; wrote: boolean; size: number }> {
-  const built = buildForwarderDll();
-  const existing = Bun.file(path);
-  if (await existing.exists()) {
-    const current = new Uint8Array(await existing.arrayBuffer());
-    if (current.length === built.bytes.length && current.every((b, i) => b === built.bytes[i])) {
-      return { path, wrote: false, size: built.bytes.length };
-    }
+  u32(opt + 108, DATA_DIRECTORY_COUNT); // NumberOfRvaAndSizes
+  for (const [index, directory] of Object.entries(image.directories)) {
+    u32(opt + 112 + Number(index) * 8, directory.rva);
+    u32(opt + 112 + Number(index) * 8 + 4, directory.size);
   }
-  const tmp = `${path}.tmp.${process.pid}.${tmpSeq++}`;
-  try {
-    await Bun.write(tmp, built.bytes);
-    const wrote = await replaceShim(tmp, path, built.bytes);
-    return { path, wrote, size: built.bytes.length };
-  } finally {
-    removeTempFile(tmp);
-  }
+
+  // IMAGE_SECTION_HEADER: Name[8] @0, VirtualSize @8, VirtualAddress @12, SizeOfRawData @16, PointerToRawData @20,
+  // Characteristics @36; each section's bytes then go to its raw pointer.
+  sections.forEach((section, index) => {
+    const header = opt + OPTIONAL_HEADER_BYTES + index * SECTION_HEADER_BYTES;
+    for (let i = 0; i < 8; i++) u8(header + i, i < section.name.length ? section.name.charCodeAt(i) : 0);
+    u32(header + 8, section.bytes.length);
+    u32(header + 12, section.rva);
+    u32(header + 16, rawSizes[index]!);
+    u32(header + 20, rawPointers[index]!);
+    u32(header + 36, section.characteristics);
+    file.set(section.bytes, rawPointers[index]!);
+  });
+  return file;
 }
 
-/** Puts `bytes` at `path` by renaming `tmp` over it; false when keepsLoadedShim left the shim there. */
-async function replaceShim(tmp: string, path: string, bytes: Uint8Array): Promise<boolean> {
-  try {
-    try {
-      await rename(tmp, path); // atomic on the first run (destination absent)
-    } catch {
-      await Bun.write(path, bytes); // rename can fail on Windows if the dest exists/locked
-    }
-    return true;
-  } catch (error) {
-    if (keepsLoadedShim(error, path)) return false;
-    throw error;
-  }
+export interface ForwarderLayout {
+  bytes: Uint8Array;
+  exports: { name: string; rva: number }[];
 }
 
-/** Synchronous sibling of writeForwarder, for callers that cannot await (engine factories). */
-export function writeForwarderSync(path: string): { path: string; wrote: boolean; size: number } {
-  const built = buildForwarderDll();
-  if (existsSync(path)) {
-    const current = readFileSync(path);
-    if (current.length === built.bytes.length && current.every((b, i) => b === built.bytes[i])) {
-      return { path, wrote: false, size: built.bytes.length };
-    }
-  }
-  const tmp = `${path}.tmp.${process.pid}.${tmpSeq++}`;
-  try {
-    writeFileSync(tmp, built.bytes);
-    const wrote = replaceShimSync(tmp, path, built.bytes);
-    return { path, wrote, size: built.bytes.length };
-  } finally {
-    removeTempFile(tmp);
-  }
-}
+export function buildForwarderDll(): ForwarderLayout {
+  const textRva = 0x1000;
+  const dataRva = 0x2000;
+  const pdataRva = 0x3000;
+  const relocRva = 0x4000;
+  const slotRva = Array.from({ length: SLOT_COUNT }, (_, slot) => dataRva + slot * SLOT_BYTES);
 
-/** Synchronous sibling of replaceShim. */
-function replaceShimSync(tmp: string, path: string, bytes: Uint8Array): boolean {
-  try {
-    try {
-      renameSync(tmp, path); // atomic on the first run (destination absent)
-    } catch {
-      writeFileSync(path, bytes); // rename can fail on Windows if the dest exists/locked
-    }
-    return true;
-  } catch (error) {
-    if (keepsLoadedShim(error, path)) return false;
-    throw error;
-  }
+  const text = buildTextSection(textRva, slotRva);
+  const pdata = buildPdata(text.callThunks, pdataRva);
+  const reloc = emptyRelocBlock(textRva);
+  const bytes = assembleImage({
+    sections: [
+      { name: ".text", rva: textRva, bytes: text.bytes, characteristics: IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ },
+      // The slots, zero-initialised until fwd_set_slots fills them.
+      { name: ".data", rva: dataRva, bytes: new Uint8Array(SLOT_COUNT * SLOT_BYTES), characteristics: IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE },
+      { name: ".pdata", rva: pdataRva, bytes: pdata.bytes, characteristics: IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ },
+      { name: ".reloc", rva: relocRva, bytes: reloc, characteristics: IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_DISCARDABLE },
+    ],
+    entryRva: text.entryRva,
+    directories: {
+      [EXPORT_DIRECTORY_INDEX]: text.exportDirectory,
+      [EXCEPTION_DIRECTORY_INDEX]: { rva: pdataRva, size: pdata.tableBytes }, // the RUNTIME_FUNCTION array
+      [BASERELOC_DIRECTORY_INDEX]: { rva: relocRva, size: reloc.length },
+    },
+  });
+  return { bytes, exports: text.exports };
 }
