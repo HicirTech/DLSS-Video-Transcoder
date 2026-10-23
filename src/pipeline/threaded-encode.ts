@@ -73,12 +73,12 @@ export function runThreadedEncode(p: ThreadedEncodeParams): Promise<FrameCounts>
       onProgress: progress,
       processFrame: (decoded, frameNumber) => {
         const rgba = new Uint8Array(decoded.buf);
-        const g = p.guide(rgba, frameNumber);
-        const result = p.engine.process({ rgba, reset: g.reset, motion: g.motion });
+        const guidance = p.guide(rgba, frameNumber);
+        const result = p.engine.process({ rgba, reset: guidance.reset, motion: guidance.motion });
         const out = result.buffer as ArrayBuffer;
         const frame: EncodeFrame = { type: "frame", index: decoded.index, buf: out };
         encodeW.postMessage(frame, [out]);
-        return g.sceneCut;
+        return guidance.sceneCut;
       },
     });
 

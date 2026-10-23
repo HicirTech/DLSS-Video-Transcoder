@@ -7,10 +7,10 @@
  * buffer convert through a Uint32Array view with integer ops only instead of
  * one scalar store/load per element.
  */
-export function bitsToHalf(x: number): number {
-  const sign = (x >>> 16) & 0x8000;
-  const rawExp = (x >>> 23) & 0xff;
-  const mant = x & 0x7fffff;
+export function bitsToHalf(float32Bits: number): number {
+  const sign = (float32Bits >>> 16) & 0x8000;
+  const rawExp = (float32Bits >>> 23) & 0xff;
+  const mant = float32Bits & 0x7fffff;
 
   if (rawExp === 0xff) {
     // Inf (mant 0) or NaN (mant != 0, keep it quiet/non-zero).
