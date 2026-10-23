@@ -6,6 +6,7 @@
  */
 import { FFIType, JSCallback } from "bun:ffi";
 import { NativeStruct, asPtr, readCString } from "../native/memory.ts";
+import { NgxResult } from "./results.ts";
 
 export interface SpyCall {
   slot: number;
@@ -13,7 +14,9 @@ export interface SpyCall {
   arg: string;
 }
 
-const UNSUPPORTED = 0xbad00010 | 0;
+const UNSUPPORTED = NgxResult.UnsupportedParameter | 0; // FFI i32 return
+/** More slots than NVSDK_NGX_Parameter's 17, so a call past the known layout lands on a spy too. */
+const SPY_SLOT_COUNT = 32;
 
 export class SpyParameter {
   readonly calls: SpyCall[] = [];
