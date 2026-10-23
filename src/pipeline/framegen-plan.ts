@@ -196,7 +196,8 @@ export function chooseInterpolationPlan(
 
   const stages = ratCmp(ratio, rational(2)) === 0 ? 1 : ratCmp(ratio, rational(4)) === 0 ? 2 : 3;
   const grid = 1 << stages;
-  const exactDyadic = cfr && (ratCmp(ratio, rational(2)) === 0 || ratCmp(ratio, rational(4)) === 0);
+  // Every output instant falls on a grid frame only when the ratio is the grid itself: 2x, 4x or 8x.
+  const exactGrid = ratCmp(ratio, rational(grid)) === 0;
   return {
     path: "Cascade",
     sourceRate,
@@ -204,7 +205,7 @@ export function chooseInterpolationPlan(
     nativeMultiplier: 2,
     gridMultiplier: grid,
     cascadeStages: stages,
-    maximumTemporalError: exactDyadic ? rational(0) : ratDiv(rational(1, 2 * grid), sourceRate),
+    maximumTemporalError: exactGrid ? rational(0) : ratDiv(rational(1, 2 * grid), sourceRate),
     generatedPerInterval: grid - 1,
   };
 }

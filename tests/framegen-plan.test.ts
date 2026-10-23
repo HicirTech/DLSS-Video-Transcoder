@@ -113,7 +113,7 @@ describe("chooseInterpolationPlan", () => {
     expect(noHags.gridMultiplier).toBe(4);
     expect(noHags.nativeMultiplier).toBe(2);
     expect(noHags.generatedPerInterval).toBe(3);
-    expect(eq(noHags.maximumTemporalError, rational(0))).toBe(true); // exact dyadic
+    expect(eq(noHags.maximumTemporalError, rational(0))).toBe(true); // exact 4x grid
   });
 
   test("30 -> 60 auto without HAGS: still native 2x (only 3x and above need HAGS)", () => {
