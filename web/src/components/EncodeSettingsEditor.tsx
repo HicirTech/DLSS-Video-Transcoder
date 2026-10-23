@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { FormControl, FormControlLabel, FormHelperText, InputLabel, MenuItem, Select, Stack, Switch } from "@mui/material";
-import { AAC_KBPS, AUDIO_IN_CONTAINER, DEFAULT_ENCODE_SETTINGS, ENCODE_CODECS, ENCODE_CONTAINERS, NVENC_MAX_SIDE, SETTING_RANGES, type EncodeSettings } from "../../../src/server/api-types";
+import { AAC_KBPS, AUDIO_IN_CONTAINER, DEFAULT_ENCODE_SETTINGS, ENCODE_CODECS, ENCODE_CONTAINERS, NVENC_CODECS, SETTING_RANGES, type EncodeSettings } from "../../../src/server/api-types";
 import { nvencLimitExceeded } from "../../../src/server/output-size";
 import { NumberField } from "./NumberField";
 
@@ -31,7 +31,7 @@ export const CONTAINER_LABELS: Record<EncodeSettings["container"], string> = { m
 function nvencLimitNote(codec: EncodeSettings["codec"], size: { width: number; height: number } | null | undefined): string | null {
   const limit = size ? nvencLimitExceeded(codec, size) : null;
   if (!size || limit === null) return null;
-  const onGpu = ENCODE_CODECS.filter((other) => NVENC_MAX_SIDE[other] !== undefined && nvencLimitExceeded(other, size) === null).map((other) => CODEC_LABELS[other]);
+  const onGpu = NVENC_CODECS.filter((other) => nvencLimitExceeded(other, size) === null).map((other) => CODEC_LABELS[other]);
   const instead = onGpu.length ? ` ${onGpu.join(" or ")} would keep it on the GPU.` : "";
   return `${CODEC_LABELS[codec]} encodes at most ${limit} pixels per side, so at ${size.width}×${size.height} this job encodes the same format on the CPU instead, which is slower.${instead}`;
 }
