@@ -6,7 +6,7 @@
 import { type EncodeSettings, FRAME_GEN_CONTAINER, resizesFrames, type ScaleSettings, STEP_KINDS, type StepKind, stepsSuffix } from "../../src/server/api-types";
 import { resolveTargetSize, srOutputProblem, videoTargetSize } from "../../src/server/output-size";
 import { rateValue, stemOf } from "./format";
-import type { StoredFrameGen } from "./hooks/useSettings";
+import type { StoredFrameGen } from "./stored-settings";
 
 /** Each step's title on the forms and the job cards; a Record, so a step without one is a build error. */
 export const STEP_TITLES: Record<StepKind, string> = { sr: "Super Resolution", nr: "Neural Rendering", fg: "Frame generation" };
