@@ -260,13 +260,19 @@ interface PipelineRun {
 async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenResult> {
   const started = performance.now();
   const job = await planFrameGen(options);
-  const { width, height, frameBytes, targetRate, output, outputExisted } = job;
+  const { width, height, targetRate, output, outputExisted } = job;
   const { decoder, sink } = await openEncodePipeline(job);
 
   // Drain the decoder's stderr for the whole run so it can never fill its pipe,
   // block, and stall the frame loop (the encode worker drains its own).
   let decodeErrText = "";
   const decodeErrDrained = new Response(decoder.stderr as ReadableStream<Uint8Array>).text().then((t) => { decodeErrText = t; }).catch(() => {});
+  /** The frame loop only sees the decoder's stdout end; its exit code says whether that end was a failure. */
+  const throwIfDecodeFailed = async (): Promise<void> => {
+    const decodeExit = await decoder.exited;
+    await decodeErrDrained;
+    if (decodeExit !== 0) throw new Error(ffmpegFailedMessage("decode", decodeExit, decodeErrText));
+  };
 
   // The frames frame generation reads and generates live in SharedArrayBuffers
   // so the guide and encode threads read them without copies. Decoded frames
@@ -278,7 +284,6 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
   // Once, whichever of the failure path and `finally` gets there first.
   let stagesClosed: Promise<unknown> | null = null;
   const closeStages = (): Promise<unknown> => (stagesClosed ??= Promise.allSettled(stages.map((stage) => stage.close())));
-  const capacity = Math.floor(DEFAULT_BUFFER_LIMIT / frameBytes);
   let processed: ProcessedFrames | null = null;
 
   let run: PipelineRun;
@@ -286,7 +291,9 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     // Before the stages, so a Super Resolution or Neural Rendering that cannot start fails the job before any DLSSG host does.
     if (job.chained) processed = openProcessedFrames(job, decoded);
     await openStages(job, zeros, stages);
-    run = await runPipeline(job, { reader: processed ?? decoded, writer, sink }, stages, capacity);
+    run = await runPipeline(job, { reader: processed ?? decoded, writer, sink }, stages);
+    // In here, so a decode that failed partway also deletes the file the encode has muxed by now.
+    await throwIfDecodeFailed();
   } catch (error) {
     // abort() kills the worker's ffmpeg and waits for it to release the output
     // file, so the partial file can be deleted here and a failed job never
@@ -302,11 +309,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     processed?.close();
   }
 
-  const decodeExit = await decoder.exited;
-  await decodeErrDrained;
-  if (decodeExit !== 0) throw new Error(ffmpegFailedMessage("decode", decodeExit, decodeErrText));
-
-  return finishFrameGen(job, writer, stages, run, started);
+  return finishFrameGen(job, { writer, stages, run, started });
 }
 
 /** Probes the tools, the DLSSG runtime and the source, and plans the interpolation. */
@@ -489,8 +492,8 @@ async function runPipeline(
   { options, progress, frameBytes, sourceRate, plan, caps, expectedDecoded, expectsGeneration }: FrameGenJob,
   { reader, writer, sink }: { reader: FrameSource; writer: NearestTimestampWriter; sink: EncodeSink },
   stages: Stage[],
-  capacity: number,
 ): Promise<PipelineRun> {
+  const capacity = Math.floor(DEFAULT_BUFFER_LIMIT / frameBytes);
   const noneGenerated = () => stages.every((stage) => stage.generatedTotal === 0);
   const check = (): void => {
     // Fail fast before spending the whole encode: nothing synthesised after
@@ -540,10 +543,7 @@ async function runPipeline(
 
 function finishFrameGen(
   { progress, ffprobe, steps, width, height, sourceRate, targetRate, plan, caps, frameBytes, output }: FrameGenJob,
-  writer: NearestTimestampWriter,
-  stages: Stage[],
-  { mode, inputFrames, peak }: PipelineRun,
-  started: number,
+  { writer, stages, run: { mode, inputFrames, peak }, started }: { writer: NearestTimestampWriter; stages: Stage[]; run: PipelineRun; started: number },
 ): FrameGenResult {
   progress(0.98, "verifying output");
   // writer.outputCount: fixed by endAt() from the decoded count, so it is the
