@@ -15,12 +15,20 @@ import { copyFromNative, guid, OutU64, readCString } from "../native/memory.ts";
 import { clampToRange } from "../server/api-types.ts";
 
 const OK = 0;
+const INVALID_VERSION = 15; // NV_ENC_ERR_INVALID_VERSION in NVENCSTATUS, nvEncodeAPI.h (SDK 13.1.15)
+const NEED_MORE_INPUT = 17; // NV_ENC_ERR_NEED_MORE_INPUT in NVENCSTATUS, nvEncodeAPI.h (SDK 13.1.15)
 
-// -- Version macros --------------------------------------------------------
-// Transcribed from nvEncodeAPI.h: NVENCAPI_VERSION = 13 | (1 << 24), and
-// NVENCAPI_STRUCT_VERSION(ver) = NVENCAPI_VERSION | (ver << 16) | (0x7 << 28).
-// `extra` carries the `| (1u << 31)` that some *_VER macros append.
-const NVENCAPI_VERSION = 13 | (1 << 24);
+// -- ABI and version macros --------------------------------------------------
+// ABI from the NVIDIA Video Codec SDK 13.1.15 header (nvEncodeAPI.h): natural
+// alignment, no #pragma pack; NVENCAPI (__stdcall) is a no-op on x64, so the
+// default bun:ffi convention applies. NVENCSTATUS 0 = NV_ENC_SUCCESS.
+// Transcribed from nvEncodeAPI.h: NVENCAPI_VERSION = NVENCAPI_MAJOR_VERSION |
+// (NVENCAPI_MINOR_VERSION << 24), and NVENCAPI_STRUCT_VERSION(ver) =
+// NVENCAPI_VERSION | (ver << 16) | (0x7 << 28). `extra` carries the
+// `| (1u << 31)` that some *_VER macros append.
+const NVENCAPI_MAJOR_VERSION = 13;
+const NVENCAPI_MINOR_VERSION = 1;
+const NVENCAPI_VERSION = NVENCAPI_MAJOR_VERSION | (NVENCAPI_MINOR_VERSION << 24);
 const STRUCT_VERSION = (ver: number, extra = 0): number =>
   ((NVENCAPI_VERSION | (ver << 16) | (0x7 << 28)) >>> 0) | (extra >>> 0);
 const STRUCT_VER = {
@@ -184,58 +192,31 @@ export function nvencMaxSupportedVersion(): { major: number; minor: number; raw:
   }
 }
 
-export interface NvencCaps {
-  available: boolean;
-  detail: string;
-  driverMajor?: number;
-  driverMinor?: number;
-  widthMax?: number;
-  heightMax?: number;
-  encoderEngines?: number;
-  yuv444?: boolean;
+/** The way out of NV_ENC_ERR_INVALID_VERSION: the driver speaks an older NVENC API than this build. */
+function driverVersionHint(): string {
+  const supported = nvencMaxSupportedVersion();
+  return `; this build needs NVENC API ${NVENCAPI_MAJOR_VERSION}.${NVENCAPI_MINOR_VERSION} and the driver supports ${supported ? `${supported.major}.${supported.minor}` : "an unknown version"}: update the NVIDIA driver`;
 }
+
+/** Whether NVENC opened on a device, and why not when it did not. */
+export type NvencCaps = { available: true } | { available: false; detail: string };
 
 /**
  * Bring up NVENC on CUDA device `ordinal`: create the instance, open a CUDA
- * encode session, query a few H.264 caps, and tear down. Proves the whole
- * CUDA + NVENC FFI/ABI chain without encoding a frame.
+ * encode session and destroy it again, which proves the whole CUDA + NVENC
+ * FFI/ABI chain without encoding a frame. The primary context it retains stays
+ * pushed on this thread, so call it only on a thread that ends with its job (a
+ * job worker, an encode worker or the CLI); see cudaReleaseContext.
  */
 export function probeNvencCaps(ordinal: number): NvencCaps {
-  const ver = nvencMaxSupportedVersion();
   let encoder = 0n;
   try {
     const opened = openEncodeSession(cudaCreateContext(ordinal));
-    if (opened.status !== OK) return { available: false, detail: `nvEncOpenEncodeSessionEx failed: NVENC ${statusName(opened.status)}`, driverMajor: ver?.major, driverMinor: ver?.minor };
+    if (opened.status !== OK) return { available: false, detail: `nvEncOpenEncodeSessionEx failed: NVENC ${statusName(opened.status)}${opened.status === INVALID_VERSION ? driverVersionHint() : ""}` };
     encoder = opened.session;
-
-    const getCaps = fn(FN.getEncodeCaps, { args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 });
-    const queryCap = (cap: number): number | undefined => {
-      const param = new Uint8Array(256); // NV_ENC_CAPS_PARAM
-      const pdv = new DataView(param.buffer);
-      pdv.setUint32(0, STRUCT_VER.CAPS_PARAM, true);
-      pdv.setUint32(4, cap, true);
-      const val = new Int32Array(1);
-      const r = getCaps(encoder, CODEC_H264, param, val) as number;
-      return r === OK ? val[0]! : undefined;
-    };
-
-    const widthMax = queryCap(CAPS.WIDTH_MAX);
-    const heightMax = queryCap(CAPS.HEIGHT_MAX);
-    const encoderEngines = queryCap(CAPS.NUM_ENCODER_ENGINES);
-    const yuv444 = queryCap(CAPS.SUPPORT_YUV444);
-
-    return {
-      available: true,
-      detail: "ok",
-      driverMajor: ver?.major,
-      driverMinor: ver?.minor,
-      widthMax,
-      heightMax,
-      encoderEngines,
-      yuv444: yuv444 === undefined ? undefined : yuv444 !== 0,
-    };
+    return { available: true };
   } catch (error) {
-    return { available: false, detail: (error as Error).message, driverMajor: ver?.major, driverMinor: ver?.minor };
+    return { available: false, detail: (error as Error).message };
   } finally {
     if (encoder !== 0n) {
       try { fn(FN.destroyEncoder, { args: [FFIType.u64], returns: FFIType.i32 })(encoder); } catch { /* best effort */ }
