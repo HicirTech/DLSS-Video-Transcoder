@@ -79,7 +79,7 @@ describe("decode worker abort", () => {
     const aborted = nextMessage(worker, "aborted");
     worker.postMessage({ type: "abort" });
     worker.postMessage({ type: "start", ffmpeg: process.execPath, args: streamingChild(marker), frameBytes: 4096 });
-    worker.postMessage({ type: "credit", n: 4 });
+    worker.postMessage({ type: "credit", frames: 4 });
     await aborted;
     // The stand-in child writes its marker 18-30 ms after spawning (measured); 500 ms leaves a wide margin.
     await Bun.sleep(500);
@@ -92,7 +92,7 @@ describe("decode worker abort", () => {
     const marker = markerPath();
     const firstFrame = nextMessage(worker, "frame");
     worker.postMessage({ type: "start", ffmpeg: process.execPath, args: streamingChild(marker), frameBytes: 4096 });
-    worker.postMessage({ type: "credit", n: 1 });
+    worker.postMessage({ type: "credit", frames: 1 });
     await firstFrame;
     const pid = Number(readFileSync(marker, "utf8"));
     childPids.push(pid);
