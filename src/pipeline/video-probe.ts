@@ -91,17 +91,12 @@ export function withDecodedSize(info: VideoInfo, decoderStderr: string): VideoIn
   return { ...info, ...decoded, displayAspect };
 }
 
-/**
- * `ffmpeg` is optional: it is only spawned when the stream carries a rotation,
- * to confirm the geometry the decoder will hand over. Without it a rotated
- * source falls back to the angle-based guess, which is right for every exact
- * 90/180/270 matrix — the case phone footage produces.
- */
-export function probeVideo(ffprobe: string, input: string, ffmpeg?: string): VideoInfo {
+/** ffmpeg is only spawned when the stream carries a rotation, to confirm the geometry the decoder will hand over. */
+export function probeVideo(ffprobe: string, input: string, ffmpeg: string): VideoInfo {
   const decoder = new TextDecoder();
   const probe = Bun.spawnSync(probeArgv(ffprobe, input), { stdout: "pipe", stderr: "pipe" });
   const info = probedInfo({ exitCode: probe.exitCode, stdout: decoder.decode(probe.stdout), stderr: decoder.decode(probe.stderr) }, input);
-  if (info.rotation === 0 || !ffmpeg) return info;
+  if (info.rotation === 0) return info;
   const frame = Bun.spawnSync(frameSizeArgv(ffmpeg, input), { stdout: "pipe", stderr: "pipe" });
   return withDecodedSize(info, decoder.decode(frame.stderr));
 }
