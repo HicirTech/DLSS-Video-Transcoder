@@ -82,7 +82,7 @@ export const VIDEO_STEP_OPTS: Record<StepKind, readonly OptionSpec[]> = {
 };
 
 export const RUNTIME_OPT: OptionSpec = { flag: "--runtime DIR", desc: "runtime folder holding the NGX DLLs", def: "<repo>/runtime" };
-export const ADAPTER_OPT: OptionSpec = { flag: "--adapter N", desc: "GPU adapter index as `probe` listed it in this session (DXGI indices can change between runs); the adapter must have a CUDA device. auto = the NVIDIA adapter with the most VRAM that has one", def: "auto" };
+export const ADAPTER_OPT: OptionSpec = { flag: "--adapter N", desc: `GPU adapter index as \`probe\` listed it in this session (DXGI indices can change between runs); the adapter must have a CUDA device. auto = ${AUTO_GPU_CHOICE}`, def: "auto" };
 
 export const COMMANDS: readonly CommandSpec[] = [
   {
