@@ -404,6 +404,18 @@ export interface SettingsDefaults {
   warmupFrames: number;
 }
 
+/** What GET /api/settings/defaults answers; fresh copies, so a caller may change them. */
+export function settingsDefaults(): SettingsDefaults {
+  return {
+    superResolution: structuredClone(DEFAULT_SR_STEP),
+    neuralRendering: { ...DEFAULT_NR_SETTINGS },
+    frameGen: { ...DEFAULT_FRAME_GEN_STEP },
+    resize: { ...DEFAULT_SCALE_SETTINGS },
+    encode: { ...DEFAULT_ENCODE_SETTINGS },
+    warmupFrames: DEFAULT_WARMUP_FRAMES,
+  };
+}
+
 /** Response of POST /api/upload: where the server stored the file, and what the client sent. */
 export interface UploadResult {
   path: string;
