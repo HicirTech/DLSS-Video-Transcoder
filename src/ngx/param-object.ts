@@ -12,7 +12,8 @@
  */
 import { FFIType, JSCallback } from "bun:ffi";
 import { NativeStruct, asPtr, readCString, viewNative } from "../native/memory.ts";
-import { NGX_SUCCESS } from "./results.ts";
+import { MSVC, type Slots } from "./params.ts";
+import { NGX_SUCCESS, NgxResult } from "./results.ts";
 
 const NOT_FOUND = 0xbad00004 | 0; // NVSDK_NGX_Result_FeatureNotFound, used for "parameter unset"
 
@@ -21,74 +22,42 @@ type Value = number | bigint;
 /** Writes a stored value into the caller's out-pointer with the getter's width. */
 type Writer = (view: DataView, value: Value) => void;
 
-const SETTER_TYPES: FFIType[] = [
-  FFIType.u64, // 0 setPointer
-  FFIType.u64, // 1 setD3d12
-  FFIType.u64, // 2 setD3d11
-  FFIType.i32, // 3 setI32
-  FFIType.u32, // 4 setU32
-  FFIType.f64, // 5 setF64
-  FFIType.f32, // 6 setF32
-  FFIType.u64, // 7 setU64
+/** Each setter's value type, and how a value is stored: a u64 as a bigint, so a getter reads it back at full width. */
+const SETTERS: ReadonlyArray<{ slot: keyof Slots; type: FFIType; toStore?: (value: Value) => Value }> = [
+  { slot: "setPointer", type: FFIType.u64 },
+  { slot: "setD3d12", type: FFIType.u64 },
+  { slot: "setD3d11", type: FFIType.u64 },
+  { slot: "setI32", type: FFIType.i32 },
+  { slot: "setU32", type: FFIType.u32 },
+  { slot: "setF64", type: FFIType.f64 },
+  { slot: "setF32", type: FFIType.f32 },
+  { slot: "setU64", type: FFIType.u64, toStore: (value) => BigInt(value) },
 ];
 
-const WRITERS: Writer[] = [
-  (v, x) => v.setBigUint64(0, BigInt(x), true), // 8 getPointer
-  (v, x) => v.setBigUint64(0, BigInt(x), true), // 9 getD3d12
-  (v, x) => v.setBigUint64(0, BigInt(x), true), // 10 getD3d11
-  (v, x) => v.setInt32(0, Number(x) | 0, true), // 11 getI32
-  (v, x) => v.setUint32(0, Number(x) >>> 0, true), // 12 getU32
-  (v, x) => v.setFloat64(0, Number(x), true), // 13 getF64
-  (v, x) => v.setFloat32(0, Number(x), true), // 14 getF32
-  (v, x) => v.setBigUint64(0, BigInt(x), true), // 15 getU64
+const writeU64: Writer = (view, value) => view.setBigUint64(0, BigInt(value), true);
+
+const GETTERS: ReadonlyArray<{ slot: keyof Slots; write: Writer }> = [
+  { slot: "getPointer", write: writeU64 },
+  { slot: "getD3d12", write: writeU64 },
+  { slot: "getD3d11", write: writeU64 },
+  { slot: "getI32", write: (view, value) => view.setInt32(0, Number(value) | 0, true) },
+  { slot: "getU32", write: (view, value) => view.setUint32(0, Number(value) >>> 0, true) },
+  { slot: "getF64", write: (view, value) => view.setFloat64(0, Number(value), true) },
+  { slot: "getF32", write: (view, value) => view.setFloat32(0, Number(value), true) },
+  { slot: "getU64", write: writeU64 },
 ];
 
 export class NgxParamObject {
   private readonly store = new Map<string, Value>();
   private readonly callbacks: JSCallback[] = [];
-  private readonly vtable: NativeStruct;
+  private readonly vtable = new NativeStruct((MSVC.reset + 1) * 8);
   private readonly object: NativeStruct;
   private closed = false;
 
   constructor() {
-    const slots = new NativeStruct(17 * 8);
-
-    // Slots 0..7: setters store the value keyed by parameter name.
-    for (let slot = 0; slot < 8; slot++) {
-      const setU64Store = slot === 7;
-      const cb = new JSCallback(
-        (_self: number, namePtr: number, value: number | bigint) => {
-          this.store.set(readCString(asPtr(namePtr), 256), setU64Store ? BigInt(value) : value);
-        },
-        { args: [FFIType.ptr, FFIType.ptr, SETTER_TYPES[slot]!], returns: FFIType.void },
-      );
-      this.callbacks.push(cb);
-      slots.pointer(slot * 8, asPtr(cb.ptr));
-    }
-
-    // Slots 8..15: getters, each writing the stored value at its own width.
-    for (let i = 0; i < 8; i++) {
-      const write = WRITERS[i]!;
-      const cb = new JSCallback(
-        (_self: number, namePtr: number, outPtr: number) => {
-          const name = readCString(asPtr(namePtr), 256);
-          if (!this.store.has(name)) return NOT_FOUND;
-          const bytes = viewNative(asPtr(outPtr), 8);
-          write(new DataView(bytes.buffer, bytes.byteOffset, 8), this.store.get(name)!);
-          return NGX_SUCCESS;
-        },
-        { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
-      );
-      this.callbacks.push(cb);
-      slots.pointer((8 + i) * 8, asPtr(cb.ptr));
-    }
-
-    // Slot 16: Reset.
-    const reset = new JSCallback(() => this.store.clear(), { args: [FFIType.ptr], returns: FFIType.void });
-    this.callbacks.push(reset);
-    slots.pointer(16 * 8, asPtr(reset.ptr));
-
-    this.vtable = slots;
+    for (const setter of SETTERS) this.install(MSVC[setter.slot], this.setterCallback(setter.type, setter.toStore));
+    for (const getter of GETTERS) this.install(MSVC[getter.slot], this.getterCallback(getter.write));
+    this.install(MSVC.reset, new JSCallback(() => this.store.clear(), { args: [FFIType.ptr], returns: FFIType.void }));
     // Object layout: first 8 bytes point at the vtable; pad so stray reads stay inside our memory.
     this.object = new NativeStruct(64);
     this.object.pointer(0, this.vtable.ptr as unknown as number);
@@ -154,6 +123,35 @@ export class NgxParamObject {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    for (const cb of this.callbacks) cb.close();
+    for (const callback of this.callbacks) callback.close();
+  }
+
+  private install(slot: number, callback: JSCallback): void {
+    this.callbacks.push(callback);
+    this.vtable.pointer(slot * 8, asPtr(callback.ptr));
+  }
+
+  /** A setter: stores the value keyed by parameter name. */
+  private setterCallback(type: FFIType, toStore?: (value: Value) => Value): JSCallback {
+    return new JSCallback(
+      (_self: number, namePtr: number, value: number | bigint) => {
+        this.store.set(readCString(asPtr(namePtr), 256), toStore ? toStore(value) : value);
+      },
+      { args: [FFIType.ptr, FFIType.ptr, type], returns: FFIType.void },
+    );
+  }
+
+  /** A getter: writes the stored value at the writer's width, or answers NOT_FOUND for a parameter never set. */
+  private getterCallback(write: Writer): JSCallback {
+    return new JSCallback(
+      (_self: number, namePtr: number, outPtr: number) => {
+        const name = readCString(asPtr(namePtr), 256);
+        if (!this.store.has(name)) return NOT_FOUND;
+        const bytes = viewNative(asPtr(outPtr), 8);
+        write(new DataView(bytes.buffer, bytes.byteOffset, 8), this.store.get(name)!);
+        return NGX_SUCCESS;
+      },
+      { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
+    );
   }
 }
