@@ -111,7 +111,7 @@ describe("runThreadedEncode", () => {
     run.encode.reply({ type: "opened" });
     run.decode.reply({ type: "frame", index: 0, buf: frame() });
     run.encode.reply({ type: "encoded", index: 0 });
-    run.decode.reply({ type: "end", frames: 1 });
+    run.decode.reply({ type: "end" });
     expect(run.encode.sentOfType("finish")).toHaveLength(1);
     expect(finishing).toBe(1);
     controller.abort();

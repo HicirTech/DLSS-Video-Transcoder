@@ -71,7 +71,7 @@ describe("connectFrameFlow", () => {
     flow.encode.reply({ type: "opened" });
     for (const index of [0, 1, 2]) flow.decode.reply(frame(index));
     expect(seen).toEqual([[0, 0], [1, 1], [2, 2]]);
-    flow.decode.reply({ type: "end", frames: 3 });
+    flow.decode.reply({ type: "end" });
     for (let acked = 0; acked < 3; acked++) flow.encode.reply({ type: "encoded" });
     flow.encode.reply({ type: "done" });
     expect((await flow.outcome).value).toEqual({ frames: 3, sceneCuts: 1 });
@@ -86,7 +86,7 @@ describe("connectFrameFlow", () => {
     expect(credits(flow)).toEqual([CREDIT_WINDOW, 1]);
     expect(flow.progress).toEqual([[0.1, "frame 1/10", { done: 1, total: 10 }]]);
     expect(flow.acks).toEqual([{ type: "encoded", slot: 0 }]);
-    flow.decode.reply({ type: "end", frames: 2 });
+    flow.decode.reply({ type: "end" });
     flow.encode.reply({ type: "encoded", slot: 1 });
     expect(credits(flow)).toEqual([CREDIT_WINDOW, 1]); // nothing left to decode, so no more credit
     expect(flow.progress).toHaveLength(2);
@@ -96,11 +96,11 @@ describe("connectFrameFlow", () => {
     const flow = start();
     flow.encode.reply({ type: "opened" });
     flow.decode.reply(frame(0));
-    flow.decode.reply({ type: "end", frames: 1 });
+    flow.decode.reply({ type: "end" });
     expect(flow.encode.sentOfType("finish")).toHaveLength(0); // the frame is not acknowledged yet
     flow.encode.reply({ type: "encoded" });
     expect(flow.encode.sentOfType("finish")).toHaveLength(1);
-    flow.decode.reply({ type: "end", frames: 1 });
+    flow.decode.reply({ type: "end" });
     expect(flow.encode.sentOfType("finish")).toHaveLength(1);
   });
 

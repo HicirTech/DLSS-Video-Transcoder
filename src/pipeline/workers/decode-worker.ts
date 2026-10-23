@@ -22,7 +22,7 @@ type DecodeIn = DecodeStart | DecodeCredit | AbortRequest;
 /** What it answers: each frame (its buffer transferred), then "end" or "error". */
 export type DecodeOut =
   | { type: "frame"; index: number; buf: ArrayBuffer }
-  | { type: "end"; frames: number }
+  | { type: "end" }
   | { type: "error"; message: string }
   | AbortedReply;
 
@@ -91,7 +91,7 @@ async function run(msg: DecodeStart): Promise<void> {
       post({ type: "error", message: ffmpegFailedMessage("decode", code, err) });
       return;
     }
-    post({ type: "end", frames: index });
+    post({ type: "end" });
   } catch (error) {
     if (aborted) return;
     post({ type: "error", message: (error as Error).message ?? String(error) });
