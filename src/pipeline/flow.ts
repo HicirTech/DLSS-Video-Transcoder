@@ -25,13 +25,8 @@ const RESET_CONFIDENCE = 0.98;
 
 // -- Estimator -----------------------------------------------------------------
 
-export interface MotionResult {
-  /**
-   * Interleaved (x, y) motion in RENDER-RESOLUTION pixels, length width*height*2.
-   * Null whenever there is no usable motion — first frame, scene cut, duplicate
-   * or low confidence — which the engine treats as zero motion plus reset.
-   */
-  motion: Float32Array | null;
+/** What scene analysis decides about a frame, whatever motion comes with it. */
+export interface SceneVerdict {
   /** First frame, scene cut, or confidence below RESET_CONFIDENCE: drop temporal history. */
   reset: boolean;
   /** Normalized [0,1] scene score (mean abs luma diff / 255). */
@@ -42,31 +37,30 @@ export interface MotionResult {
   confidence: number;
 }
 
+export interface MotionResult extends SceneVerdict {
+  /**
+   * Interleaved (x, y) motion in RENDER-RESOLUTION pixels, length width*height*2: a backward field (current ->
+   * previous, MV[p] = prevPos - curPos), origin top-left, +x right, +y down, no y flip, so the engine only packs it
+   * to R16G16_FLOAT with MV.Scale = 1.0. Null whenever there is no usable motion — first frame, scene cut,
+   * duplicate or low confidence. The engine takes null as zero motion; `reset` alone says whether temporal history
+   * is dropped (false on a duplicate).
+   */
+  motion: Float32Array | null;
+}
+
 /** MotionResult with the field already packed as R16G16_FLOAT, the form the DLSSG host consumes. */
-export interface PackedMotionResult {
+export interface PackedMotionResult extends SceneVerdict {
   /** Interleaved (x, y) halves in render pixels, length width*height*2; null as in MotionResult.motion. */
   half: Uint16Array | null;
-  reset: boolean;
-  sceneScore: number;
-  duplicate: boolean;
-  confidence: number;
 }
 
 /**
- * The analysis half of processPacked(): scene decisions plus the grid-resolution
- * flow, so the expensive upsample + pack can run on another thread. At most one
- * of `small` / `half` is ever set — `small` on the fast path, for the caller to
- * finish with packFlowResizedR16G16; `half` when a non-finite grid sample forced
- * the exact path to build the full field here.
+ * The analysis half of processPacked(): scene decisions plus the motion, so the expensive upsample + pack can run on
+ * another thread. "grid" is the fast path's finite grid-resolution flow, for the caller to finish with
+ * packFlowResizedR16G16; "packed" is the finished result, for a frame with no flow at all or one a non-finite grid
+ * sample sent down the exact path.
  */
-export interface AnalyzedMotion {
-  small: Float32Array | null;
-  half: Uint16Array | null;
-  reset: boolean;
-  sceneScore: number;
-  duplicate: boolean;
-  confidence: number;
-}
+export type AnalyzedMotion = { kind: "grid"; small: Float32Array; verdict: SceneVerdict } | { kind: "packed"; motion: PackedMotionResult };
 
 export interface MotionEstimator {
   /**
@@ -101,9 +95,7 @@ export interface MotionEstimatorOptions {
  * settles reset and confidence once it knows how much of the upsampled field is
  * finite.
  */
-type Analysis =
-  | { settled: true; reset: boolean; sceneScore: number; duplicate: boolean; confidence: number }
-  | { settled: false; small: Float32Array; sceneScore: number };
+type Analysis = { settled: true; verdict: SceneVerdict } | { settled: false; small: Float32Array; sceneScore: number };
 
 class DisMotionEstimator implements MotionEstimator {
   private readonly flowW: number;
@@ -111,6 +103,8 @@ class DisMotionEstimator implements MotionEstimator {
   private readonly offsets: Int32Array;
   private prevGray: Float32Array | null = null;
   private prevSamples: Float32Array | null = null;
+  /** Whether the next calc starts a sequence: none ran since the first frame or the last cut, so prevGray does not follow its frames. */
+  private sequenceStart = true;
 
   constructor(
     private readonly width: number,
@@ -135,7 +129,8 @@ class DisMotionEstimator implements MotionEstimator {
     if (!this.prevGray || !this.prevSamples) {
       this.prevGray = gray;
       this.prevSamples = samples;
-      return { settled: true, reset: true, sceneScore: 1, duplicate: false, confidence: 0 };
+      this.sequenceStart = true;
+      return { settled: true, verdict: { reset: true, sceneScore: 1, duplicate: false, confidence: 0 } };
     }
 
     const sceneScore = meanAbsLumaDiff(samples, this.prevSamples) / 255;
@@ -145,8 +140,9 @@ class DisMotionEstimator implements MotionEstimator {
     if (duplicate || sceneReset) {
       this.prevGray = gray;
       this.prevSamples = samples;
-      // A duplicate holds the temporal history (confidence 1); a cut discards it.
-      return { settled: true, reset: sceneReset, sceneScore, duplicate, confidence: duplicate ? 1 : 0 };
+      // A duplicate holds the temporal history (confidence 1) and continues the sequence; a cut discards both.
+      if (sceneReset) this.sequenceStart = true;
+      return { settled: true, verdict: { reset: sceneReset, sceneScore, duplicate, confidence: duplicate ? 1 : 0 } };
     }
 
     // Grid pixels, current -> previous; the caller scales to render pixels.
@@ -184,34 +180,29 @@ class DisMotionEstimator implements MotionEstimator {
   }
 
   process(rgba: Uint8Array, forceReset = false): MotionResult {
-    const a = this.analyze(rgba, forceReset);
-    if (a.settled) return { motion: null, reset: a.reset, sceneScore: a.sceneScore, duplicate: a.duplicate, confidence: a.confidence };
-    const { full, confidence } = this.toFull(a.small);
+    const analysis = this.analyze(rgba, forceReset);
+    if (analysis.settled) return { motion: null, ...analysis.verdict };
+    const { full, confidence } = this.toFull(analysis.small);
     const reset = confidence < RESET_CONFIDENCE;
-    return { motion: reset ? null : full, reset, sceneScore: a.sceneScore, duplicate: false, confidence };
+    return { motion: reset ? null : full, reset, sceneScore: analysis.sceneScore, duplicate: false, confidence };
   }
 
   analyzePacked(rgba: Uint8Array, forceReset = false): AnalyzedMotion {
-    const a = this.analyze(rgba, forceReset);
-    if (a.settled) return { small: null, half: null, reset: a.reset, sceneScore: a.sceneScore, duplicate: a.duplicate, confidence: a.confidence };
-    if (allFinite(a.small)) return { small: a.small, half: null, reset: false, sceneScore: a.sceneScore, duplicate: false, confidence: 1 };
-    const { full, confidence } = this.toFull(a.small);
+    const analysis = this.analyze(rgba, forceReset);
+    if (analysis.settled) return { kind: "packed", motion: { half: null, ...analysis.verdict } };
+    // A finite grid — always so for block matching and NVOFA — interpolates to a
+    // finite field, so confidence is exactly 1 and one fused pass (processPacked)
+    // can replace resize + scale + count + pack.
+    if (allFinite(analysis.small)) return { kind: "grid", small: analysis.small, verdict: { reset: false, sceneScore: analysis.sceneScore, duplicate: false, confidence: 1 } };
+    const { full, confidence } = this.toFull(analysis.small);
     const reset = confidence < RESET_CONFIDENCE;
-    return { small: null, half: reset ? null : encodeMotionR16G16(full), reset, sceneScore: a.sceneScore, duplicate: false, confidence };
+    return { kind: "packed", motion: { half: reset ? null : encodeMotionR16G16(full), reset, sceneScore: analysis.sceneScore, duplicate: false, confidence } };
   }
 
   processPacked(rgba: Uint8Array, forceReset = false): PackedMotionResult {
-    const a = this.analyze(rgba, forceReset);
-    if (a.settled) return { half: null, reset: a.reset, sceneScore: a.sceneScore, duplicate: a.duplicate, confidence: a.confidence };
-    // A finite grid — always so for block matching and NVOFA — interpolates to a
-    // finite field, so confidence is exactly 1 and one fused pass can replace
-    // resize + scale + count + pack.
-    if (allFinite(a.small)) {
-      return { half: packFlowResizedR16G16(a.small, this.flowW, this.flowH, this.width, this.height), reset: false, sceneScore: a.sceneScore, duplicate: false, confidence: 1 };
-    }
-    const { full, confidence } = this.toFull(a.small);
-    const reset = confidence < RESET_CONFIDENCE;
-    return { half: reset ? null : encodeMotionR16G16(full), reset, sceneScore: a.sceneScore, duplicate: false, confidence };
+    const analyzed = this.analyzePacked(rgba, forceReset);
+    if (analyzed.kind === "packed") return analyzed.motion;
+    return { half: packFlowResizedR16G16(analyzed.small, { width: this.flowW, height: this.flowH }, { width: this.width, height: this.height }), ...analyzed.verdict };
   }
 
   close(): void {

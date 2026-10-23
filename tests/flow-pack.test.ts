@@ -75,13 +75,13 @@ describe("packFlowResizedR16G16", () => {
     ] as const) {
       const flow = new Float32Array(inW * inH * 2);
       for (let i = 0; i < flow.length; i++) flow[i] = (rnd() - 0.5) * 30;
-      expect(packFlowResizedR16G16(flow, inW, inH, outW, outH)).toEqual(referencePack(flow, inW, inH, outW, outH));
+      expect(packFlowResizedR16G16(flow, { width: inW, height: inH }, { width: outW, height: outH })).toEqual(referencePack(flow, inW, inH, outW, outH));
     }
   });
 
   test("same size in and out is a pure pack", () => {
     const flow = new Float32Array([1.5, -2.25, 0.125, 3, -7, 0.5, 2, 2, 9, -9, 0.75, 0.25]);
-    expect(packFlowResizedR16G16(flow, 3, 2, 3, 2)).toEqual(encodeMotionR16G16(flow));
+    expect(packFlowResizedR16G16(flow, { width: 3, height: 2 }, { width: 3, height: 2 })).toEqual(encodeMotionR16G16(flow));
   });
 
   test("allFinite", () => {

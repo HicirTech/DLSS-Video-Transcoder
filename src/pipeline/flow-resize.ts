@@ -7,6 +7,17 @@ interface HalfArray {
 }
 const HALF_ARRAY = (globalThis as unknown as { Float16Array?: new (buffer: ArrayBufferLike) => HalfArray }).Float16Array ?? null;
 
+/** A flow field's size in samples, the grid's or the render's. */
+interface FieldSize {
+  width: number;
+  height: number;
+}
+
+/** Corner-aligned source step per output sample (align_corners=True); 0 when either side has a single sample. */
+function cornerAlignedStep(inSize: number, outSize: number): number {
+  return inSize > 1 && outSize > 1 ? (inSize - 1) / (outSize - 1) : 0;
+}
+
 /**
  * Fused upsample + scale (grid pixels -> render pixels, x by outW/inW, y by
  * outH/inH) + half packing, one row at a time. Bit-identical to
@@ -15,7 +26,9 @@ const HALF_ARRAY = (globalThis as unknown as { Float16Array?: new (buffer: Array
  * full-resolution float32 passes and intermediate. Every grid sample must be
  * finite; the caller checks that with `allFinite`.
  */
-export function packFlowResizedR16G16(flow: Float32Array, inW: number, inH: number, outW: number, outH: number): Uint16Array {
+export function packFlowResizedR16G16(flow: Float32Array, from: FieldSize, to: FieldSize): Uint16Array {
+  const { width: inW, height: inH } = from;
+  const { width: outW, height: outH } = to;
   const out = new Uint16Array(outW * outH * 2);
   const kx = outW / inW;
   const ky = outH / inH;
