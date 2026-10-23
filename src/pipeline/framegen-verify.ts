@@ -30,9 +30,19 @@ function probeOutputVideo(ffprobe: string, path: string): { frames: number; rate
 /** Average rate is frames over container duration, so its final-frame rounding is allowed this much drift. */
 const AVERAGE_RATE_TOLERANCE = 1e-3;
 
+/** Deletes an output that failed verification; the verification error is the one worth reporting, not an unlink's. */
+function removeUnverifiedOutput(output: string): void {
+  try {
+    unlinkSync(output);
+  } catch {
+    /* the verification error is the one worth reporting */
+  }
+}
+
 /**
- * Throw unless the muxed file matches the plan, deleting it first: a file with
- * the wrong timeline is worse than no file, because it looks like a success.
+ * Throw unless the muxed file matches the plan, deleting it first, also when it
+ * cannot be read back: a file with a wrong or unknown timeline is worse than no
+ * file, because it looks like a success.
  *
  * Packet count and base rate are exact — the track timescale is pinned to the
  * target rate's numerator and every frame lasts its denominator in ticks, so mp4
@@ -46,15 +56,17 @@ export function verifyOutputVideo(
   targetRate: Rational,
   expectedFrames: number,
 ): void {
-  const verified = probeOutputVideo(ffprobe, output);
+  let verified: ReturnType<typeof probeOutputVideo>;
+  try {
+    verified = probeOutputVideo(ffprobe, output);
+  } catch (error) {
+    removeUnverifiedOutput(output);
+    throw new Error(`${(error as Error).message} The file was removed, since its timeline could not be checked; run the job again.`, { cause: error });
+  }
   const averageOff = Math.abs(ratToNumber(verified.avgRate) / ratToNumber(targetRate) - 1);
   if (verified.frames === expectedFrames && ratCmp(verified.rate, targetRate) === 0 && averageOff <= AVERAGE_RATE_TOLERANCE) return;
-  try {
-    unlinkSync(output);
-  } catch {
-    /* the error below is the one worth reporting */
-  }
+  removeUnverifiedOutput(output);
   throw new Error(
-    `Output verification found ${verified.frames} frames at base rate ${formatRational(verified.rate)} fps (average ${formatRational(verified.avgRate)}, time base ${verified.timeBase}); expected ${expectedFrames} at ${formatRational(targetRate)}. The file was removed.`,
+    `Output verification found ${verified.frames} frames at base rate ${formatRational(verified.rate)} fps (average ${formatRational(verified.avgRate)}, time base ${verified.timeBase}); expected ${expectedFrames} at ${formatRational(targetRate)}. The file was removed. The encode wrote a different timeline than frame generation produced, a fault in this program rather than in the source: run the job again, and if it repeats, report it with these numbers.`,
   );
 }
