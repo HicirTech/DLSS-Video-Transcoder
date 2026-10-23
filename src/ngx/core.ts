@@ -154,16 +154,8 @@ export class NgxCore {
    * and passing NULL faults inside the core. Always hand it a real struct.
    */
   initExt(device: number, appId: bigint, appDataPath: string, featureInfo: FeatureCommonInfo | null): number {
-    const path = wstring(appDataPath);
-    this.keep.push(path, featureInfo);
-    const result = this.fn("NVSDK_NGX_D3D12_Init_Ext", [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.i32, FFIType.ptr])(
-      appId,
-      path,
-      device,
-      NGX_VERSION_API,
-      featureInfo ? featureInfo.ptr : null,
-    ) as number;
-    return result;
+    this.keep.push(featureInfo);
+    return this.initExtRaw(device, appId, appDataPath, featureInfo ? featureInfo.ptr : 0);
   }
 
   /**
@@ -188,7 +180,7 @@ export class NgxCore {
     return result;
   }
 
-  /** Init_Ext with an arbitrary fifth argument (used with the spy parameter object). */
+  /** Init_Ext with an arbitrary fifth argument: initExt goes through here, and the probe passes its spy parameter object. */
   initExtRaw(device: number, appId: bigint, appDataPath: string, fifth: number): number {
     const path = wstring(appDataPath);
     this.keep.push(path);
