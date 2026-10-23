@@ -310,11 +310,14 @@ function initializeNgx({ options, report, reasons, say, runtimeDir, appDataPath 
       say(`Init -> ${ngxName(result)}`);
     } else if (mode === "spy") {
       const spy = new SpyParameter();
-      trace("NVSDK_NGX_D3D12_Init_Ext (fifth argument = spy vtable object)");
-      result = core.initExtRaw(device.ptr, NGX_APPLICATION_ID, appDataPath, spy.ptr);
-      say(`Init_Ext(spy) -> ${ngxName(result)}; spy saw: ${spy.summary()}`);
-      report.capabilities["spy.calls"] = spy.summary();
-      spy.close(); // release the 32 JSCallback trampolines the spy vtable allocated
+      try {
+        trace("NVSDK_NGX_D3D12_Init_Ext (fifth argument = spy vtable object)");
+        result = core.initExtRaw(device.ptr, NGX_APPLICATION_ID, appDataPath, spy.ptr);
+        say(`Init_Ext(spy) -> ${ngxName(result)}; spy saw: ${spy.summary()}`);
+        report.capabilities["spy.calls"] = spy.summary();
+      } finally {
+        spy.close(); // release the JSCallback trampolines the spy vtable allocated
+      }
     } else {
       const featureInfo = options.nullFeatureInfo ? null : new FeatureCommonInfo([runtimeDir]);
       trace(`NVSDK_NGX_D3D12_Init_Ext (featureInfo=${featureInfo ? "struct with 1 search path" : "NULL"})`);
@@ -452,14 +455,18 @@ function releaseGpu({ factory, adapters, device }: ProbeGpu): void {
 export async function runProbe(options: ProbeOptions): Promise<ProbeReport> {
   const context = createProbeContext(options);
   const gpu = probeAdapters(context);
-  probeOpticalFlow(context, gpu);
-  const nrRuntimeInstalled = await inspectRuntimeFolder(context);
-  const core = await loadNgxCore(context);
-  if (core) await connectForwarder(context, core);
-  if (core && gpu.device) initializeNgx(context, core, gpu.device);
-  if (core && context.report.ngxInit.ok) readCapabilities(context, core);
-  if (core && gpu.adapter && (options.requirements ?? true)) queryFeatureRequirements(context, core, gpu.adapter);
-  judgeReadiness(context, gpu, nrRuntimeInstalled, core);
-  releaseGpu(gpu);
-  return context.report;
+  try {
+    probeOpticalFlow(context, gpu);
+    const nrRuntimeInstalled = await inspectRuntimeFolder(context);
+    const core = await loadNgxCore(context);
+    const forwarderReady = core !== null && (await connectForwarder(context, core));
+    if (core && !forwarderReady) context.say("skipping NGX Init and feature queries: the DLSS runtime setup is not usable");
+    if (core && forwarderReady && gpu.device) initializeNgx(context, core, gpu.device);
+    if (core && context.report.ngxInit.ok) readCapabilities(context, core);
+    if (core && forwarderReady && gpu.adapter && (options.requirements ?? true)) queryFeatureRequirements(context, core, gpu.adapter);
+    judgeReadiness(context, gpu, nrRuntimeInstalled, core);
+    return context.report;
+  } finally {
+    releaseGpu(gpu);
+  }
 }
