@@ -160,7 +160,7 @@ export function runAsyncNrEncode(p: AsyncNrEncodeParams): Promise<FrameCounts> {
         const g = p.guide(rgba, frameNumber);
         const slot = freeSlots.shift()!;
         const list = pool.submit.begin(slot);
-        p.nr.recordEvaluateInto(list, pool.stagings[slot]!, rgba, g.reset, pool.buffers[slot]!, p.rowPitch);
+        p.nr.recordEvaluateInto(rgba, g.reset, { list, staging: pool.stagings[slot]!, dst: pool.buffers[slot]!, rowPitch: p.rowPitch });
         const value = pool.submit.submit(slot);
         const frame: AsyncEncodeFrame = { type: "frame", slot, value };
         encodeWorker.postMessage(frame);
