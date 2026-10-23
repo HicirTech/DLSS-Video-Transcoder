@@ -63,6 +63,7 @@ function Shell() {
   const [tab, setTab] = useState(readTab);
   const [probe, setProbe] = useState<ProbeReport | null>(null);
   const [probing, setProbing] = useState(false);
+  const [probeError, setProbeError] = useState<string | null>(null);
   const [tools, setTools] = useState<ToolsReport | null>(null);
   const [toolsError, setToolsError] = useState<string | null>(null);
 
@@ -71,10 +72,13 @@ function Shell() {
 
   const runProbe = useCallback(async (): Promise<void> => {
     setProbing(true);
+    setProbeError(null);
     try {
       setProbe(await api.probe());
     } catch (err) {
-      toast.showError(`Probe failed: ${errorMessage(err)}`);
+      const message = errorMessage(err);
+      setProbeError(message);
+      toast.showError(`Probe failed: ${message}`);
     } finally {
       setProbing(false);
     }
@@ -138,8 +142,8 @@ function Shell() {
       </AppBar>
 
       <Container maxWidth="xl" sx={{ py: 3, flex: 1 }}>
-        <TabPanel active={tab === 0}>
-          <ProbePanel probe={probe} probing={probing} onProbe={() => void runProbe()} />
+        <TabPanel {...panelProps("probe")}>
+          <ProbePanel probe={probe} probing={probing} probeError={probeError} onProbe={() => void runProbe()} />
         </TabPanel>
         <TabPanel {...panelProps("image")}>
           <ImagePanel jobs={feed.jobs} now={now} />
