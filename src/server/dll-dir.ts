@@ -1,7 +1,7 @@
 /**
  * The catalog half of validating a step's dllDir: the folder must be a version folder of the DLSS
- * feature the step loads. It needs the catalog and path resolution, so it sits beside main.ts and
- * not in validate.ts, which the web mock backend shares and which therefore imports no Node module.
+ * feature the step loads. It needs the catalog and path resolution, so it sits beside admission.ts
+ * and not in validate.ts, which the web mock backend shares and which therefore imports no Node module.
  */
 import { isAbsolute, resolve } from "node:path";
 import { featureByKey, type FeatureManifest, type RuntimeManifest } from "../ngx/runtime-catalog.ts";
