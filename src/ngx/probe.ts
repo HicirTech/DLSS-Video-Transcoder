@@ -206,12 +206,13 @@ function probeOpticalFlow({ report, say, pipelineGrid }: ProbeContext, { adapter
   } else {
     trace(`probeNvof(${cudaOrdinal})`);
     const caps = probeNvof(cudaOrdinal);
-    report.opticalFlow = { ...caps, cudaOrdinal, pipelineGrid };
-    say(
-      caps.status === "ok"
-        ? `hardware optical flow (NVOFA) on CUDA device ${cudaOrdinal}: input ${caps.limits!.widthMin}..${caps.limits!.widthMax} x ${caps.limits!.heightMin}..${caps.limits!.heightMax} px, output grids ${caps.outGridSizes!.join(", ")}`
-        : `hardware optical flow (NVOFA) unavailable on CUDA device ${cudaOrdinal}: ${caps.detail}`,
-    );
+    if (caps.status === "ok") {
+      report.opticalFlow = { status: "ok", detail: caps.detail, cudaOrdinal, limits: caps.limits, outGridSizes: caps.outGridSizes, pipelineGrid };
+      say(`hardware optical flow (NVOFA) on CUDA device ${cudaOrdinal}: input ${caps.limits.widthMin}..${caps.limits.widthMax} x ${caps.limits.heightMin}..${caps.limits.heightMax} px, output grids ${caps.outGridSizes.join(", ")}`);
+    } else {
+      report.opticalFlow = { status: "unavailable", detail: caps.detail, cudaOrdinal, limits: null, outGridSizes: null, pipelineGrid };
+      say(`hardware optical flow (NVOFA) unavailable on CUDA device ${cudaOrdinal}: ${caps.detail}`);
+    }
   }
 }
 
