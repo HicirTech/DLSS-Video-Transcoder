@@ -236,8 +236,12 @@ async function spawnGeneratedCount(generatedCount: number): Promise<GeneratedCou
   try {
     const [text, exitCode] = await Promise.all([new Response(child.stdout).text(), child.exited]);
     if (timedOut) return `killed after ${CHILD_TIMEOUT_MS / 1000} s`;
-    const line = text.trim().split(/\r?\n/).filter((l) => l.startsWith("{")).pop();
-    return line ? (JSON.parse(line) as GeneratedCountReport) : `exited ${exitCode} without a report`;
+    const line = text.trim().split(/\r?\n/).filter((candidate) => candidate.startsWith("{")).pop();
+    if (!line) return `exited ${exitCode} without a report`;
+    const report = JSON.parse(line) as GeneratedCountReport;
+    // The child exits 0 on a pass and 1 on a fail; any other code, or a mismatch, means it went wrong after reporting.
+    const expectedExit = report.pass ? 0 : 1;
+    return exitCode === expectedExit ? report : `report says ${report.pass ? "pass" : "fail"} but exited ${exitCode}`;
   } finally {
     clearTimeout(timer);
   }
