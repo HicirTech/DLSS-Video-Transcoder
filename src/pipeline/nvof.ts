@@ -17,7 +17,7 @@ const NV_OF_API_VERSION = 0x20; // (major 2 << 4) | minor 0
 const OK = 0;
 
 /** NV_OF_CAPS enum values we query. */
-const CAPS = { OUT_GRID: 0, HINT_GRID: 1, WIDTH_MIN: 4, HEIGHT_MIN: 5, WIDTH_MAX: 6, HEIGHT_MAX: 7 } as const;
+const CAPS = { OUT_GRID: 0, WIDTH_MIN: 4, HEIGHT_MIN: 5, WIDTH_MAX: 6, HEIGHT_MAX: 7 } as const;
 
 /** Index of each pointer in NV_OF_CUDA_API_FUNCTION_LIST (declaration order). */
 const FN = {
