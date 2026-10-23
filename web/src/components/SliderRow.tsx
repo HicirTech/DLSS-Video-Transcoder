@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Box, Slider, Typography } from "@mui/material";
 
 interface SliderMark {
@@ -10,14 +11,16 @@ interface SliderRowProps {
   value: number;
   min: number;
   max: number;
-  step?: number;
   marks?: SliderMark[];
   disabled?: boolean;
-  /** Text shown next to the label and in the value tooltip. */
+  /** Text shown next to the label and in the value tooltip, and the value assistive technology reads out. */
   format?: (value: number) => string;
   hint?: string;
   onChange: (value: number) => void;
 }
+
+/** The slider step; every slider here is a Neural Rendering strength, set in steps of 0.05. */
+const SLIDER_STEP = 0.05;
 
 /**
  * MUI centres the thumb and every mark label on its value, so at either end of the rail half of each would hang
@@ -41,13 +44,15 @@ function endLabelSx(marks: SliderMark[] | undefined, min: number, max: number): 
 }
 
 /** A labelled slider with the current value printed on the right. */
-export function SliderRow({ label, value, min, max, step = 0.05, marks, disabled, format, hint, onChange }: SliderRowProps) {
+export function SliderRow({ label, value, min, max, marks, disabled, format, hint, onChange }: SliderRowProps) {
+  const labelId = useId();
+  const hintId = useId();
   const text = format ? format(value) : value.toFixed(2);
   const hasMarkLabels = marks?.some((mark) => mark.label !== undefined) ?? false;
   return (
     <Box>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 1 }}>
-        <Typography variant="body2" color={disabled ? "text.disabled" : "text.primary"}>
+        <Typography id={labelId} variant="body2" color={disabled ? "text.disabled" : "text.primary"}>
           {label}
         </Typography>
         <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "Consolas, monospace" }}>
@@ -59,9 +64,13 @@ export function SliderRow({ label, value, min, max, step = 0.05, marks, disabled
           value={value}
           min={min}
           max={max}
-          step={step}
+          step={SLIDER_STEP}
           marks={marks}
           disabled={disabled}
+          aria-labelledby={labelId}
+          getAriaValueText={format}
+          // aria-describedby on the Slider itself would land on its root, not on the range input.
+          slotProps={{ input: { "aria-describedby": hint ? hintId : undefined } }}
           valueLabelDisplay="auto"
           valueLabelFormat={format}
           onChange={(_event, next) => onChange(Array.isArray(next) ? (next[0] ?? value) : next)}
@@ -69,7 +78,7 @@ export function SliderRow({ label, value, min, max, step = 0.05, marks, disabled
         />
       </Box>
       {hint ? (
-        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+        <Typography id={hintId} variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
           {hint}
         </Typography>
       ) : null}

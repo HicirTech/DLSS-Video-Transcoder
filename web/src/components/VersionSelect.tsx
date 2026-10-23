@@ -10,15 +10,15 @@ interface VersionSelectProps {
   feature: StepKind;
   /** Selected DLL folder, or "" for the bundled default. */
   value: string;
-  disabled?: boolean;
   onChange: (dir: string) => void;
 }
 
 /** Lets the user pick a specific installed DLSS DLL version (or the bundled default) for a feature. */
-export function VersionSelect({ feature, value, disabled, onChange }: VersionSelectProps) {
+export function VersionSelect({ feature, value, onChange }: VersionSelectProps) {
   // Per instance, not per feature: the image and video panels both render the
   // version picker for the same step, so a feature-keyed id appears twice.
   const labelId = useId();
+  const helpId = useId();
   const [catalog, setCatalog] = useState<RuntimeManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,14 +36,9 @@ export function VersionSelect({ feature, value, disabled, onChange }: VersionSel
   const versions = catalog?.features.find((f) => f.key === feature)?.versions ?? [];
 
   return (
-    <FormControl sx={{ minWidth: 220 }} disabled={disabled}>
+    <FormControl sx={{ minWidth: 220 }}>
       <InputLabel id={labelId}>DLSS version</InputLabel>
-      <Select<string>
-        labelId={labelId}
-        label="DLSS version"
-        value={value}
-        onChange={(event) => onChange(String(event.target.value))}
-      >
+      <Select<string> labelId={labelId} label="DLSS version" value={value} aria-describedby={helpId} onChange={(event) => onChange(event.target.value)}>
         <MenuItem value="">Bundled (default)</MenuItem>
         {versions.map((v) => (
           <MenuItem key={v.dir} value={v.dir}>

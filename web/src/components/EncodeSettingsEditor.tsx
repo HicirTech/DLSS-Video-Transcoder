@@ -43,7 +43,9 @@ function audioSwitchLabel(container: EncodeSettings["container"]): string {
 
 export function EncodeSettingsEditor({ value, fixedContainer, outputSize, onChange }: EncodeSettingsEditorProps) {
   const codecLabelId = useId();
+  const codecHelpId = useId();
   const containerLabelId = useId();
+  const containerHelpId = useId();
   const update = (patch: Partial<EncodeSettings>): void => onChange({ ...value, ...patch });
   const container = fixedContainer?.container ?? value.container;
   const limitNote = nvencLimitNote(value.codec, outputSize);
@@ -56,6 +58,7 @@ export function EncodeSettingsEditor({ value, fixedContainer, outputSize, onChan
           labelId={codecLabelId}
           label="Codec"
           value={value.codec}
+          aria-describedby={limitNote ? codecHelpId : undefined}
           onChange={(event) => update({ codec: event.target.value })}
         >
           {ENCODE_CODECS.map((codec) => (
@@ -64,7 +67,11 @@ export function EncodeSettingsEditor({ value, fixedContainer, outputSize, onChan
             </MenuItem>
           ))}
         </Select>
-        {limitNote ? <FormHelperText sx={{ color: "warning.main" }}>{limitNote}</FormHelperText> : null}
+        {limitNote ? (
+          <FormHelperText id={codecHelpId} sx={{ color: "warning.main" }}>
+            {limitNote}
+          </FormHelperText>
+        ) : null}
       </FormControl>
       <NumberField
         label="Quality (CRF / CQ)"
@@ -81,6 +88,7 @@ export function EncodeSettingsEditor({ value, fixedContainer, outputSize, onChan
           labelId={containerLabelId}
           label="Container"
           value={container}
+          aria-describedby={fixedContainer ? containerHelpId : undefined}
           onChange={(event) => update({ container: event.target.value })}
         >
           {ENCODE_CONTAINERS.map((container) => (
@@ -89,7 +97,7 @@ export function EncodeSettingsEditor({ value, fixedContainer, outputSize, onChan
             </MenuItem>
           ))}
         </Select>
-        {fixedContainer ? <FormHelperText>{fixedContainer.reason}</FormHelperText> : null}
+        {fixedContainer ? <FormHelperText id={containerHelpId}>{fixedContainer.reason}</FormHelperText> : null}
       </FormControl>
       <FormControlLabel
         sx={{ ml: 0, mt: 0.5 }}
