@@ -61,7 +61,25 @@ export const DXGI_FORMAT_D32_FLOAT = 40;
 export const DXGI_FORMAT_R32_FLOAT = 41;
 
 export const D3D12_TEXTURE_DATA_PITCH_ALIGNMENT = 256;
-export const D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT = 512;
+const D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT = 512;
+
+/**
+ * How long a CPU wait for the GPU lasts before the GPU counts as hung: far longer than any one submit here takes,
+ * while Windows' TDR (2 s by default) removes the device of a GPU that really hangs well before it.
+ */
+export const FENCE_WAIT_TIMEOUT_MS = 30_000;
+
+/** The error for a GPU wait that ran out of time on a device that is still present. */
+export function gpuTimeoutError(what: string, timeoutMs: number): Error {
+  return new Error(`${what}: the GPU did not finish within ${timeoutMs} ms; another program may be holding it. Free the GPU or lower the workload, then retry.`);
+}
+
+/** The DXGI formats this project creates resources in. */
+const FORMATS: ReadonlyMap<number, { name: string; bytesPerPixel: number }> = new Map([
+  [DXGI_FORMAT_R8G8B8A8_UNORM, { name: "R8G8B8A8_UNORM", bytesPerPixel: 4 }],
+  [DXGI_FORMAT_R16G16_FLOAT, { name: "R16G16_FLOAT", bytesPerPixel: 4 }],
+  [DXGI_FORMAT_R32_FLOAT, { name: "R32_FLOAT", bytesPerPixel: 4 }],
+]);
 
 export function bytesPerPixel(format: number): number {
   switch (format) {
@@ -187,6 +205,13 @@ export class D3D12Fence extends ComObject {
 
   setEventOnCompletion(value: bigint, event: Win32Event): void {
     this.callHr(9, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 }, "SetEventOnCompletion", value, event.handle);
+  }
+
+  /** Block until the fence reaches `value`, waiting on `event`; false when `timeoutMs` passes first. */
+  waitFor(value: bigint, event: Win32Event, timeoutMs = FENCE_WAIT_TIMEOUT_MS): boolean {
+    if (this.completedValue() >= value) return true;
+    this.setEventOnCompletion(value, event);
+    return event.wait(timeoutMs);
   }
 }
 

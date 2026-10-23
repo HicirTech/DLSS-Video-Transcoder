@@ -11,7 +11,7 @@
  * lists in submit order, which is the order the CPU recorded them in.
  */
 import {
-  D3D12CommandQueue, D3D12CommandAllocator, D3D12Fence, D3D12GraphicsCommandList, D3D12Device,
+  D3D12CommandQueue, D3D12CommandAllocator, D3D12Fence, D3D12GraphicsCommandList, D3D12Device, FENCE_WAIT_TIMEOUT_MS, gpuTimeoutError,
 } from "./d3d12.ts";
 import { Win32Event } from "./win32.ts";
 
@@ -80,12 +80,17 @@ export class AsyncSubmit {
     return this.value;
   }
 
-  /** Block until every outstanding submit has completed on the GPU. */
-  drain(timeoutMs = 30_000): void {
-    if (this.fence.completedValue() < this.value) {
-      this.fence.setEventOnCompletion(this.value, this.event);
-      this.event.wait(timeoutMs);
-    }
+  /** Block until every outstanding submit has completed on the GPU; throws when that takes longer than `timeoutMs`. */
+  drain(timeoutMs = FENCE_WAIT_TIMEOUT_MS): void {
+    this.waitFor(this.value, "AsyncSubmit.drain", timeoutMs);
+  }
+
+  /**
+   * False while the GPU still runs a submit that drain timed out on. Until it finishes, the lists, the allocators
+   * and every resource the submits use must stay allocated.
+   */
+  get idle(): boolean {
+    return this.fence.completedValue() >= this.value;
   }
 
   close(): void {
@@ -94,5 +99,9 @@ export class AsyncSubmit {
     for (const l of this.lists) l.release();
     for (const a of this.allocators) a.release();
     this.event.close();
+  }
+
+  private waitFor(value: bigint, what: string, timeoutMs: number): void {
+    if (!this.fence.waitFor(value, this.event, timeoutMs)) throw this.device.removedError(what) ?? gpuTimeoutError(what, timeoutMs);
   }
 }
