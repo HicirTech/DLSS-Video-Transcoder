@@ -1,6 +1,6 @@
 /**
- * The ffmpeg argv the video paths build: the output-side encoder for the rawvideo sinks, and the
- * display-aspect flags every output carries.
+ * The ffmpeg argv the video paths build: the decode to raw RGBA frames, the output-side encoder for the
+ * rawvideo sinks, the stream-copy mux of NVENC's output, and the audio, aspect and faststart flags they share.
  */
 import { AAC_KBPS, AUDIO_IN_CONTAINER, clampToRange, ENCODE_CODECS, type EncodeSettings } from "../server/api-types.ts";
 import { nvencGpuArgs } from "./encode-select.ts";
@@ -110,9 +110,10 @@ interface MuxCopySpec {
   size: FrameSize;
   /**
    * Re-stamps packet N at exactly N / `retime`, for an output whose clock has to be exact (frame generation's,
-   * checked by verifyOutputVideo). The raw demuxer counts in 1/1200000 s and adds a rounded frame duration per
-   * packet, so a rate that tick does not divide drifts: at 7508/125 one packet of 182 lands 124 ticks after the
-   * last instead of 125. Exact while the rate's numerator is below those 1200000 ticks.
+   * checked by verifyOutputVideo). The raw demuxer stamps in 1/1200000 s and adds a rounded frame duration per
+   * packet, so a rate that unit does not divide drifts: at 7508/125 one packet of 182 lands 124 track ticks
+   * (1/7508 s) after the last instead of 125. Exact while the rate's numerator is below 1200000, so a track tick
+   * stays coarser than a demuxer tick.
    */
   retime?: Rational;
   /** Output flags that come after the audio ones and before the container's own, such as -video_track_timescale. */
