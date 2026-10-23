@@ -380,16 +380,16 @@ async function runEngineJob(job: VideoJob): Promise<VideoJobResult> {
   const nativeTarget = nvencNativeTarget(encode.codec, outWidth, outHeight);
   const nvenc = nativeTarget !== null ? probeNvencCaps(cudaOrdinal) : null;
   if (nvenc && !nvenc.available) progress(0, `encode: NVENC direct path unavailable (${nvenc.detail}); falling back to the single-thread rawvideo pipeline`);
-  const useThreaded = nvenc?.available === true;
+  const threadedTarget = nvenc?.available ? nativeTarget : null;
 
   const path: EnginePath = { engine, outWidth, outHeight, decodeArgs, frameBytes, guide };
   const counts: FrameCounts = { frames: 0, sceneCuts: 0 };
   try {
-    if (useThreaded && nativeTarget) await runThreadedNvenc(job, path, nativeTarget, counts);
+    if (threadedTarget) await runThreadedNvenc(job, path, threadedTarget, counts);
     else await runRawvideo(job, path, counts);
   } catch (error) {
     // The threaded orchestrator reports its count on the error; the rawvideo loop counted here.
-    removePartialOutput(output, useThreaded ? framesWrittenOf(error) : counts.frames, outputExisted);
+    removePartialOutput(output, threadedTarget ? framesWrittenOf(error) : counts.frames, outputExisted);
     throw error;
   } finally {
     frameGuide.close();
