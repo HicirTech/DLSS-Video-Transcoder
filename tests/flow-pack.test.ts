@@ -33,15 +33,35 @@ describe("bitsToHalf / encodeMotionR16G16", () => {
     return u32[0]!;
   };
 
-  test("matches floatToHalf on edge values and rounding ties", () => {
-    const values = [0, -0, 1, -1, 0.1, -0.1, 65504, 65520, 70000, 1e-8, 5.960464477539063e-8, 6.103515625e-5, 3.0517578125e-5,
-      1.0009765625, 1.00048828125, 1.00146484375, 2.5, -3.75, 1234.5678, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
-    for (const v of values) expect(bitsToHalf(bitsOf(v))).toBe(floatToHalf(v));
-    // Round-to-nearest-even on the dropped mantissa bits.
-    expect(halfToFloat(floatToHalf(1.00048828125))).toBe(1); // tie -> even
-    expect(halfToFloat(floatToHalf(1.00146484375))).toBe(1.001953125); // tie -> even (up)
-    expect(halfToFloat(floatToHalf(70000))).toBe(Number.POSITIVE_INFINITY);
-    expect(Number.isNaN(halfToFloat(floatToHalf(Number.NaN)))).toBe(true);
+  test("bitsToHalf pins the IEEE-754 half encoding on edge values and rounding ties", () => {
+    // Each pair checked once against Bun's Float16Array.
+    const cases: [value: number, halfBits: number][] = [
+      [0, 0x0000],
+      [-0, 0x8000],
+      [1, 0x3c00],
+      [-1, 0xbc00],
+      [0.1, 0x2e66],
+      [-0.1, 0xae66],
+      [65504, 0x7bff],
+      [65520, 0x7c00], // a tie that rounds to even, past the largest half: overflows
+      [70000, 0x7c00],
+      [1e-8, 0x0000], // underflow
+      [5.960464477539063e-8, 0x0001], // 2^-24, the smallest subnormal
+      [6.103515625e-5, 0x0400], // 2^-14, the smallest normal
+      [3.0517578125e-5, 0x0200], // 2^-15, a subnormal
+      [1.0009765625, 0x3c01],
+      [1.00048828125, 0x3c00], // tie to even
+      [1.00146484375, 0x3c02], // tie to even, up
+      [2.5, 0x4100],
+      [-3.75, 0xc380],
+      [1234.5678, 0x64d3],
+      [Number.NaN, 0x7e00],
+      [Number.POSITIVE_INFINITY, 0x7c00],
+      [Number.NEGATIVE_INFINITY, 0xfc00],
+    ];
+    for (const [value, halfBits] of cases) expect(bitsToHalf(bitsOf(value)), String(value)).toBe(halfBits);
+    expect(halfToFloat(0x3c02)).toBe(1.001953125);
+    expect(Number.isNaN(halfToFloat(0x7e00))).toBe(true);
   });
 
   test("view-based encode equals element-wise floatToHalf on a random buffer", () => {
