@@ -3,6 +3,7 @@
  * one-line error.
  */
 import { flag } from "./cli/args.ts";
+import type { CommandName } from "./cli/commands.ts";
 import { fgCommand } from "./cli/fg-command.ts";
 import { forwarderCommand } from "./cli/forwarder-command.ts";
 import { printHelp, unknownCommand } from "./cli/help.ts";
@@ -13,15 +14,21 @@ import { EXIT_FAILED, EXIT_USAGE, UsageError } from "./cli/usage-error.ts";
 import { versionsCommand } from "./cli/versions-command.ts";
 import { videoCommand } from "./cli/video-command.ts";
 
-const COMMAND_HANDLERS = new Map<string, (args: string[]) => Promise<void>>([
-  ["probe", probeCommand],
-  ["forwarder", forwarderCommand],
-  ["sr", srCommand],
-  ["nr", nrCommand],
-  ["video", videoCommand],
-  ["fg", fgCommand],
-  ["versions", versionsCommand],
-]);
+/** A handler for every command COMMANDS defines but help, which main answers itself: a missing or extra key is a type error. */
+const COMMAND_HANDLERS: Record<Exclude<CommandName, "help">, (args: string[]) => Promise<void>> = {
+  probe: probeCommand,
+  forwarder: forwarderCommand,
+  sr: srCommand,
+  nr: nrCommand,
+  video: videoCommand,
+  fg: fgCommand,
+  versions: versionsCommand,
+};
+
+/** Own keys only: a name every object inherits, such as toString, is not a command. */
+function isHandledCommand(command: string): command is keyof typeof COMMAND_HANDLERS {
+  return Object.hasOwn(COMMAND_HANDLERS, command);
+}
 
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
@@ -33,13 +40,12 @@ async function main(): Promise<void> {
     printHelp();
     process.exit(0);
   }
-  const handler = COMMAND_HANDLERS.get(command);
-  if (!handler) unknownCommand(command);
+  if (!isHandledCommand(command)) unknownCommand(command);
   if (flag(args, "--help") || flag(args, "-h")) {
     printHelp(command);
     process.exit(0);
   }
-  await handler(args);
+  await COMMAND_HANDLERS[command](args);
 }
 
 // A wrong command line ends with EXIT_USAGE, after the help page of the command it names; any other
