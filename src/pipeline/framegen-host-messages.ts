@@ -25,6 +25,6 @@ export function noFramesGeneratedMessage(plan: InterpolationPlan, { disabledFram
     ? hagsEnabled
       ? multiFrameRefused
       : " Multi-frame (3x and above) DLSS Frame Generation requires Windows hardware-accelerated GPU scheduling (HAGS), which is off on this machine: enable it under Settings > System > Display > Graphics > Default graphics settings and reboot, or use the cascade engine (auto falls back to it automatically)."
-    : " Check that the GPU driver is current and the dlssg runtime folder is complete; the cascade engine only needs 2x generation.";
+    : " 2x generation itself failed, which every engine needs: check that the GPU driver is current and the dlssg runtime folder is complete.";
   return `DLSS Frame Generation produced no interpolated frames (${wanted})${reported}.${hint} No output was written.`;
 }

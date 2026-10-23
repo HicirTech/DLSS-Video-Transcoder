@@ -26,8 +26,16 @@ describe("noFramesGeneratedMessage", () => {
     expect(message).not.toContain("reported generation disabled");
   });
 
-  test("a 2x session that produced nothing points at the driver and the runtime folder", () => {
+  test("a 2x session that produced nothing points at the driver and the runtime folder, not at another engine", () => {
     const message = noFramesGeneratedMessage(nativePlan(2), { disabledFrames: 3, hagsEnabled: true });
-    expect(message).toContain(`(30 -> 60 fps via Native DLSSG); ${HOST_PROCESS_NAME} reported generation disabled for 3 frame(s). Check that the GPU driver is current`);
+    expect(message).toContain(`(30 -> 60 fps via Native DLSSG); ${HOST_PROCESS_NAME} reported generation disabled for 3 frame(s). 2x generation itself failed, which every engine needs: check that the GPU driver is current`);
+    expect(message).not.toContain("cascade engine");
+  });
+
+  test("a cascade that produced nothing is not sent to the cascade engine it already ran on", () => {
+    const cascade = chooseInterpolationPlan(rational(30), rational(120), "cascade", 6, { cfr: true, hagsEnabled: true });
+    const message = noFramesGeneratedMessage(cascade, { disabledFrames: 0, hagsEnabled: true });
+    expect(message).toContain("(30 -> 120 fps via Cascade). 2x generation itself failed");
+    expect(message).not.toContain("cascade engine");
   });
 });
