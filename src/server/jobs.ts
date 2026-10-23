@@ -56,7 +56,6 @@ interface Entry {
   request: JobRequest;
   worker: Worker | null;
   startedAtMs: number;
-  lastFrameAtMs: number;
   /** Set while a cancelled running job is expected to answer; fires terminate() if it does not in time. */
   cancelTimer: ReturnType<typeof setTimeout> | null;
   /** The job posted "finishing": a cancel can no longer stop it. */
@@ -99,7 +98,7 @@ export class JobManager {
       error: null,
       log: [],
     };
-    this.entries.set(id, { status, request, worker: null, startedAtMs: 0, lastFrameAtMs: 0, cancelTimer: null, finishing: false });
+    this.entries.set(id, { status, request, worker: null, startedAtMs: 0, cancelTimer: null, finishing: false });
     this.order.push(id);
     this.evict();
     this.publish(status);
