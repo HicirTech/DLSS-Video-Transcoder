@@ -8,7 +8,7 @@ import { resolveTargetSize, srOutputProblem, videoTargetSize } from "../../src/s
 import { rateValue, stemOf } from "./format";
 import type { StoredFrameGen } from "./stored-settings";
 
-/** Each step's title on the forms and the job cards; a Record, so a step without one is a build error. */
+/** Each step's title on the forms, the job cards and the plan line; a Record, so a step without one is a build error. */
 export const STEP_TITLES: Record<StepKind, string> = { sr: "Super Resolution", nr: "Neural Rendering", fg: "Frame generation" };
 
 export interface FrameSize {
@@ -105,10 +105,10 @@ export interface StagesInput {
 export function planStages({ plan, source, srScale, resize, frameGenTarget, writer }: StagesInput): string[] {
   const size = plan.outputSize ? formatSize(plan.outputSize) : null;
   const stages = [source ? `Decode ${formatSize(source)}` : "Decode"];
-  if (plan.steps.includes("sr")) stages.push(`Super Resolution to ${size ?? scaleText(srScale)}`);
+  if (plan.steps.includes("sr")) stages.push(`${STEP_TITLES.sr} to ${size ?? scaleText(srScale)}`);
   else if (resize.mode !== "none") stages.push(`Resize to ${size ?? scaleText(resize)}`);
-  if (plan.steps.includes("nr")) stages.push("Neural Rendering");
-  if (plan.steps.includes("fg")) stages.push(`Frame generation to ${frameGenTarget}`);
+  if (plan.steps.includes("nr")) stages.push(STEP_TITLES.nr);
+  if (plan.steps.includes("fg")) stages.push(`${STEP_TITLES.fg} to ${frameGenTarget}`);
   stages.push(writer);
   return stages;
 }
