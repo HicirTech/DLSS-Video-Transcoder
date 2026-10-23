@@ -72,8 +72,8 @@ function sourceFrame(rgba: Uint8Array, index: number, sourceRate: Rational): Tim
  * before an evaluation, and motion storage before a guide, so no owner ever
  * blocks on a queue put; the last stage is served first so the pipeline drains.
  */
-export async function runOverlapped(p: RunParams): Promise<RunResult> {
-  return new OverlappedRun(p).run();
+export async function runOverlapped(params: RunParams): Promise<RunResult> {
+  return new OverlappedRun(params).run();
 }
 
 /** The queues, credit ledger and pending work of one overlapped run; every method is one step of the coordinator loop. */
@@ -144,8 +144,8 @@ class OverlappedRun {
   /** Runs `promise` as the pending work `name`; harvest() hands its value to `onValue`, or throws its error. */
   private start<T>(name: string, promise: Promise<T>, onValue: (value: T) => void): void {
     this.pending.add(name);
-    const t0 = performance.now();
-    const settle = (): void => { this.busy[name] = (this.busy[name] ?? 0) + (performance.now() - t0); this.pending.delete(name); };
+    const startedAt = performance.now();
+    const settle = (): void => { this.busy[name] = (this.busy[name] ?? 0) + (performance.now() - startedAt); this.pending.delete(name); };
     promise.then(
       (value) => { settle(); this.done.push({ apply: () => onValue(value) }); this.wake?.(); },
       (error) => { settle(); this.done.push({ error: error instanceof Error ? error : new Error(String(error)) }); this.wake?.(); },
