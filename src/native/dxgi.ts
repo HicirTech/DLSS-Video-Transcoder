@@ -13,7 +13,7 @@ const dxgi = dlopen("dxgi.dll", {
   CreateDXGIFactory1: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
 });
 
-export const IID_IDXGIFactory1 = guid("{770aae78-f26f-4dba-a829-253c83d1b387}");
+const IID_IDXGIFactory1 = guid("{770aae78-f26f-4dba-a829-253c83d1b387}");
 
 const DXGI_ADAPTER_FLAG_SOFTWARE = 2;
 const VENDOR_NVIDIA = 0x10de;
