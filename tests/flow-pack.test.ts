@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { FlowBackend } from "../src/pipeline/block-match.ts";
+import type { FlowBackend } from "../src/pipeline/flow-backend.ts";
 import { createMotionEstimator } from "../src/pipeline/flow.ts";
 import { allFinite, packFlowResizedR16G16, resizeFlowBilinear } from "../src/pipeline/flow-resize.ts";
 import { bitsToHalf, encodeMotionR16G16 } from "../src/pipeline/half-float.ts";
@@ -103,7 +103,6 @@ describe("DisMotionEstimator.processPacked", () => {
   /** Deterministic grid field, independent of the frames, so process() and processPacked() see the same flow. */
   function fakeBackend(): FlowBackend {
     return {
-      name: "fake",
       calc: (_c, _p, w, h) => {
         const out = new Float32Array(w * h * 2);
         for (let i = 0; i < out.length; i++) out[i] = Math.sin(i * 0.37) * 5;
@@ -144,7 +143,6 @@ describe("DisMotionEstimator.processPacked", () => {
 
   test("non-finite grid samples fall back to the exact counting path", () => {
     const backend: FlowBackend = {
-      name: "poison",
       calc: (_c, _p, w, h) => {
         const out = new Float32Array(w * h * 2);
         out[0] = Number.NaN; // one poisoned sample -> some non-finite full-res vectors, confidence < 1

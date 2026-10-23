@@ -1,16 +1,5 @@
-/** The FlowBackend seam and the dependency-free block-matching backend that fills it by default. */
-
-/**
- * Dense per-pixel flow on the small gray grid: an interleaved (dx, dy) field of
- * length w*h*2 in GRID pixels, `calc(current, previous)` mapping current ->
- * previous (DIS convention). The seam a native DIS or NVOFA backend slots into.
- */
-export interface FlowBackend {
-  readonly name: string;
-  calc(current: Float32Array, previous: Float32Array, w: number, h: number): Float32Array;
-  /** Release any native resources (GPU backends); optional for pure backends. */
-  close?(): void;
-}
+/** The dependency-free block-matching FlowBackend (flow-backend.ts), the estimator's default. */
+import type { FlowBackend } from "./flow-backend.ts";
 
 /** Square block edge of the block matcher, in grid pixels. */
 const BLOCK_EDGE = 8;
@@ -101,7 +90,6 @@ function blockCost(grids: GridPair, block: Block, dx: number, dy: number): numbe
 /** The pure-TS block-matching backend, used unless the caller passes its own. */
 export function createBlockMatchBackend(): FlowBackend {
   return {
-    name: "ts-blockmatch",
     calc: blockMatchFlow,
   };
 }
