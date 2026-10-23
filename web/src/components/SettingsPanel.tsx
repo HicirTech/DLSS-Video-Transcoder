@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { Button, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
 import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
-import { DEFAULT_WARMUP_FRAMES, FRAME_GEN_GPU_CHOICE, type ProbeReport, SETTING_RANGES } from "../../../src/server/api-types";
+import { AUTO_GPU_CHOICE, DEFAULT_WARMUP_FRAMES, FRAME_GEN_GPU_CHOICE, type ProbeReport, SETTING_RANGES } from "../../../src/server/api-types";
 import { api } from "../api";
 import { errorMessage } from "../errors";
 import { STORAGE_KEY, useSettings, withServerDefaults } from "../hooks/useSettings";
@@ -55,7 +55,7 @@ export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
               value={settings.adapterUuid ?? AUTO_GPU}
               onChange={(event) => update({ adapterUuid: event.target.value === AUTO_GPU ? null : event.target.value })}
             >
-              <MenuItem value={AUTO_GPU}>Automatic: the NVIDIA adapter with the most VRAM that has a CUDA device</MenuItem>
+              <MenuItem value={AUTO_GPU}>Automatic: {AUTO_GPU_CHOICE}</MenuItem>
               {gpus.map((a) => (
                 <MenuItem key={a.cudaUuid!} value={a.cudaUuid!}>
                   {a.name} — CUDA device {a.cudaOrdinal} ({a.cudaUuid})
