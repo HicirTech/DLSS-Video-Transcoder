@@ -282,9 +282,18 @@ export interface JobRequest {
   adapterUuid?: string;
 }
 
+/** The JobRequest field each step is given in. */
+export const STEP_FIELDS = { sr: "superResolution", nr: "neuralRendering", fg: "frameGen" } as const satisfies Record<StepKind, keyof JobRequest>;
+export type StepField = (typeof STEP_FIELDS)[StepKind];
+
+/** Which steps a request, or a body not validated yet, names. */
+export function stepsPresent(request: Partial<Record<StepField, unknown>>): Record<StepKind, boolean> {
+  return { sr: request[STEP_FIELDS.sr] !== undefined, nr: request[STEP_FIELDS.nr] !== undefined, fg: request[STEP_FIELDS.fg] !== undefined };
+}
+
 /** The steps `request` runs, in their order. */
-export function jobSteps(request: Pick<JobRequest, "superResolution" | "neuralRendering" | "frameGen">): StepKind[] {
-  const present: Record<StepKind, boolean> = { sr: request.superResolution !== undefined, nr: request.neuralRendering !== undefined, fg: request.frameGen !== undefined };
+export function jobSteps(request: Partial<Record<StepField, unknown>>): StepKind[] {
+  const present = stepsPresent(request);
   return STEP_KINDS.filter((step) => present[step]);
 }
 

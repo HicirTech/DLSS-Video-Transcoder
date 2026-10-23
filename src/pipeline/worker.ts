@@ -2,7 +2,7 @@
  * Job worker: runs one image or video job off the server's main thread.
  * bun:ffi works inside workers, so the GPU session lives entirely here.
  */
-import type { JobRequest } from "../server/api-types.ts";
+import { type JobRequest, stepsPresent } from "../server/api-types.ts";
 import { JobCancelledError } from "./cancel.ts";
 import { loadEngines } from "./engine-loader.ts";
 import type { FrameTally, ProgressReporter } from "./frame-progress.ts";
@@ -61,7 +61,7 @@ async function run(message: RunMessage): Promise<void> {
     log(text);
   };
   try {
-    await loadEngines({ sr: request.superResolution !== undefined, nr: request.neuralRendering !== undefined });
+    await loadEngines(stepsPresent(request));
     if (request.kind === "image") {
       const result = await processImage({
         input: request.input,

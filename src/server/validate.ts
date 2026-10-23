@@ -22,6 +22,7 @@ import {
   SCALE_MODES,
   SETTING_RANGES,
   SR_FACTOR_MIN,
+  stepsPresent,
   type JobRequest,
   type ScaleSettings,
 } from "./api-types.ts";
@@ -187,7 +188,7 @@ function checkAdapterUuid(v: Record<string, unknown>): string | null {
     return `adapterUuid must be a CUDA device UUID as GET /api/probe lists it ("GPU-" followed by ${DEVICE_UUID_GROUP_LENGTHS.join("-")} hex digits).`;
   }
   // Frame generation picks its GPU in its host process (README, "Shared options"); the choice reaches only SR and NR.
-  if (!takesGpuChoice({ sr: v.superResolution !== undefined, nr: v.neuralRendering !== undefined, fg: v.frameGen !== undefined })) {
+  if (!takesGpuChoice(stepsPresent(v))) {
     return `adapterUuid applies to Super Resolution and Neural Rendering; frame generation picks its GPU itself (${FRAME_GEN_GPU_CHOICE}). Omit it.`;
   }
   return null;
