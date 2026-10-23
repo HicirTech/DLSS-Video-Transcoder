@@ -42,7 +42,6 @@ export interface VideoJobOptions {
   /** One of the two, never both: see GpuOptions. */
   adapterIndex?: number;
   adapterUuid?: string;
-  debugLayer?: boolean;
   runtimeDir?: string;
   appDataPath?: string;
   onProgress?: ProgressReporter;
@@ -163,7 +162,7 @@ async function prepareVideoJob(options: VideoJobOptions): Promise<VideoJob> {
 
   // The probe above is synchronous; a cancel sent during it is only delivered after a yield.
   await throwIfAbortedAfterYield(options.signal);
-  const session = openGpu({ adapterIndex: options.adapterIndex, adapterUuid: options.adapterUuid, debugLayer: options.debugLayer });
+  const session = openGpu({ adapterIndex: options.adapterIndex, adapterUuid: options.adapterUuid });
   progress(0, describeGpu(session));
   // session.cudaOrdinal, not adapterIndex: see GpuSession.cudaOrdinal. Every
   // CUDA user below (ffmpeg's -gpu, in-process NVENC, NVOFA) takes this one.

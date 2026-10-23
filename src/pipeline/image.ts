@@ -23,10 +23,8 @@ export interface ImageJobOptions {
   resize?: ScaleSettings;
   /** Passes over the still before the kept one; default DEFAULT_WARMUP_FRAMES. */
   warmupFrames?: number;
-  /** One of the two, never both: see GpuOptions. */
-  adapterIndex?: number;
+  /** The GPU by CUDA UUID; see GpuOptions. */
   adapterUuid?: string;
-  debugLayer?: boolean;
   runtimeDir?: string;
   appDataPath?: string;
   /** The still's `frames` are the engine passes it runs: the warm-up frames and the one that is kept. */
