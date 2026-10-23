@@ -322,6 +322,11 @@ export const CANCELLED_MESSAGE = "cancelled by user";
 /** Most recent log lines kept per job: the server trims to it and so does the web feed. */
 export const JOB_LOG_LIMIT = 400;
 
+/** Drops the oldest lines so that at most JOB_LOG_LIMIT remain. */
+export function trimJobLog(log: string[]): void {
+  if (log.length > JOB_LOG_LIMIT) log.splice(0, log.length - JOB_LOG_LIMIT);
+}
+
 /**
  * Whether a cancel was sent to a running job and what it did; kept after the
  * job ends. "pending": the job was asked to stop; it normally ends
