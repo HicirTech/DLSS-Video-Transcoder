@@ -45,8 +45,9 @@ bun run cli <command>    # see CLI reference below
 Server env vars: `PORT` (default **4080**), `NR_HOST` (default **127.0.0.1**, loopback only: the API
 has no authentication), `NR_RUNTIME_DIR` (default `<repo>/runtime`; the CLI ignores it and uses
 `<repo>/runtime` unless given `--runtime`), `NODE_ENV=production` (turns dev mode off).
-`NR_APPDATA` (default `<repo>/logs`) is the folder NGX writes its logs to, for the server and every CLI
-command alike; the server stores uploads in its `uploads/` subfolder.
+`NR_APPDATA` (default `<repo>/logs`) is the folder NGX writes its logs to (frame generation's go in its
+`ngx/` subfolder), for the server and every CLI command alike; the server stores uploads in its `uploads/`
+subfolder.
 
 ---
 
@@ -58,7 +59,7 @@ command alike; the server stores uploads in its `uploads/` subfolder.
 | `sr <in.png> [out.png]` | **DLSS Super Resolution (feature 1)** — real PNG upscaling. |
 | `nr <in.png> [out.png]` | **DLSS Neural Rendering (feature 18)** — enhance a PNG at the same size. |
 | `video <in> [out] [--sr] [--nr] [--fg]` | **Any of SR, NR and Frame Generation on a video in one pass**, in that order, then encode — the web UI's video job. |
-| `fg <in.mp4> [out.mp4]` | **DLSS Frame Generation (feature 11)** — interpolate to higher frame rate. |
+| `fg <in> [out.mp4]` | **DLSS Frame Generation (feature 11)** — interpolate to higher frame rate. |
 | `versions` | List every installed DLSS runtime DLL per feature. |
 | `forwarder` | (Re)generate the `nvngx.dll` shim NGX requires. |
 | `help [command]` | Overview or per-command help. |
@@ -88,8 +89,10 @@ command alike; the server stores uploads in its `uploads/` subfolder.
   validation as `POST /api/jobs`.
 - **`fg`** — `--fps RATE` (a named rate from 23.976 to 480, or an exact `num/den`; default: source fps
   × `--multiplier`), `--multiplier N` (2, whole number 1–16; used when `--fps` is absent),
-  `--engine auto|native|cascade` (auto, see below), `--codec NAME` (NVENC when available, else
-  libx264), `--quality N` (0–51, lower = better, 20), `--dlss-version VER` (an installed Frame Generation
+  `--engine auto|native|cascade` (auto, see below), `--codec NAME` (h264, hevc or av1 on the CPU, or
+  h264_nvenc, hevc_nvenc or av1_nvenc on the GPU, which take at most 4096, 8192 and 8192 pixels per side;
+  h264_nvenc by default, or its CPU codec of the same format, h264, when NVENC cannot start or the output
+  is larger), `--quality N` (0–51, lower = better, 20), `--dlss-version VER` (an installed Frame Generation
   version; `310.7.129.0`, `310.7.0.0` and `310.6.0.0` were measured to load and run 2× on an RTX 5090);
   writes `<input>.fg.mp4` by default, the name `video --fg` gives it
 
@@ -111,9 +114,10 @@ GPU with CUDA and the most VRAM, and its NVENC and NVOFA helpers use CUDA device
 with more than one NVIDIA GPU can be another device; `video --fg` alone therefore refuses `--adapter`.
 
 **Exit status.** 0 when the command succeeds; 1 when the run fails (`probe`: neural rendering is not
-ready); 2 when the command line is wrong — an unknown command or option, a value an option does not
-accept (an `fg --fps` that is not a rate, an `sr --dlss-version` that is not installed), or a missing
-input.
+ready); 2 when the command line is wrong — an unknown command or option, an argument the command does not
+take, a value an option does not accept (an `fg --fps` that is not a rate, an `sr --dlss-version` that is
+not installed), or a missing input argument. An input file that does not exist, or that is not a PNG for
+`sr`/`nr`, fails the run: 1.
 
 ---
 
@@ -124,7 +128,8 @@ For front-end-only work: `bun run web/mock-server.ts` on port 3080, or append `?
 card with its own switch, numbered in the order the steps run, and shows its settings while it is on. Once
 the input is chosen, the form reads the source's size, rates, length, codec and audio, shows what each step
 makes of them, and sums the job up in a plan line above Run, with the name of the file it writes. A setting
-the job does not use, such as the resize beside Super Resolution, is greyed out with the reason.
+the job does not use says why: with Super Resolution on, the resize gives way to the output size Super
+Resolution sets.
 
 **Image tab** — PNG input only; Super Resolution (only enlarges, to at most 8192 pixels per side; the
 source size runs DLAA) and Neural Rendering (look controls), each with its own DLSS version; a resize
@@ -150,13 +155,13 @@ generation ignores it), image warm-up passes (0–64, default 4), stored setting
 
 ## HTTP API
 
-All JSON, same-origin base:
+Same-origin; JSON requests and responses unless a row says otherwise:
 
 | Method & path | Returns |
 | --- | --- |
 | `GET /api/probe` | ProbeReport (hardware/runtime probe). It runs in a process of its own, one probe at a time; `500 { error }` if that process fails or runs over 30 s |
 | `GET /api/runtime` | Runtime report: the DLLs in the runtime folder, read without a probe |
-| `GET /api/tools` | ffmpeg / ffprobe / NVENC availability |
+| `GET /api/tools` | ffmpeg / ffprobe paths and versions, and whether that ffmpeg build lists the h264_nvenc encoder (`null` without ffmpeg); each job checks for itself that NVENC starts on its GPU |
 | `GET /api/catalog` | DLL version catalog |
 | `GET /api/media?path=<abs>` | what a job would read from the file: a PNG's size, or a video's size, nominal and average rate, length, frame count, codec and audio |
 | `GET /api/settings/defaults` | each step's defaults, and the resize, encode and warm-up defaults |
@@ -171,7 +176,9 @@ A job request carries one object per step it runs — `superResolution`, `neural
 (video only), each with its settings and an optional DLL version folder — plus `resize` (only without
 Super Resolution), `encode` (video), `warmupFrames` (image) and `adapterUuid`. The steps run in that
 order; a request without one re-encodes the source. The fields of the one-engine API (`engine`, `motion`,
-`scale`, `settings`, `dllDir`) are refused by name.
+`scale`, `settings`, `dllDir`) are refused by name. An `output` path must be absolute and inside the
+app-data folder (`NR_APPDATA`) or the input's own folder, or a folder below either; without one, the job
+writes next to its input.
 
 A job's `state` is `queued`, `running`, `done`, `failed` or `cancelled`. Cancelling a queued job ends it
 at once. A running job is asked to stop: it stays `running` with `cancelRequest: "pending"` until it has
