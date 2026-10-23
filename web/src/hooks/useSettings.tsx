@@ -80,7 +80,7 @@ export function defaultSettings(): StoredSettings {
     imageSteps: { sr: false, nr: true },
     superResolution: { scale: { ...DEFAULT_SR_STEP.scale }, motion: DEFAULT_SR_STEP.motion },
     neuralRendering: { ...DEFAULT_NR_SETTINGS },
-    frameGen: { rateBy: "fps", targetFps: pick(DEFAULT_FRAME_GEN_STEP.targetFps, FRAME_GEN_FPS_CHOICES, "60"), multiplier: DEFAULT_FRAME_GEN_MULTIPLIER, engine: DEFAULT_FRAME_GEN_STEP.engine },
+    frameGen: { rateBy: "fps", targetFps: DEFAULT_FRAME_GEN_STEP.targetFps, multiplier: DEFAULT_FRAME_GEN_MULTIPLIER, engine: DEFAULT_FRAME_GEN_STEP.engine },
     resize: { ...DEFAULT_SCALE_SETTINGS },
     encode: { ...DEFAULT_ENCODE_SETTINGS },
     warmupFrames: DEFAULT_WARMUP_FRAMES,

@@ -386,7 +386,7 @@ export interface JobStatus {
 export const DEFAULT_SR_STEP: Required<Pick<SuperResolutionStep, "scale" | "motion">> = { scale: { ...DEFAULT_SCALE_SETTINGS, mode: "factor" }, motion: "none" };
 
 /** What a frame generation step starts with on a form: 60 fps on the automatic path. */
-export const DEFAULT_FRAME_GEN_STEP: Required<Pick<FrameGenStep, "targetFps" | "engine">> = { targetFps: "60", engine: "auto" };
+export const DEFAULT_FRAME_GEN_STEP: { targetFps: FrameGenFps; engine: FrameGenEngine } = { targetFps: "60", engine: "auto" };
 
 /** Response of GET /api/media: what the server reads from a file before a job runs, so a form can show it and plan sizes. */
 export type MediaInfo =
