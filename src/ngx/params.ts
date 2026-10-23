@@ -170,6 +170,15 @@ export class NgxParameters {
     }
     return "unknown";
   }
+
+  /** detectLayout, refusing a parameter object in neither known layout: no parameter could then be set or read. */
+  static requireLayout(params: NgxParameters, feature: string): VtableLayout {
+    const layout = NgxParameters.detectLayout(params);
+    if (layout === "unknown") {
+      throw new Error(`${feature}: the NGX parameter object answers in neither known vtable layout, so no parameter can be set or read. Update the NVIDIA driver.`);
+    }
+    return layout;
+  }
 }
 
 /** Public DLSS parameter names (nvsdk_ngx_defs.h). */

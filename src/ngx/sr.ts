@@ -12,22 +12,21 @@
  * never calls it — NGX is reclaimed at process exit. Reuse one session across
  * jobs, or run one job per short-lived process.
  */
-import { mkdirSync } from "node:fs";
 import {
   D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
   DXGI_FORMAT_R8G8B8A8_UNORM,
   DXGI_FORMAT_R16G16_FLOAT,
   DXGI_FORMAT_R32_FLOAT,
   type D3D12Resource,
+  type TextureOptions,
 } from "../native/d3d12.ts";
 import { APP_DATA_DIR, callerDir, featureDir } from "../paths.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
-import { FeatureCommonInfo, NgxCore } from "./core.ts";
-import { prepareForwarderSync } from "./forwarder-runtime.ts";
+import { NgxCore, startNgxCore } from "./core.ts";
 import { encodeMotionR16G16 } from "../pipeline/half-float.ts";
 import { NgxParam, NgxParameters } from "./params.ts";
 import { srOutputProblem } from "../server/output-size.ts";
-import { DEFAULT_SR_PRESET, DLSS_PRESET_PARAM, DlssCreateFlag, DlssRenderPreset, NGX_APPLICATION_ID, ngxCheck } from "./results.ts";
+import { DEFAULT_SR_PRESET, DLSS_PRESET_PARAM, DlssCreateFlag, DlssRenderPreset, NgxFeature, PerfQuality, ngxCheck, perfQualityName } from "./results.ts";
 
 const UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
@@ -63,56 +62,74 @@ export class DlssSrSession {
     private readonly output: D3D12Resource,
     private readonly depth: D3D12Resource,
     private readonly motion: D3D12Resource,
-    private readonly forwarderKeep: unknown,
   ) {}
 
   static open(session: GpuSession, opts: SrOptions): DlssSrSession {
     // Named here, before anything is created: CreateFeature only answers InvalidParameter.
     const sizeProblem = srOutputProblem({ width: opts.renderWidth, height: opts.renderHeight }, { width: opts.outputWidth, height: opts.outputHeight });
     if (sizeProblem) throw new Error(sizeProblem);
-    const appData = opts.appDataPath ?? APP_DATA_DIR;
-    mkdirSync(appData, { recursive: true });
+    const quality = opts.quality ?? PerfQuality.MaxPerf;
+    const presetParam = DLSS_PRESET_PARAM[quality];
+    if (presetParam === undefined) throw new Error(`DLSS SR: ${perfQualityName(quality)} is not a quality mode; pass one of ${Object.keys(PerfQuality).join(", ")}.`);
 
-    const core = NgxCore.load(); // driver core
-    const { forwarder } = prepareForwarderSync(callerDir(opts.runtimeDir));
-    core.useForwarder(forwarder);
-    ngxCheck(
-      core.initExt(session.device.ptr, NGX_APPLICATION_ID, appData, new FeatureCommonInfo([opts.dllDir ?? featureDir(opts.runtimeDir, "sr")])),
-      "DLSS SR Init_Ext",
-    );
+    // The driver NGX core loads nvngx_dlss.dll from the feature search path and owns the parameter allocator.
+    const core = NgxCore.load();
+    startNgxCore(core, session.device.ptr, {
+      callerDir: callerDir(opts.runtimeDir),
+      appDataPath: opts.appDataPath ?? APP_DATA_DIR,
+      searchPaths: [opts.dllDir ?? featureDir(opts.runtimeDir, "sr")],
+      what: "DLSS SR",
+    });
 
-    const quality = opts.quality ?? 0;
     const params = core.allocateParameters();
-    NgxParameters.detectLayout(params);
-    params.setU32(NgxParam.PerfQualityValue, quality);
-    params.setU32(NgxParam.Width, opts.renderWidth);
-    params.setU32(NgxParam.Height, opts.renderHeight);
-    params.setU32(NgxParam.OutWidth, opts.outputWidth);
-    params.setU32(NgxParam.OutHeight, opts.outputHeight);
-    // MVLowRes: our motion vectors live in the render-resolution texture with
-    // MV.Scale = 1 (render pixels). Without this flag DLSS treats them as
-    // display-resolution and mis-scales temporal reconstruction (ghosting on
-    // upscaled video). Correct at DLAA too, where render == output.
-    params.setU32(NgxParam.DlssCreateFlags, DlssCreateFlag.AutoExposure | DlssCreateFlag.MVLowRes);
-    params.setU32(DLSS_PRESET_PARAM[quality] ?? DLSS_PRESET_PARAM[0]!, opts.preset ?? DlssRenderPreset[DEFAULT_SR_PRESET]);
-    params.setU32(NgxParam.CreationNodeMask, 1);
-    params.setU32(NgxParam.VisibilityNodeMask, 1);
+    let handle = 0;
+    const textures: D3D12Resource[] = [];
+    const texture = (options: TextureOptions): D3D12Resource => {
+      const created = session.device.createTexture2D(options);
+      textures.push(created);
+      return created;
+    };
+    try {
+      NgxParameters.requireLayout(params, "DLSS SR");
+      params.setU32(NgxParam.PerfQualityValue, quality);
+      params.setU32(NgxParam.Width, opts.renderWidth);
+      params.setU32(NgxParam.Height, opts.renderHeight);
+      params.setU32(NgxParam.OutWidth, opts.outputWidth);
+      params.setU32(NgxParam.OutHeight, opts.outputHeight);
+      // MVLowRes: our motion vectors live in the render-resolution texture with
+      // MV.Scale = 1 (render pixels). Without this flag DLSS treats them as
+      // display-resolution and mis-scales temporal reconstruction (ghosting on
+      // upscaled video). Correct at DLAA too, where render == output.
+      params.setU32(NgxParam.DlssCreateFlags, DlssCreateFlag.AutoExposure | DlssCreateFlag.MVLowRes);
+      params.setU32(presetParam, opts.preset ?? DlssRenderPreset[DEFAULT_SR_PRESET]);
+      params.setU32(NgxParam.CreationNodeMask, 1);
+      params.setU32(NgxParam.VisibilityNodeMask, 1);
 
-    const created = core.createFeature(session.gpu.list.ptr, 1, params);
-    ngxCheck(created.result, "DLSS SR CreateFeature");
-    session.gpu.submitAndWait();
+      const created = core.createFeature(session.gpu.list.ptr, NgxFeature.SuperSampling, params);
+      ngxCheck(created.result, "DLSS SR CreateFeature");
+      handle = created.handle;
+      session.gpu.submitAndWait();
 
-    const device = session.device;
-    const color = device.createTexture2D({ width: opts.renderWidth, height: opts.renderHeight, format: DXGI_FORMAT_R8G8B8A8_UNORM, allowUnorderedAccess: true, label: "sr color" });
-    const output = device.createTexture2D({ width: opts.outputWidth, height: opts.outputHeight, format: DXGI_FORMAT_R8G8B8A8_UNORM, allowUnorderedAccess: true, label: "sr output" });
-    const depth = device.createTexture2D({ width: opts.renderWidth, height: opts.renderHeight, format: DXGI_FORMAT_R32_FLOAT, allowUnorderedAccess: true, label: "sr depth" });
-    const motion = device.createTexture2D({ width: opts.renderWidth, height: opts.renderHeight, format: DXGI_FORMAT_R16G16_FLOAT, allowUnorderedAccess: true, label: "sr motion" });
-    // Depth and motion are unused for still images; initialise them to zero once.
-    session.gpu.uploadTexture(depth, new Uint8Array(opts.renderWidth * opts.renderHeight * 4), UAV);
-    session.gpu.uploadTexture(motion, new Uint8Array(opts.renderWidth * opts.renderHeight * 4), UAV);
-    session.gpu.submitAndWait();
+      const color = texture({ width: opts.renderWidth, height: opts.renderHeight, format: DXGI_FORMAT_R8G8B8A8_UNORM, allowUnorderedAccess: true, label: "sr color" });
+      const output = texture({ width: opts.outputWidth, height: opts.outputHeight, format: DXGI_FORMAT_R8G8B8A8_UNORM, allowUnorderedAccess: true, label: "sr output" });
+      const depth = texture({ width: opts.renderWidth, height: opts.renderHeight, format: DXGI_FORMAT_R32_FLOAT, allowUnorderedAccess: true, label: "sr depth" });
+      const motion = texture({ width: opts.renderWidth, height: opts.renderHeight, format: DXGI_FORMAT_R16G16_FLOAT, allowUnorderedAccess: true, label: "sr motion" });
+      // DLSS always binds both: depth is never supplied, motion only when evaluate() gets it (MV scale 0 otherwise).
+      // Zero them once so neither is ever uninitialised.
+      session.gpu.uploadTexture(depth, new Uint8Array(opts.renderWidth * opts.renderHeight * 4), UAV);
+      session.gpu.uploadTexture(motion, new Uint8Array(opts.renderWidth * opts.renderHeight * 4), UAV);
+      session.gpu.submitAndWait();
 
-    return new DlssSrSession(session, core, params, created.handle, opts.renderWidth, opts.renderHeight, opts.outputWidth, opts.outputHeight, color, output, depth, motion, forwarder);
+      return new DlssSrSession(session, core, params, handle, opts.renderWidth, opts.renderHeight, opts.outputWidth, opts.outputHeight, color, output, depth, motion);
+    } catch (error) {
+      // After a GPU timeout the feature and the textures may still be in use, so they are left allocated.
+      if (session.gpu.drain()) {
+        for (const created of textures) created.release();
+        if (handle !== 0) core.releaseFeature(handle);
+      }
+      core.destroyParameters(params);
+      throw error;
+    }
   }
 
   /** Upscale one render-resolution RGBA8 frame; returns the output-resolution RGBA8 frame. */
@@ -150,7 +167,6 @@ export class DlssSrSession {
     this.output.release();
     this.depth.release();
     this.motion.release();
-    void this.forwarderKeep;
-    // Deliberately no Shutdown1: this driver core faults on it after a create.
+    // NGX itself is left to process exit (see NgxCore).
   }
 }

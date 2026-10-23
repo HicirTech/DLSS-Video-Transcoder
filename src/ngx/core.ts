@@ -3,7 +3,7 @@
  * bun:ffi. Only the D3D12 entry points this project uses are wired up.
  */
 import { FFIType, ptr } from "bun:ffi";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { callableAt, type OwnedCallable } from "../native/com.ts";
 import { NativeStruct, OutPointer, cstring, readCString, wstring } from "../native/memory.ts";
@@ -279,4 +279,15 @@ export class NgxCore {
   releaseFeature(handle: number): number {
     return this.fn("NVSDK_NGX_D3D12_ReleaseFeature", [FFIType.ptr])(handle) as number;
   }
+}
+
+/**
+ * Starts `core` on `device` the way every feature session needs: the app-data folder exists, the generated
+ * nvngx.dll shim routes NGX's calls, and Init_Ext names the feature's search paths. The shim must be attached
+ * before Init_Ext, which otherwise faults inside the driver core (measured on 310.9.1, feature 11 included).
+ */
+export function startNgxCore(core: NgxCore, device: number, options: { callerDir: string; appDataPath: string; searchPaths: string[]; what: string }): void {
+  mkdirSync(options.appDataPath, { recursive: true });
+  core.useForwarder(prepareForwarderSync(options.callerDir).forwarder);
+  ngxCheck(core.initExt(device, NGX_APPLICATION_ID, options.appDataPath, new FeatureCommonInfo(options.searchPaths)), `${options.what} Init_Ext`);
 }
