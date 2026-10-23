@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "DLSS 5 neural rendering for photos and video, written in TypeScript on Bun (D3D12 and NGX through bun:ffi).",
+  "description": "DLSS Super Resolution, Frame Generation and Neural Rendering for PNG images and video, written in TypeScript on Bun (D3D12, NGX and CUDA through bun:ffi).",
   "scripts": {
     "cli": "bun run src/cli.ts",
     "probe": "bun run src/cli.ts probe",
