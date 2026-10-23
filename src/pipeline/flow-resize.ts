@@ -1,10 +1,11 @@
 /** Upsamples the grid-resolution flow field to render resolution: bilinear resize, or fused resize + scale + half-pack. */
 import { bitsToHalf } from "./half-float.ts";
 
-/** Float16Array when the runtime provides it — Bun 1.4 does — otherwise null. */
+/** The slice of Float16Array this module uses: bulk-set float values as packed halves. */
 interface HalfArray {
   set(values: ArrayLike<number>, offset?: number): void;
 }
+/** Float16Array (ES2025) when the runtime provides it, otherwise null. */
 const HALF_ARRAY = (globalThis as unknown as { Float16Array?: new (buffer: ArrayBufferLike) => HalfArray }).Float16Array ?? null;
 
 /** A flow field's size in samples, the grid's or the render's. */
@@ -49,8 +50,7 @@ export function packFlowResizedR16G16(flow: Float32Array, from: FieldSize, to: F
   const row = new Float32Array(outW * 2);
   const rowBits = new Uint32Array(row.buffer);
   // Float16Array (ES2025) rounds to nearest-even, so it matches bitsToHalf on
-  // finite values while converting ~5x faster; the scalar loop is the fallback
-  // for runtimes without it.
+  // finite values; the scalar loop is the fallback for runtimes without it.
   const outHalf = HALF_ARRAY ? new HALF_ARRAY(out.buffer) : null;
   // Upsampling means sy < 1, so consecutive output rows keep reusing the same
   // two horizontally-interpolated input rows: a two-slot cache drops the

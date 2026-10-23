@@ -1,10 +1,8 @@
 /**
- * The flow of frames through one decode-worker / encode-worker run: each decoded frame goes
- * through the caller's per-frame step to the encode worker, whose acknowledgement gives the decode
- * worker credit for another, until both ends are drained and the encoder is told to finish. The two
- * video orchestrators (threaded-encode.ts, async-nr-encode.ts) differ only in that per-frame step,
- * so the credits, acknowledgements, progress line and finish condition live here, once. The run's
- * lifecycle (settling once, stopping, cleanup) is WorkerPairRun's.
+ * Drives the frames of one decode-worker / encode-worker run: each decoded frame goes through the caller's per-frame
+ * step to the encode worker, whose acknowledgement gives the decode worker credit for another, until both ends are
+ * drained and the encoder is told to finish. The credits, acknowledgements, progress line and finish condition live
+ * here; the run's lifecycle is WorkerPairRun's.
  */
 import { frameProgress, type ProgressReporter } from "./frame-progress.ts";
 import type { WorkerPairRun } from "./worker-pair-run.ts";

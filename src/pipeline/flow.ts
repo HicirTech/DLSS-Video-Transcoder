@@ -1,16 +1,7 @@
 /**
- * Optical-flow motion vectors for the DLSS / DLSSG / DLSSNR motion-vector
- * contract, ported from the reference DIS generator (dref guides.py).
- *
- * Output unit and convention, which `FrameInput.motion` (engine.ts) already
- * expects so the engine only packs to R16G16_FLOAT with MV.Scale = 1.0: a
- * backward per-pixel field in RENDER-RESOLUTION PIXELS, interleaved (x, y),
- * origin top-left, +x right, +y down, no y flip. DIS sign convention:
- * `calc(current, previous)` maps current -> previous, `MV[p] = prevPos - curPos`.
- *
- * OpenCV is unavailable in Bun, so the producer is a pure-TS block matcher on a
- * downscaled gray grid (guides.py:24-55). Everything here is GPU-free, so it is
- * unit-testable without a GPU.
+ * Optical-flow motion vectors for the DLSS / DLSSG / DLSSNR motion-vector contract, estimated on a downscaled gray
+ * grid by a FlowBackend (the GPU-free block matcher unless the caller passes NVOFA's); ported from the reference DIS
+ * generator (dref guides.py:24-55).
  */
 import { createBlockMatchBackend } from "./block-match.ts";
 import type { FlowBackend } from "./flow-backend.ts";
@@ -34,7 +25,7 @@ export interface SceneVerdict {
   sceneScore: number;
   /** Near-duplicate frame (sceneScore below DUPLICATE_SCENE_SCORE); not a reset. */
   duplicate: boolean;
-  /** Fraction of finite motion vectors in [0,1]; 1.0 on a duplicate. */
+  /** Fraction of finite motion vectors in [0,1]; 1.0 on a duplicate, 0 on the first frame and on a scene cut. */
   confidence: number;
 }
 
