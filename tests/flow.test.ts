@@ -50,6 +50,7 @@ function solid(width: number, height: number, r: number, g: number, b: number): 
 
 test("flowGridSize caps the long side near MAX_FLOW_LONG_SIDE, rounds even, clamps to MIN_FLOW_SIDE", () => {
   expect(flowGridSize(1920, 1080)).toEqual({ flowW: 640, flowH: 360 });
+  expect(flowGridSize(1080, 1920)).toEqual({ flowW: 360, flowH: 640 }); // portrait: the long side (height) is capped, not the width
   expect(flowGridSize(96, 64)).toEqual({ flowW: 96, flowH: 64 }); // below cap: unchanged
   expect(flowGridSize(40, 30)).toEqual({ flowW: 64, flowH: 64 }); // clamped up to 64
 });
@@ -104,6 +105,7 @@ test("estimator flags a duplicate frame: zero motion, no reset, confidence 1", (
   expect(dup.reset).toBe(false);
   expect(dup.motion).toBeNull();
   expect(dup.confidence).toBe(1);
+  expect(dup.sceneScore).toBe(0);
   expect(dup.sceneScore).toBeLessThan(DUPLICATE_SCENE_SCORE);
   est.close();
 });
@@ -114,6 +116,7 @@ test("estimator resets with null motion across a scene cut", () => {
   const cut = est.process(solid(96, 64, 255, 255, 255));
   expect(cut.reset).toBe(true);
   expect(cut.motion).toBeNull();
+  expect(cut.sceneScore).toBeCloseTo(1, 5); // black to white: the whole luma range
   expect(cut.sceneScore).toBeGreaterThan(RESET_SCENE_SCORE);
   est.close();
 });

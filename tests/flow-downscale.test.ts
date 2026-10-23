@@ -40,6 +40,7 @@ describe("smallGray", () => {
   test("integer downscale ratios are bit-identical to the general box average", () => {
     for (const [w, h, fw, fh] of [
       [1280, 720, 640, 360], // the production 720p case: 2x2 blocks
+      [1920, 1080, 640, 360], // 3x3 blocks: the 1080p case
       [64, 36, 32, 18],
       [96, 48, 32, 16], // 3x3 blocks
       [40, 30, 8, 6], // 5x5 blocks
@@ -51,14 +52,16 @@ describe("smallGray", () => {
   });
 
   test("non-integer ratios still take the general path and match it", () => {
-    for (const [w, h, fw, fh] of [
-      [1920, 1080, 640, 360], // 3x3 exactly, but included as a control
+    for (const [width, height, flowW, flowH] of [
+      [64, 37, 32, 18], // width divides, height does not: must not take the integer path
+      [65, 36, 32, 18], // height divides, width does not
+      [1920, 800, 640, 266], // a production shape: 3 across, not 3 down
       [33, 19, 10, 7],
       [50, 33, 16, 9],
       [7, 5, 4, 3], // upscale-ish: blocks clamp to a single pixel
     ] as const) {
-      const rgba = noise(w, h, w * 17 + h);
-      expect(smallGray(rgba, { width: w, height: h }, { flowW: fw, flowH: fh })).toEqual(referenceSmallGray(rgba, w, h, fw, fh));
+      const rgba = noise(width, height, width * 17 + height);
+      expect(smallGray(rgba, { width, height }, { flowW, flowH })).toEqual(referenceSmallGray(rgba, width, height, flowW, flowH));
     }
   });
 
