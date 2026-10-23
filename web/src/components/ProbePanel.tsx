@@ -36,9 +36,10 @@ export function ProbePanel({ probe, probing, probeError, onProbe }: ProbePanelPr
         </Button>
         <Typography variant="body2" color="text.secondary">
           Checks whether this machine can run DLSS neural rendering: it lists your display adapters (GPUs), matches the
-          selected one to its CUDA device (jobs require one), reads the hardware optical-flow engine&apos;s limits, creates
-          a Direct3D 12 device, starts NVIDIA&apos;s NGX runtime, and confirms the neural rendering feature and its support
-          files are available. Takes a few seconds.
+          one the automatic choice picks to its CUDA device (jobs require one; Settings can pick another for Super
+          Resolution and Neural Rendering), reads the hardware optical-flow engine&apos;s limits, creates a Direct3D 12
+          device, starts NVIDIA&apos;s NGX runtime, and confirms the neural rendering feature and its support files are
+          available. Takes a few seconds.
         </Typography>
       </Box>
       {probing ? <LinearProgress /> : null}
