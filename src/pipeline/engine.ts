@@ -59,7 +59,7 @@ export interface NrEngineOptions extends EngineRuntime {
   settings: NrSettings;
 }
 
-export class BypassEngine implements Engine {
+class BypassEngine implements Engine {
   readonly name = "bypass";
   readonly outputWidth: number;
   readonly outputHeight: number;

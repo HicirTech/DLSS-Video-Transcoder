@@ -21,7 +21,7 @@ import { buildSampleOffsets, DUPLICATE_SCENE_SCORE, meanAbsLumaDiff, RESET_SCENE
 // -- Reference reset threshold (guides.py DLSSGGuideGenerator) ---
 
 /** Finite-vector fraction below this forces a reset (guides.py:63). */
-export const RESET_CONFIDENCE = 0.98;
+const RESET_CONFIDENCE = 0.98;
 
 // -- Estimator -----------------------------------------------------------------
 
