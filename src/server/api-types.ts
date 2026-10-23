@@ -331,10 +331,11 @@ export function jobSteps(request: Partial<Record<StepField, unknown>>): StepKind
 
 /**
  * What a job's default output is named after, between the input's stem and the extension: its steps in order
- * ("sr-nr-fg"), "resize" for a resize alone, "copy" for neither.
+ * ("sr-nr-fg", with Neural Rendering as nrStackLabel(nrStack): "sr-nrx3-fg"), "resize" for a resize alone, "copy"
+ * for neither.
  */
-export function stepsSuffix(steps: readonly StepKind[], resized: boolean): string {
-  if (steps.length) return steps.join("-");
+export function stepsSuffix(steps: readonly StepKind[], resized: boolean, nrStack: number): string {
+  if (steps.length) return steps.map((step) => (step === "nr" ? nrStackLabel(nrStack) : step)).join("-");
   return resized ? "resize" : "copy";
 }
 

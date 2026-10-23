@@ -25,6 +25,7 @@ import {
   isActiveState,
   isTerminalState,
   jobSteps,
+  nrStackLabel,
   nrStackOf,
   resizesFrames,
   stepsSuffix,
@@ -88,10 +89,17 @@ describe("steps", () => {
   });
 
   test("a default output is named after the steps, a resize alone, or a copy", () => {
-    expect(stepsSuffix(["sr", "nr", "fg"], false)).toBe("sr-nr-fg");
-    expect(stepsSuffix(["nr"], true)).toBe("nr");
-    expect(stepsSuffix([], true)).toBe("resize");
-    expect(stepsSuffix([], false)).toBe("copy");
+    expect(stepsSuffix(["sr", "nr", "fg"], false, 1)).toBe("sr-nr-fg");
+    expect(stepsSuffix(["nr"], true, 1)).toBe("nr");
+    expect(stepsSuffix([], true, 1)).toBe("resize");
+    expect(stepsSuffix([], false, 1)).toBe("copy");
+  });
+
+  test("a stacked Neural Rendering names its pass count, and only Neural Rendering's name changes", () => {
+    expect(stepsSuffix(["sr", "nr", "fg"], false, 3)).toBe("sr-nrx3-fg");
+    expect(stepsSuffix(["sr", "fg"], false, 3)).toBe("sr-fg");
+    expect(nrStackLabel(1)).toBe("nr");
+    expect(nrStackLabel(4)).toBe("nrx4");
   });
 
   test("a Neural Rendering step without a stack runs once", () => {

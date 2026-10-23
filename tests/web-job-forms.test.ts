@@ -103,6 +103,11 @@ describe("planJob", () => {
     expect(plan("image", { sr: true }, null).defaultOutputName).toBe("take.2.sr.png");
   });
 
+  test("names a stacked Neural Rendering after its passes", () => {
+    expect(plan("video", { sr: true, nr: true }, null, 3).defaultOutputName).toBe("take.2.sr-nrx3.mkv");
+    expect(plan("image", { sr: true }, null, 3).defaultOutputName).toBe("take.2.sr.png");
+  });
+
   test("says when Super Resolution cannot write the size, before the job is sent", () => {
     const shrink = planJob({ kind: "video", input: "C:\\a.mp4", source: { width: 3840, height: 2160 }, steps: steps({ sr: true }), srScale: { ...DEFAULT_SCALE_SETTINGS, mode: "size", width: 1920, height: 1080 }, resize: DEFAULT_SCALE_SETTINGS, nrStack: 1, container: "mp4" });
     expect(shrink.srProblem).toMatch(/^DLSS Super Resolution only enlarges/);

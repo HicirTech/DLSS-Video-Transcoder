@@ -9,6 +9,7 @@ import {
   DEFAULT_ENCODE_SETTINGS,
   DEFAULT_WARMUP_FRAMES,
   jobSteps,
+  nrStackOf,
   resizesFrames,
   stepsSuffix,
   trimJobLog,
@@ -24,7 +25,7 @@ function outputPathFor(request: JobRequest): string {
   const slash = Math.max(request.input.lastIndexOf("\\"), request.input.lastIndexOf("/"));
   const stem = dot > slash ? request.input.slice(0, dot) : request.input;
   const extension = request.kind === "video" ? `.${request.encode?.container ?? DEFAULT_ENCODE_SETTINGS.container}` : ".png";
-  return `${stem}.${stepsSuffix(jobSteps(request), resizesFrames(request))}${extension}`;
+  return `${stem}.${stepsSuffix(jobSteps(request), resizesFrames(request), nrStackOf(request.neuralRendering))}${extension}`;
 }
 
 /** The frames a job counts once it runs: an image job's passes as image.ts runs them, a random length for a video. */

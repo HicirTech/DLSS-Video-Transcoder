@@ -5,7 +5,7 @@ import { isPng } from "../codec/png/chunks.ts";
 import { decodePng } from "../codec/png/decode.ts";
 import { encodePng } from "../codec/png/encode.ts";
 import type { RgbaImage } from "../codec/png/types.ts";
-import { DEFAULT_SCALE_SETTINGS, DEFAULT_WARMUP_FRAMES, jobSteps, type NeuralRenderingStep, resizesFrames, type ScaleSettings, type StepKind, stepsSuffix, type SuperResolutionStep } from "../server/api-types.ts";
+import { DEFAULT_SCALE_SETTINGS, DEFAULT_WARMUP_FRAMES, jobSteps, type NeuralRenderingStep, nrStackOf, resizesFrames, type ScaleSettings, type StepKind, stepsSuffix, type SuperResolutionStep } from "../server/api-types.ts";
 import { resolveTargetSize, srOutputProblem } from "../server/output-size.ts";
 import { throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngineChain, type Engine } from "./engine.ts";
@@ -200,7 +200,7 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
 
   options.onFinishing?.();
   progress(ENCODING_PROGRESS, "encoding PNG");
-  const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resizesFrames(options)), ".png");
+  const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resizesFrames(options), nrStackOf(options.neuralRendering)), ".png");
   await Bun.write(output, encodePng(enhanced.image));
   progress(1, "done");
   return {

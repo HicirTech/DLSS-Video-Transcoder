@@ -346,7 +346,7 @@ async function planFrameGen(options: SettledFrameGenOptions): Promise<FrameGenJo
   const expectedDecoded = Math.max(1, Math.round(sourceSeconds * ratToNumber(sourceRate)));
   const estimatedOutput = Math.ceil(sourceSeconds * ratToNumber(targetRate));
   const expectsGeneration = plan.generatedPerInterval > 0;
-  const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resized), `.${FRAME_GEN_CONTAINER}`);
+  const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resized, nrStackOf(options.neuralRendering)), `.${FRAME_GEN_CONTAINER}`);
   const inputProblem = inputAsOutputProblem(options.input, output);
   if (inputProblem) throw new Error(inputProblem);
   // Read before anything can write there: it decides what the failure path may delete.

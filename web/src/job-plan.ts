@@ -51,7 +51,7 @@ export function planJob(plan: PlanInput): JobPlan {
   const srProblem = plan.steps.sr && plan.source && outputSize ? srOutputProblem(plan.source, outputSize) : null;
   const extension = plan.kind === "image" ? "png" : videoContainer(plan.steps, plan.container);
   const input = plan.input.trim();
-  const defaultOutputName = input ? `${stemOf(input)}.${stepsSuffix(steps, resized)}.${extension}` : null;
+  const defaultOutputName = input ? `${stemOf(input)}.${stepsSuffix(steps, resized, plan.nrStack)}.${extension}` : null;
   return { steps, nrStack: plan.nrStack, outputSize, srProblem, defaultOutputName };
 }
 

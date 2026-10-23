@@ -138,7 +138,7 @@ async function prepareVideoJob(options: VideoJobOptions): Promise<VideoJob> {
   const srProblem = sr ? srOutputProblem(info, target) : null;
   if (srProblem) throw new Error(srProblem);
   const steps = jobSteps({ superResolution: sr, neuralRendering: options.neuralRendering });
-  const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resizesFrames(options)), `.${requestedEncode.container}`);
+  const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resizesFrames(options), nrStackOf(options.neuralRendering)), `.${requestedEncode.container}`);
   const inputProblem = inputAsOutputProblem(options.input, output);
   if (inputProblem) throw new Error(inputProblem);
   // Whether the destination is ours to delete after an abnormal end: see partial-output.ts.
