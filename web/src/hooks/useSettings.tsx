@@ -284,8 +284,9 @@ export interface SettingsStore {
   settings: StoredSettings;
   /** Replaces the parts `patch` names and keeps the rest. */
   update(patch: Partial<StoredSettings>): void;
-  replaceAll(next: StoredSettings): void;
-  /** Back to the DEFAULT_* constants of the API contract. */
+  /** Takes the server's defaults, keeping the step switches and the GPU stored at the moment they are applied. */
+  applyServerDefaults(defaults: SettingsDefaults): void;
+  /** Back to defaultSettings(), the step switches and the GPU choice included. */
   reset(): void;
 }
 
@@ -304,7 +305,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     () => ({
       settings,
       update: (patch) => setSettings((current) => ({ ...current, ...patch })),
-      replaceAll: (next) => setSettings(next),
+      applyServerDefaults: (defaults) => setSettings((current) => withServerDefaults(current, defaults)),
       reset: () => setSettings(defaultSettings()),
     }),
     [settings],
