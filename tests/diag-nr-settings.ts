@@ -42,15 +42,17 @@ const SWEEPS: [keyof NrSettings, (number | boolean)[]][] = [
 console.log(`input ${input}`);
 console.log("A setting with one distinct hash across its whole range is ignored by this runtime.\n");
 const ignored: string[] = [];
-for (const [name, values] of SWEEPS) {
-  const hashes: string[] = [];
-  for (const value of values) hashes.push(await hashFor(`${name}-${value}`, { [name]: value } as Partial<NrSettings>));
-  const distinct = new Set(hashes).size;
-  if (distinct === 1) ignored.push(String(name));
-  console.log(`  ${String(name).padEnd(16)} ${values.length} values -> ${distinct} distinct  ${distinct === 1 ? "IGNORED" : ""}`);
-  console.log(`      ${values.map((v, i) => `${v}=${hashes[i]!.slice(0, 8)}`).join("  ")}`);
+try {
+  for (const [name, values] of SWEEPS) {
+    const hashes: string[] = [];
+    for (const value of values) hashes.push(await hashFor(`${name}-${value}`, { [name]: value } as Partial<NrSettings>));
+    const distinct = new Set(hashes).size;
+    if (distinct === 1) ignored.push(String(name));
+    console.log(`  ${String(name).padEnd(16)} ${values.length} values -> ${distinct} distinct  ${distinct === 1 ? "IGNORED" : ""}`);
+    console.log(`      ${values.map((value, index) => `${value}=${hashes[index]!.slice(0, 8)}`).join("  ")}`);
+  }
+  console.log(`\nignored by this runtime: ${ignored.length ? ignored.join(", ") : "(none)"}`);
+} finally {
+  rmSync(out, { recursive: true, force: true });
 }
-
-console.log(`\nignored by this runtime: ${ignored.length ? ignored.join(", ") : "(none)"}`);
-rmSync(out, { recursive: true, force: true });
 process.exit(0);
