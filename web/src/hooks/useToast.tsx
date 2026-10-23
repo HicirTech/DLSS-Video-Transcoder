@@ -47,7 +47,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <Snackbar
         key={seq}
         open={open}
-        autoHideDuration={toast?.severity === "error" ? 8000 : 4000}
+        autoHideDuration={toast?.severity === "error" ? ERROR_TOAST_MS : TOAST_MS}
         onClose={(_event, reason) => {
           if (reason !== "clickaway") setOpen(false);
         }}
@@ -58,7 +58,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           variant="filled"
           role={toast?.severity === "error" ? "alert" : "status"}
           onClose={() => setOpen(false)}
-          sx={{ width: "100%", maxWidth: 640 }}
+          sx={{ width: "100%", maxWidth: TOAST_MAX_WIDTH_PX }}
         >
           {toast?.message ?? ""}
         </Alert>
