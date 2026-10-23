@@ -29,7 +29,7 @@ export function targetFpsOption(args: string[]): string | undefined {
 export async function fgCommand(args: string[]): Promise<void> {
   const positional = positionalArgs(args, commandSpec("fg"));
   const input = positional[0];
-  if (!input) usageError("missing <input.mp4>", "fg");
+  if (!input) usageError("missing <input>", "fg");
   const runtimeDir = runtimeDirOption(args);
   const result = await processFrameGen({
     input,
