@@ -81,9 +81,9 @@ function hint(result: number): string {
       // Any feature's call can return this (the DLSS-G host has seen it from EvaluateFeature after
       // thousands of good intervals), so the text names no feature and no single cause.
       return " - a platform error inside the NGX runtime; the runtime also returns it to callers outside a module named nvngx.dll, which is why every NGX call goes through the nvngx.dll shim";
-    case 0xbad0000b:
-      return " - the feature could not start; check driver version, GPU architecture and that the capability parameter block was used";
-    case 0xbad00012:
+    case NgxResult.UnableToInitializeFeature:
+      return " - the feature could not start; check the driver version and GPU architecture (`probe` reports both), or try another installed feature DLL (`versions` lists them)";
+    case NgxResult.NotImplemented:
       return " - this driver's NGX core does not know the feature; a newer driver is required";
     case 0xbad00001:
       return " - the feature is not supported on this GPU or driver";

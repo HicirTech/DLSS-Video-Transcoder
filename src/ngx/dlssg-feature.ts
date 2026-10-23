@@ -166,7 +166,8 @@ function readCapabilities(core: NgxCore): DlssgCapabilities {
 /** Why this runtime cannot generate maxGenerated frames per interval, or null when it can; a probe asks with 1. */
 export function capabilityRefusal(capabilities: DlssgCapabilities, maxGenerated: number): { reason: DlssgRefusal; detail: string } | null {
   if (capabilities.needsUpdatedDriver) {
-    return { reason: "driverTooOld", detail: `the NVIDIA driver is too old for this nvngx_dlssg.dll. Install driver ${capabilities.minDriverVersion ?? "a newer version"} or later.` };
+    const remedy = capabilities.minDriverVersion === null ? "Install a newer NVIDIA driver." : `Install NVIDIA driver ${capabilities.minDriverVersion} or later.`;
+    return { reason: "driverTooOld", detail: `the NVIDIA driver is too old for this nvngx_dlssg.dll. ${remedy}` };
   }
   if (!capabilities.available) {
     const initResult = capabilities.featureInitResult === null ? "" : ` (FeatureInitResult ${ngxName(capabilities.featureInitResult)})`;
