@@ -4,7 +4,7 @@
  *
  * Ported from the reference project's frame_interpolation/scheduler.py and models.py (FPS table).
  */
-import { FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, type FrameGenEngine, type FrameGenFps } from "../server/api-types.ts";
+import { FRAME_GEN_CASCADE_MAX_STAGES, FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, type FrameGenEngine, type FrameGenFps } from "../server/api-types.ts";
 import { parseRational, type Rational, ratCmp, ratDiv, ratToNumber, rational } from "./rational.ts";
 
 // ---------------------------------------------------------------------------
@@ -117,13 +117,6 @@ export function isNativeMultiFramePlan(plan: InterpolationPlan): boolean {
 }
 
 /**
- * The cascade is capped at 3 stages (8x grid) because each further stage
- * doubles the evaluations per source frame while only halving the residual
- * timing error, and interpolates from frames that were themselves interpolated.
- */
-const MAX_CASCADE_STAGES = 3;
-
-/**
  * Decide how to reach targetRate from sourceRate (reference scheduler.py
  * choose_interpolation_plan, plus the HAGS gate for "auto"). The source is
  * always constant-rate here: the decoder resamples it to its nominal rate.
@@ -167,7 +160,7 @@ export function chooseInterpolationPlan({ sourceRate, targetRate, engine, native
     };
   }
 
-  const stages = ratCmp(ratio, rational(2)) === 0 ? 1 : ratCmp(ratio, rational(4)) === 0 ? 2 : MAX_CASCADE_STAGES;
+  const stages = ratCmp(ratio, rational(2)) === 0 ? 1 : ratCmp(ratio, rational(4)) === 0 ? 2 : FRAME_GEN_CASCADE_MAX_STAGES;
   const grid = 1 << stages;
   // Every output instant falls on a grid frame only when the ratio is the grid itself: 2x, 4x or 8x.
   const exactGrid = ratCmp(ratio, rational(grid)) === 0;
