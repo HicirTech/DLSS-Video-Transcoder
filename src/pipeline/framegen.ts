@@ -197,6 +197,9 @@ function dlssgRuntimeOf(options: FrameGenOptions): DlssgRuntime {
   return { root: options.runtimeDir, dllDir: options.dllDir };
 }
 
+/** FrameGenOptions once processFrameGen has settled the engine ("auto" when absent). */
+type SettledFrameGenOptions = FrameGenOptions & { engine: FrameGenEngine };
+
 /**
  * Engine "auto" plans one native session when the ratio is an exact integer up to the runtime's
  * maximum, from 3x up only with HAGS on, and a cascade of 2x stages otherwise (framegen-plan.ts). A
@@ -208,7 +211,7 @@ export async function processFrameGen(options: FrameGenOptions): Promise<FrameGe
   const runtimeKey = dlssgRuntimeKey(dlssgRuntimeOf(options));
   if (engine === "auto" && nativeMultiFrameRefused.has(runtimeKey)) return processFrameGenOnce({ ...options, engine: "cascade" });
   try {
-    return await processFrameGenOnce(options);
+    return await processFrameGenOnce({ ...options, engine });
   } catch (error) {
     if (engine === "auto" && error instanceof FrameGenDisabledError && isNativeMultiFramePlan(error.plan)) {
       nativeMultiFrameRefused.add(runtimeKey);
@@ -257,7 +260,7 @@ interface PipelineRun {
 }
 
 /** One attempt at a job; processFrameGen re-runs it as a cascade when a native session turns out to be disabled. */
-async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenResult> {
+async function processFrameGenOnce(options: SettledFrameGenOptions): Promise<FrameGenResult> {
   const started = performance.now();
   const job = await planFrameGen(options);
   const { width, height, targetRate, output, outputExisted } = job;
@@ -317,7 +320,7 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
 }
 
 /** Probes the tools, the DLSSG runtime and the source, and plans the interpolation. */
-async function planFrameGen(options: FrameGenOptions): Promise<FrameGenJob> {
+async function planFrameGen(options: SettledFrameGenOptions): Promise<FrameGenJob> {
   const progress = options.onProgress ?? (() => {});
   // Before the host probe, which starts a GPU process of up to PROBE_TIMEOUT_MS, and again after it: the probe does not watch the signal.
   throwIfAborted(options.signal);
@@ -352,7 +355,7 @@ async function planFrameGen(options: FrameGenOptions): Promise<FrameGenJob> {
   const sourceRate = parseRational(info.nominalFpsText);
   const multiplier = options.multiplier ?? DEFAULT_FRAME_GEN_MULTIPLIER;
   const targetRate = options.targetFps !== undefined ? resolveTargetRate(options.targetFps) : ratMul(sourceRate, rational(multiplier));
-  const plan = chooseInterpolationPlan(sourceRate, targetRate, options.engine ?? "auto", nativeMultiplierMax, { cfr: true, hagsEnabled: caps.hagsEnabled });
+  const plan = chooseInterpolationPlan({ sourceRate, targetRate, engine: options.engine, nativeMultiplierMax, hagsEnabled: caps.hagsEnabled });
   // Estimates for the progress report only; the exact output length is set
   // from the decoded count by writer.endAt() at end of stream. `frames` is
   // nb_frames (or duration x avg_frame_rate), counted in the MEASURED clock, so
