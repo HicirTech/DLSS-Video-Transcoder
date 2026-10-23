@@ -1,16 +1,4 @@
-/**
- * NGX parameter objects and parameter names.
- *
- * The driver's NGX core does not export the C helpers
- * (NVSDK_NGX_Parameter_SetI and friends); those live in NVIDIA's static
- * library and simply call virtual methods on the NVSDK_NGX_Parameter object.
- * So this module calls the vtable directly.
- *
- * The interface declares eight `Set` overloads, eight `Get` overloads and
- * `Reset`. MSVC lays adjacent overloads out in reverse declaration order, so
- * the slot table below defaults to that layout; `detectLayout()` confirms it at
- * runtime by round-tripping a float through the object.
- */
+/** NGX parameter objects driven through the NVSDK_NGX_Parameter vtable, and the public and Neural Rendering parameter names. */
 import { FFIType } from "bun:ffi";
 import { vtableMethod } from "../native/com.ts";
 import { OutF32, OutU32, OutU64, cstring } from "../native/memory.ts";
@@ -64,6 +52,10 @@ function name(text: string): Uint8Array {
   return bytes;
 }
 
+/**
+ * An NGX parameter object the core owns. The driver's NGX core does not export the C helpers (NVSDK_NGX_Parameter_SetI
+ * and friends); those live in NVIDIA's static library and call these virtual methods, so this calls the vtable directly.
+ */
 export class NgxParameters {
   static layout: VtableLayout = "msvc";
 

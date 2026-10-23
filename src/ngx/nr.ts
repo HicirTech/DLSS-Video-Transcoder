@@ -3,9 +3,9 @@
  * that runs Neural Rendering) wires DLSS Neural Rendering — NGX feature 18 — into
  * `createEngineChain`.
  *
- * Feature 18 enhances each frame at the same size, which is what lets it satisfy
- * the pipeline's 1:1 working-size contract; true DLSS upscaling with a
- * render/output split is a separate engine, `sr`.
+ * Feature 18 enhances each frame at the same size, so this engine's output size
+ * is its input size; true DLSS upscaling with a render/output split is a
+ * separate engine, `sr`, which runs before this one when a job has both steps.
  */
 import { RUNTIME_DIR } from "../paths.ts";
 import { registerNeuralEngine, type Engine, type NrEngineOptions } from "../pipeline/engine.ts";

@@ -1,16 +1,6 @@
 /**
- * DLSS Super Resolution (NGX feature 1) driven in-process.
- *
- * The driver NGX core (`_nvngx.dll`) loads `nvngx_dlss.dll` from the feature
- * search path and owns the parameter allocator, so this session inits the core
- * (through the nvngx.dll forwarder shim so the runtime's caller-module check
- * passes), creates the feature once, then evaluates one frame at a time on
- * GPU-resident textures.
- *
- * Teardown: this driver core's Shutdown1 frees the D3D12 device and faults once a
- * feature has been created, so close() releases the feature and its resources but
- * never calls it — NGX is reclaimed at process exit. Reuse one session across
- * jobs, or run one job per short-lived process.
+ * DLSS Super Resolution (NGX feature 1) driven in-process: the feature is created once, then evaluates one frame at
+ * a time on GPU-resident textures.
  */
 import {
   D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
