@@ -154,6 +154,9 @@ describe("video", () => {
     const unnamed = await usageErrorOf(() => request("C:\\out.avi", "--nr", "--container", "mov"));
     expect(unnamed.message).toBe("output C:\\out.avi must end in .mov, the container this job writes (--container, default mp4); rename it");
     expect(request("C:\\OUT.MKV", "--nr", "--container", "mkv").output).toBe("C:\\OUT.MKV");
+    // With --fg, --container takes mp4 only, so the refusal does not send the user to --container mkv.
+    const frameGen = await usageErrorOf(() => request("C:\\out.mkv", "--fg"));
+    expect(frameGen.message).toBe("output C:\\out.mkv must end in .mp4, the container this job writes (--container, default mp4); rename it");
   });
 });
 
@@ -162,6 +165,17 @@ describe("fg", () => {
     const error = await usageErrorOf(() => fgCommand([]));
     expect(error.message).toBe("missing <input.mp4>");
     expect(error.command).toBe("fg");
+  });
+
+  test("an output path has to end in .mp4, the container frame generation writes", async () => {
+    for (const output of ["C:\\out.mkv", "C:\\out"]) {
+      const error = await usageErrorOf(() => fgCommand(["C:\\in.mp4", output]));
+      expect(error.message, output).toBe(`output ${output} must end in .mp4, the container frame generation writes; rename it`);
+      expect(error.command, output).toBe("fg");
+    }
+    // --fps is read after the output, so its refusal shows the output was accepted.
+    const accepted = await usageErrorOf(() => fgCommand(["C:\\in.mp4", "C:\\OUT.MP4", "--fps", "x"]));
+    expect(accepted.message).toStartWith("--fps is not a rate this build can produce: ");
   });
 
   test("a --dlss-version that matches no installed Frame Generation version is a usage error that says how to list them", async () => {
