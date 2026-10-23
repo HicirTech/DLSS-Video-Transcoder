@@ -63,8 +63,8 @@ export type GpuChoice =
   | { eligible: false; index: number | null; reasons: string[] };
 
 /** An adapter a job accepts: NVIDIA hardware with a CUDA device behind it. The probe reports this per adapter. */
-export function isEligibleGpu(c: GpuCandidate): boolean {
-  return isHardwareNvidia(c.info) && c.cudaOrdinal !== null;
+export function isEligibleGpu(candidate: GpuCandidate): boolean {
+  return isHardwareNvidia(candidate.info) && candidate.cudaOrdinal !== null;
 }
 
 /** The sentence every refusal ends with: the adapters a user can pick instead, with the identifiers to pick them by. */
@@ -105,7 +105,7 @@ function noCudaDevice(cuda: CudaSummary, candidate: GpuCandidate): string {
 export function chooseGpu(candidates: readonly GpuCandidate[], cuda: CudaSummary, preferredIndex?: number): GpuChoice {
   const withCuda = candidates.filter(isEligibleGpu);
   if (preferredIndex !== undefined) {
-    const chosen = candidates.find((c) => c.info.index === preferredIndex);
+    const chosen = candidates.find((candidate) => candidate.info.index === preferredIndex);
     if (!chosen) {
       return { eligible: false, index: null, reasons: [`No adapter at index ${preferredIndex}. Available adapters: ${listedAdapters(candidates)}.`] };
     }
@@ -150,7 +150,7 @@ export function gpuCandidates(adapters: readonly DxgiAdapter[]): { candidates: G
  * be tested; the UUIDs it offers are the ones a user can actually pick.
  */
 export function adapterIndexForUuid(candidates: readonly GpuCandidate[], uuid: string): { index: number } | { index: null; reason: string } {
-  const match = candidates.find((c) => isEligibleGpu(c) && c.cudaUuid === uuid);
+  const match = candidates.find((candidate) => isEligibleGpu(candidate) && candidate.cudaUuid === uuid);
   if (match) return { index: match.info.index };
   return {
     index: null,
@@ -198,7 +198,7 @@ export function openGpu(options: GpuOptions = {}): GpuSession {
   // Candidates are built 1:1 from the adapters, so the chosen index is always one of them.
   const adapter = adapters.find((a) => a.info.index === choice.index)!;
   const cudaOrdinal = choice.cudaOrdinal;
-  const cudaUuid = candidates.find((c) => c.info.index === adapter.info.index)!.cudaUuid;
+  const cudaUuid = candidates.find((candidate) => candidate.info.index === adapter.info.index)!.cudaUuid;
   let device: D3D12Device | null = null;
   let gpu: GpuContext;
   try {
