@@ -6,8 +6,9 @@ import { unusedSettings } from "../../../src/server/settings-in-use";
 import { api } from "../api";
 import { useJobRunner } from "../hooks/useJobRunner";
 import { useMediaInfo } from "../hooks/useMediaInfo";
-import { type ImageStepKind, useSettings } from "../hooks/useSettings";
-import { formatSize, planJob, planStages, STEP_TITLES } from "../job-plan";
+import { useSettings } from "../hooks/useSettings";
+import type { ImageStepKind } from "../stored-settings";
+import { formatSize, planJob, planStages } from "../job-plan";
 import { imageRequest } from "../job-requests";
 import { CompareView } from "./CompareView";
 import { JobCard } from "./JobCard";
@@ -69,9 +70,8 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
       <Section title="Steps" action={<Typography variant="caption" color="text.secondary">Switch on what to run; they always run in this order.</Typography>}>
         <Stack spacing={1.5}>
           <StepCard
-            order={1}
-            title={STEP_TITLES.sr}
-            summary="Upscales the image with DLSS Super Resolution, from the source size to the output size."
+            step="sr"
+            summary="Runs DLSS Super Resolution on the image, from the source size to the output size; at the source size it runs DLAA and does not upscale."
             on={steps.sr}
             onToggle={(on) => setStep("sr", on)}
             result={source && outputSize ? `${formatSize(source)} → ${outputSize}` : null}
@@ -84,8 +84,7 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
           </StepCard>
 
           <StepCard
-            order={2}
-            title={STEP_TITLES.nr}
+            step="nr"
             summary="Enhances the image at the output size with DLSS Neural Rendering; no upscale."
             on={steps.nr}
             onToggle={(on) => setStep("nr", on)}

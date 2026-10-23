@@ -87,9 +87,8 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
       <Section title="Steps" action={<Typography variant="caption" color="text.secondary">Switch on what to run; they always run in this order.</Typography>}>
         <Stack spacing={1.5}>
           <StepCard
-            order={1}
-            title={STEP_TITLES.sr}
-            summary="Upscales every frame with DLSS Super Resolution, from the source size to the output size."
+            step="sr"
+            summary="Runs DLSS Super Resolution on every frame, from the source size to the output size; at the source size it runs DLAA and does not upscale."
             on={steps.sr}
             onToggle={(on) => setStep("sr", on)}
             result={source && outputSize ? `${formatSize(source)} → ${outputSize}` : null}
@@ -102,8 +101,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
           </StepCard>
 
           <StepCard
-            order={2}
-            title={STEP_TITLES.nr}
+            step="nr"
             summary="Enhances every frame at the output size with DLSS Neural Rendering; no upscale."
             on={steps.nr}
             onToggle={(on) => setStep("nr", on)}
@@ -116,8 +114,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
           </StepCard>
 
           <StepCard
-            order={3}
-            title={STEP_TITLES.fg}
+            step="fg"
             summary="Interpolates the processed frames to a higher frame rate with DLSS Frame Generation."
             on={steps.fg}
             onToggle={(on) => setStep("fg", on)}
