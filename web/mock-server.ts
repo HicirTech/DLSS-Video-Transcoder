@@ -36,6 +36,7 @@ function sleep(ms: number): Promise<void> {
 
 const server = Bun.serve({
   port: PORT,
+  hostname: "127.0.0.1",
   development: true,
   maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
   routes: {
