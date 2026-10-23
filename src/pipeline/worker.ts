@@ -49,9 +49,16 @@ async function run(message: RunMessage): Promise<void> {
   const { id, request } = message;
   const log = (line: string) => post({ type: "log", id, line });
   const onFinishing = (): void => post({ type: "finishing", id });
+  const postProgress: ProgressReporter = (fraction, text, frames) => post({ type: "progress", id, fraction, message: text, frames });
+  // Video and frame generation tally once per frame, so those lines stay out of the log.
   const onProgress: ProgressReporter = (fraction, text, frames) => {
-    post({ type: "progress", id, fraction, message: text, frames });
+    postProgress(fraction, text, frames);
     if (frames === undefined) log(text);
+  };
+  // A still runs at most warmupFrames + 1 passes, so every pass line is logged.
+  const onImageProgress: ProgressReporter = (fraction, text, frames) => {
+    postProgress(fraction, text, frames);
+    log(text);
   };
   try {
     await loadEngines({ sr: request.superResolution !== undefined, nr: request.neuralRendering !== undefined });
@@ -68,10 +75,7 @@ async function run(message: RunMessage): Promise<void> {
         appDataPath: message.appDataPath,
         signal: jobCancellation.signal,
         onFinishing,
-        onProgress: (fraction, text, frames) => {
-          post({ type: "progress", id, fraction, message: text, frames });
-          log(text);
-        },
+        onProgress: onImageProgress,
       });
       post({ type: "done", id, output: result.output, detail: { ...result } });
       return;
