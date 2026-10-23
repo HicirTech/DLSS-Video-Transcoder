@@ -56,6 +56,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         <Alert
           severity={toast?.severity ?? "info"}
           variant="filled"
+          role={toast?.severity === "error" ? "alert" : "status"}
           onClose={() => setOpen(false)}
           sx={{ width: "100%", maxWidth: 640 }}
         >
