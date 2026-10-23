@@ -16,6 +16,7 @@ import {
   FENCE_WAIT_TIMEOUT_MS,
   gpuTimeoutError,
   linearLayout,
+  packRows,
 } from "./d3d12.ts";
 import { viewNative } from "./memory.ts";
 import { Win32Event } from "./win32.ts";
@@ -184,14 +185,7 @@ export class GpuContext {
     }
     const staging = this.ensureUpload(layout.totalBytes);
     const address = staging.map({ begin: 0, end: 0 });
-    const target = viewNative(address, layout.totalBytes);
-    if (layout.rowPitch === layout.rowBytes) {
-      target.set(pixels);
-    } else {
-      for (let y = 0; y < texture.height; y++) {
-        target.set(pixels.subarray(y * layout.rowBytes, (y + 1) * layout.rowBytes), y * layout.rowPitch);
-      }
-    }
+    packRows(viewNative(address, layout.totalBytes), pixels, layout, texture.height);
     staging.unmap();
     this.list.transition(texture, D3D12_RESOURCE_STATE_COPY_DEST);
     this.list.copyTextureRegion(
