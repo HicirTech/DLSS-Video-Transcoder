@@ -50,8 +50,10 @@ import { NearestTimestampWriter } from "./nearest-timestamp-writer.ts";
 import { type Rational, parseRational, ratDiv, ratMul, ratToNumber, rational } from "./rational.ts";
 import { requireFfmpegTools } from "./tools.ts";
 import { type VideoInfo, probeVideo } from "./video-probe.ts";
+import type { GpuSelection } from "./gpu.ts";
 
-export interface FrameGenOptions {
+/** The GPU selection names where Super Resolution and Neural Rendering run; frame generation's host picks its own (FRAME_GEN_GPU_CHOICE). */
+export interface FrameGenOptions extends GpuSelection {
   input: string;
   output?: string;
   /**
@@ -77,9 +79,6 @@ export interface FrameGenOptions {
   neuralRendering?: NeuralRenderingStep;
   /** A lanczos resize of the decoded frames; only without superResolution, which sets the size itself. */
   resize?: ScaleSettings;
-  /** The GPU Super Resolution and Neural Rendering run on, one of the two at most (GpuOptions); frame generation's host picks its own (FRAME_GEN_GPU_CHOICE). */
-  adapterIndex?: number;
-  adapterUuid?: string;
   appDataPath?: string;
   /** Default DEFAULT_ENCODE_SETTINGS.quality. */
   quality?: number;

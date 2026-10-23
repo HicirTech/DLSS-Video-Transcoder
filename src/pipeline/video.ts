@@ -27,11 +27,11 @@ import { probeNvencCaps, type NvencSdkCodec } from "./nvenc.ts";
 import { runThreadedEncode } from "./threaded-encode.ts";
 import { runAsyncNrEncode } from "./async-nr-encode.ts";
 import { DXGI_FORMAT_R8G8B8A8_UNORM, linearLayout } from "../native/d3d12.ts";
-import { describeGpu, openGpu, type GpuSession } from "./gpu.ts";
+import { describeGpu, openGpu, type GpuSelection, type GpuSession } from "./gpu.ts";
 import { requireFfmpegTools } from "./tools.ts";
 import { probeVideo, type VideoInfo } from "./video-probe.ts";
 
-export interface VideoJobOptions {
+export interface VideoJobOptions extends GpuSelection {
   input: string;
   output?: string;
   superResolution?: SuperResolutionStep;
@@ -39,9 +39,6 @@ export interface VideoJobOptions {
   /** A lanczos resize of the decoded frames; only without superResolution, which sets the size itself. */
   resize?: ScaleSettings;
   encode?: EncodeSettings;
-  /** One of the two, never both: see GpuOptions. */
-  adapterIndex?: number;
-  adapterUuid?: string;
   runtimeDir?: string;
   appDataPath?: string;
   onProgress?: ProgressReporter;
@@ -162,7 +159,7 @@ async function prepareVideoJob(options: VideoJobOptions): Promise<VideoJob> {
 
   // The probe above is synchronous; a cancel sent during it is only delivered after a yield.
   await throwIfAbortedAfterYield(options.signal);
-  const session = openGpu({ adapterIndex: options.adapterIndex, adapterUuid: options.adapterUuid });
+  const session = openGpu(options);
   progress(0, describeGpu(session));
   // session.cudaOrdinal, not adapterIndex: see GpuSession.cudaOrdinal. Every
   // CUDA user below (ffmpeg's -gpu, in-process NVENC, NVOFA) takes this one.

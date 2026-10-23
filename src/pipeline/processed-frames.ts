@@ -8,9 +8,10 @@ import { createEngineChain, type Engine } from "./engine.ts";
 import { createFrameGuide, type FrameGuide } from "./frame-guide.ts";
 import type { ProgressReporter } from "./frame-progress.ts";
 import { allocateFrame, type FrameReader, type FrameSource } from "./frame-reader.ts";
-import { describeGpu, openGpu, type GpuSession } from "./gpu.ts";
+import { describeGpu, openGpu, type GpuSelection, type GpuSession } from "./gpu.ts";
 
-export interface ProcessedFramesOptions {
+/** The GPU selection names where the chain runs; frame generation's host picks its own. */
+export interface ProcessedFramesOptions extends GpuSelection {
   /** The decoded frames, at the decode size. */
   reader: FrameReader;
   /** The decode size: the source's when Super Resolution runs, else the output size. */
@@ -21,9 +22,6 @@ export interface ProcessedFramesOptions {
   outputHeight: number;
   superResolution?: SuperResolutionStep;
   neuralRendering?: NeuralRenderingStep;
-  /** The GPU the chain runs on, one of the two at most (GpuOptions); frame generation's host picks its own. */
-  adapterIndex?: number;
-  adapterUuid?: string;
   runtimeDir: string;
   appDataPath?: string;
   progress: ProgressReporter;
