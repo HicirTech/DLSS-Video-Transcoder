@@ -109,7 +109,11 @@ self.onmessage = (event: MessageEvent<FramegenEncodeIn>) => {
     try {
       let note = "";
       // On this thread so the synchronous NVENC encode stays off the coordinator; its CUDA context is created here.
-      if (m.nvenc && probeNvencCaps(FRAMEGEN_CUDA_DEVICE).available) ({ encoder: enc, note } = openNvenc(m.nvenc));
+      if (m.nvenc) {
+        const caps = probeNvencCaps(FRAMEGEN_CUDA_DEVICE);
+        if (caps.available) ({ encoder: enc, note } = openNvenc(m.nvenc));
+        else note = `encode: NVENC direct path unavailable (${caps.detail}); using rawvideo pipe`;
+      }
       proc = Bun.spawn([m.ffmpeg, ...(enc ? m.nvencArgs : m.rawArgs)], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
       sink = proc.stdin as { write(b: Uint8Array): unknown; end(): unknown };
       // Drain stderr for the whole run so ffmpeg can never block on a full pipe.

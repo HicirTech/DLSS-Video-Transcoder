@@ -382,7 +382,9 @@ async function runEngineJob(job: VideoJob): Promise<VideoJobResult> {
   // (-c:v copy). CPU/AV1 codecs, oversized frames, or an NVENC that will not
   // come up here fall through to the single-thread rawvideo path.
   const nativeTarget = nvencNativeTarget(encode.codec, outWidth, outHeight);
-  const useThreaded = nativeTarget !== null && probeNvencCaps(cudaOrdinal).available;
+  const nvenc = nativeTarget !== null ? probeNvencCaps(cudaOrdinal) : null;
+  if (nvenc && !nvenc.available) progress(0, `encode: NVENC direct path unavailable (${nvenc.detail}); falling back to the single-thread rawvideo pipeline`);
+  const useThreaded = nvenc?.available === true;
 
   const path: EnginePath = { engine, outWidth, outHeight, decodeArgs, wantAudio, frameBytes, guide };
   const counts: FrameCounts = { frames: 0, sceneCuts: 0 };
