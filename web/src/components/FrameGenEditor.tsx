@@ -25,6 +25,7 @@ interface FrameGenEditorProps {
 export function FrameGenEditor({ value, sourceFps, outputFps, onChange }: FrameGenEditorProps) {
   const fpsLabelId = useId();
   const pathLabelId = useId();
+  const helpId = useId();
   const update = (patch: Partial<StoredFrameGen>): void => onChange({ ...value, ...patch });
   const { min, max } = SETTING_RANGES.multiplier;
   const multiplied = sourceFps !== null && outputFps !== null ? `: ${formatFps(sourceFps)} → ${formatFps(outputFps)} fps` : "";
@@ -76,7 +77,13 @@ export function FrameGenEditor({ value, sourceFps, outputFps, onChange }: FrameG
         )}
         <FormControl sx={{ minWidth: 300 }}>
           <InputLabel id={pathLabelId}>Path</InputLabel>
-          <Select<FrameGenEngine> labelId={pathLabelId} label="Path" value={value.engine} onChange={(event) => update({ engine: event.target.value as FrameGenEngine })}>
+          <Select<FrameGenEngine>
+            labelId={pathLabelId}
+            label="Path"
+            value={value.engine}
+            aria-describedby={helpId}
+            onChange={(event) => update({ engine: event.target.value })}
+          >
             {FRAME_GEN_ENGINES.map((mode) => (
               <MenuItem key={mode} value={mode}>
                 {PATH_LABELS[mode]}
@@ -85,7 +92,7 @@ export function FrameGenEditor({ value, sourceFps, outputFps, onChange }: FrameG
           </Select>
         </FormControl>
       </Stack>
-      <FormHelperText>
+      <FormHelperText id={helpId}>
         DLSS Frame Generation runs last, on the frames the steps before it made, and keeps the source duration; a rate
         at or below the source's generates nothing and only resamples. Path Auto: {FRAME_GEN_AUTO_PATH}. Always writes
         MP4.
