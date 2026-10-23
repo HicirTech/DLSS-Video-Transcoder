@@ -84,20 +84,32 @@ function Shell() {
     }
   }, [toast]);
 
-  useEffect(() => {
-    let active = true;
+  // Only the newest tools request applies its answer.
+  const toolsGeneration = useRef(0);
+  const loadTools = useCallback((): void => {
+    const generation = ++toolsGeneration.current;
     api
       .tools()
       .then((report) => {
-        if (active) setTools(report);
+        if (generation !== toolsGeneration.current) return;
+        setTools(report);
+        setToolsError(null);
       })
       .catch((err: unknown) => {
-        if (active) setToolsError(errorMessage(err));
+        if (generation === toolsGeneration.current) setToolsError(errorMessage(err));
       });
-    return () => {
-      active = false;
-    };
   }, []);
+
+  useEffect(() => loadTools(), [loadTools]);
+
+  // The server may have restarted with other tools installed, or been down when the page asked, so every
+  // reconnect asks again; the first connect after the page loads is not a reconnect.
+  const wasConnected = useRef(false);
+  useEffect(() => {
+    if (!feed.connected) return;
+    if (wasConnected.current) loadTools();
+    wasConnected.current = true;
+  }, [feed.connected, loadTools]);
 
   useEffect(() => {
     if (feed.status.kind === "failed") toast.showError(`Could not load the job list: ${feed.status.error}`);
