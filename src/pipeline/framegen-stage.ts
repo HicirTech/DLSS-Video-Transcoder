@@ -115,12 +115,12 @@ export class Stage {
 
   private fail(error: Error): void {
     this.failed ??= error;
-    const w = this.waiter;
+    const pendingGuide = this.waiter;
     this.waiter = null;
-    w?.reject(error);
-    const p = this.packWaiter;
+    pendingGuide?.reject(error);
+    const pendingPack = this.packWaiter;
     this.packWaiter = null;
-    p?.reject(error);
+    pendingPack?.reject(error);
   }
 
   /** Run the guide analysis for one frame on this stage's thread (one at a time, in stream order). */
