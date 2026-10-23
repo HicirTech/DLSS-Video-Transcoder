@@ -25,19 +25,22 @@ function cloneJob(job: JobStatus): JobStatus {
 type Listener = (event: WsEvent) => void;
 type Timer = ReturnType<typeof setTimeout>;
 
+/** How often a running mock job advances one step. */
+const TICK_MS = 400;
+
 /** In-memory job queue that advances queued/running jobs on timers and publishes WsEvents. */
 export class MockJobEngine {
   private readonly jobs = new Map<string, JobStatus>();
   private readonly listeners = new Set<Listener>();
   private readonly timers = new Map<string, Timer>();
-  private readonly tickMs: number;
+  /** The request of each job created here; the seed jobs have none. */
+  private readonly requests = new Map<string, JobRequest>();
   private counter = 0;
 
-  constructor(seed: JobStatus[] = [], tickMs = 400) {
-    this.tickMs = tickMs;
+  constructor(seed: JobStatus[]) {
     for (const job of seed) this.jobs.set(job.id, cloneJob(job));
     for (const job of this.jobs.values()) {
-      if (job.state === "running") this.schedule(job.id, tickMs);
+      if (job.state === "running") this.schedule(job.id, TICK_MS);
       else if (job.state === "queued") this.schedule(job.id, 2500);
     }
   }
@@ -95,7 +98,7 @@ export class MockJobEngine {
       this.timers.set(id, setTimeout(() => {
         this.timers.delete(id);
         this.markCancelled(job);
-      }, this.tickMs));
+      }, TICK_MS));
     }
     return cloneJob(job);
   }
@@ -148,7 +151,7 @@ export class MockJobEngine {
       job.message = "Creating NGX feature 18";
       this.appendLog(job, "[ngx] D3D12 device ready on adapter 0, NVSDK_NGX_D3D12_CreateFeature(18) ok");
       this.emitJob(job);
-      this.schedule(id, this.tickMs);
+      this.schedule(id, TICK_MS);
       return;
     }
     if (job.state !== "running") return;
@@ -178,7 +181,7 @@ export class MockJobEngine {
       return;
     }
     this.emitJob(job);
-    this.schedule(id, this.tickMs);
+    this.schedule(id, TICK_MS);
   }
 
   private appendLog(job: JobStatus, line: string): void {
