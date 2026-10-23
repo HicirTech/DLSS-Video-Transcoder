@@ -1,15 +1,8 @@
-import { type ChangeEvent, useId, useState } from "react";
-import { Button, FormControl, FormHelperText, InputLabel, MenuItem, Select, Stack, TextField } from "@mui/material";
+import { type ChangeEvent, useState } from "react";
+import { Button, Stack, TextField } from "@mui/material";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
-import { MOTION_KINDS, type MotionKind } from "../../../src/server/api-types";
 import { api } from "../api";
 import { errorMessage } from "../errors";
-
-// Record<...>: a motion mode the API accepts without menu words is a build error, not a blank item.
-const MOTION_MENU_LABELS: Record<MotionKind, string> = {
-  none: "None — process each frame independently",
-  flow: "Optical flow (estimate motion between frames)",
-};
 
 interface InputPathFieldProps {
   kind: "image" | "video";
@@ -94,30 +87,5 @@ export function OutputPathField({ value, defaultName, onChange }: OutputPathFiel
       onChange={(event) => onChange(event.target.value)}
       slotProps={{ htmlInput: { spellCheck: false }, inputLabel: { shrink: true } }}
     />
-  );
-}
-
-interface MotionSelectProps {
-  value: MotionKind;
-  onChange: (value: MotionKind) => void;
-}
-
-export function MotionSelect({ value, onChange }: MotionSelectProps) {
-  const motionLabelId = useId();
-  return (
-    <FormControl sx={{ minWidth: 260, maxWidth: 420 }}>
-      <InputLabel id={motionLabelId}>Motion</InputLabel>
-      <Select<MotionKind> labelId={motionLabelId} label="Motion" value={value} onChange={(event) => onChange(event.target.value)}>
-        {MOTION_KINDS.map((motion) => (
-          <MenuItem key={motion} value={motion}>
-            {MOTION_MENU_LABELS[motion]}
-          </MenuItem>
-        ))}
-      </Select>
-      <FormHelperText>
-        Optical flow hands Super Resolution the motion between frames, for steadier detail over time: on the GPU's
-        hardware flow engine (NVOFA) when it starts, otherwise a slower CPU estimator.
-      </FormHelperText>
-    </FormControl>
   );
 }
