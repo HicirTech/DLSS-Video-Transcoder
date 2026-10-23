@@ -15,7 +15,20 @@ import {
 } from "./d3d12.ts";
 import { Win32Event } from "./win32.ts";
 
+export interface AsyncSubmitOptions {
+  device: D3D12Device;
+  queue: D3D12CommandQueue;
+  /** Signalled with the next value by every submit; a consumer that imported it waits on those values. */
+  fence: D3D12Fence;
+  /** How many lists can be in flight at once. */
+  depth: number;
+}
+
 export class AsyncSubmit {
+  readonly depth: number;
+  private readonly device: D3D12Device;
+  private readonly queue: D3D12CommandQueue;
+  private readonly fence: D3D12Fence;
   private readonly allocators: D3D12CommandAllocator[] = [];
   private readonly lists: D3D12GraphicsCommandList[] = [];
   private readonly slotValue: bigint[] = [];
@@ -23,19 +36,24 @@ export class AsyncSubmit {
   private value = 0n;
   private closed = false;
 
-  constructor(
-    device: D3D12Device,
-    private readonly queue: D3D12CommandQueue,
-    private readonly fence: D3D12Fence,
-    readonly depth: number,
-  ) {
-    for (let i = 0; i < depth; i++) {
-      const allocator = device.createCommandAllocator();
-      const list = device.createCommandList(allocator);
-      list.close(); // D3D12 hands back an open list; begin() expects to reset it
-      this.allocators.push(allocator);
-      this.lists.push(list);
-      this.slotValue.push(0n);
+  constructor(options: AsyncSubmitOptions) {
+    this.device = options.device;
+    this.queue = options.queue;
+    this.fence = options.fence;
+    this.depth = options.depth;
+    try {
+      for (let slot = 0; slot < this.depth; slot++) {
+        const allocator = this.device.createCommandAllocator();
+        this.allocators.push(allocator);
+        const list = this.device.createCommandList(allocator);
+        this.lists.push(list);
+        list.close(); // D3D12 hands back an open list; begin() expects to reset it
+        this.slotValue.push(0n);
+      }
+    } catch (error) {
+      // Nothing owns a partly built pool yet, so the slots created so far and the event are released here.
+      this.close();
+      throw error;
     }
   }
 
