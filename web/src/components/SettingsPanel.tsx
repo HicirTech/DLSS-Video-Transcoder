@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { Button, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
 import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
-import { AUTO_GPU_CHOICE, DEFAULT_WARMUP_FRAMES, FRAME_GEN_GPU_CHOICE, type ProbeReport, SETTING_RANGES } from "../../../src/server/api-types";
+import { AUTO_GPU_CHOICE, DEFAULT_WARMUP_FRAMES, FRAME_GEN_GPU_CHOICE, type ProbeAdapter, type ProbeReport, SETTING_RANGES } from "../../../src/server/api-types";
 import { api } from "../api";
 import { errorMessage } from "../errors";
 import { STORAGE_KEY, useSettings } from "../hooks/useSettings";
@@ -28,8 +28,11 @@ export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
   const toast = useToast();
   const [loading, setLoading] = useState(false);
   // Only adapters a job would accept are offered; the probe judged that by the rule jobs apply.
-  const gpus = (probe?.adapters ?? []).filter((a) => a.eligible && a.cudaUuid !== null);
-  const storedIsListed = settings.adapterUuid === null || gpus.some((a) => a.cudaUuid === settings.adapterUuid);
+  const gpus = (probe?.adapters ?? []).filter(
+    (adapter): adapter is ProbeAdapter & { cudaUuid: string } => adapter.eligible && adapter.cudaUuid !== null,
+  );
+  const storedUuid = settings.adapterUuid;
+  const unlistedStoredUuid = storedUuid !== null && !gpus.some((gpu) => gpu.cudaUuid === storedUuid) ? storedUuid : null;
 
   const loadServerDefaults = async (): Promise<void> => {
     setLoading(true);
@@ -57,14 +60,14 @@ export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
               onChange={(event) => update({ adapterUuid: event.target.value === AUTO_GPU ? null : event.target.value })}
             >
               <MenuItem value={AUTO_GPU}>Automatic: {AUTO_GPU_CHOICE}</MenuItem>
-              {gpus.map((a) => (
-                <MenuItem key={a.cudaUuid!} value={a.cudaUuid!}>
-                  {a.name} — CUDA device {a.cudaOrdinal} ({a.cudaUuid})
+              {gpus.map((gpu) => (
+                <MenuItem key={gpu.cudaUuid} value={gpu.cudaUuid}>
+                  {gpu.name} — CUDA device {gpu.cudaOrdinal} ({gpu.cudaUuid})
                 </MenuItem>
               ))}
-              {storedIsListed ? null : (
-                <MenuItem value={settings.adapterUuid!}>
-                  Stored choice {settings.adapterUuid} ({probe ? "not in the last probe" : "run the probe to confirm it is present"})
+              {unlistedStoredUuid === null ? null : (
+                <MenuItem value={unlistedStoredUuid}>
+                  Stored choice {unlistedStoredUuid} ({probe ? "not in the last probe" : "run the probe to confirm it is present"})
                 </MenuItem>
               )}
             </Select>
