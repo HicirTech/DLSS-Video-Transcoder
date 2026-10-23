@@ -87,9 +87,7 @@ async function writeToSink(bytes: Uint8Array): Promise<void> {
 /** Flushes NVENC, closes ffmpeg's stdin and reports how ffmpeg exited. */
 async function finishEncode(): Promise<void> {
   if (stopped || !sink || !proc) return;
-  // Flush anything NVENC still holds before closing the pipe.
-  const tail = enc?.finish();
-  if (tail?.length) await writeToSink(tail);
+  enc?.finish(); // EOS only; zeroReorderDelay leaves nothing to drain.
   sink.end();
   await stderrDrained;
   const code = await proc.exited;
