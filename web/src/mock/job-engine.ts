@@ -3,7 +3,7 @@
  * dependency, so the Bun mock server (web/mock-server.ts) and the browser (`?mock=1`) share it.
  */
 import type { JobRequest, JobStatus, WsEvent } from "../../../src/server/api-types";
-import { CANCELLED_MESSAGE, DEFAULT_ENCODE_SETTINGS, JOB_LOG_LIMIT, jobSteps, resizesFrames, stepsSuffix } from "../../../src/server/api-types";
+import { CANCELLED_MESSAGE, DEFAULT_ENCODE_SETTINGS, jobSteps, resizesFrames, stepsSuffix, trimJobLog } from "../../../src/server/api-types";
 
 export function timestamp(): string {
   return new Date().toISOString();
@@ -183,7 +183,7 @@ export class MockJobEngine {
 
   private appendLog(job: JobStatus, line: string): void {
     job.log.push(line);
-    if (job.log.length > JOB_LOG_LIMIT) job.log.splice(0, job.log.length - JOB_LOG_LIMIT);
+    trimJobLog(job.log);
   }
 
   private emitLog(job: JobStatus, line: string): void {
