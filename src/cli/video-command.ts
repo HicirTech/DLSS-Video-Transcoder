@@ -27,7 +27,7 @@ import {
 import { takesGpuChoice } from "../server/settings-in-use.ts";
 import { validateJobRequest } from "../server/validate.ts";
 import { adapterOption, choiceOption, flag, numberOption, option, positionalArgs, runtimeDirOption } from "./args.ts";
-import { commandSpec, FG_MULTIPLIER_OPTION, QUALITY_OPTION, VIDEO_STEP_OPTS } from "./commands.ts";
+import { commandSpec, FG_MULTIPLIER_OPTION, optionName, QUALITY_OPTION, VIDEO_STEP_OPTS } from "./commands.ts";
 import { stepVersionOption } from "./dlss-version-option.ts";
 import { frameGenSummary, targetFpsOption } from "./fg-command.ts";
 import { interruptSignal } from "./interrupt.ts";
@@ -108,7 +108,7 @@ export function videoRequest(args: string[], runtimeDir: string): JobRequest {
 function refuseOptionsWithoutStep(args: string[], steps: Record<StepKind, boolean>): void {
   for (const step of STEP_KINDS) {
     if (steps[step]) continue;
-    const given = VIDEO_STEP_OPTS[step].map((row) => row.flag.split(/\s+/)[0]!).filter((name) => flag(args, name));
+    const given = VIDEO_STEP_OPTS[step].map(optionName).filter((name) => flag(args, name));
     if (given.length) usageError(`${given.join(", ")} ${given.length === 1 ? "applies" : "apply"} only with --${step}; add --${step} or leave ${given.length === 1 ? "it" : "them"} out`, "video");
   }
 }
