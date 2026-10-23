@@ -1,5 +1,8 @@
 import { createTheme } from "@mui/material/styles";
 
+/** Monospace stack for paths, identifiers, numbers and logs. */
+export const monoFontFamily = "Consolas, 'Cascadia Mono', monospace";
+
 /** Dark, compact theme: every control defaults to its small size. */
 export const appTheme = createTheme({
   palette: {
