@@ -188,6 +188,6 @@ export function formatRate(rate: Rational): string {
   const name = FRAME_GEN_FPS_CHOICES.find((choice) => ratCmp(NAMED_RATES[choice], rate) === 0);
   if (name !== undefined) return name;
   if (rate.den === 1n) return String(rate.num);
-  const approx = Number(rate.num) / Number(rate.den);
+  const approx = ratToNumber(rate);
   return `${approx.toFixed(3).replace(/\.?0+$/, "")} (${rate.num}/${rate.den})`;
 }
