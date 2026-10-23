@@ -16,19 +16,19 @@ const d3d12 = dlopen("d3d12.dll", {
   D3D12GetDebugInterface: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
 });
 
-export const IID_ID3D12Device = guid("{189819f1-1db6-4b57-be54-1821339b85f7}");
-export const IID_ID3D12CommandQueue = guid("{0ec870a6-5d7e-4c22-8cfc-5baae07616ed}");
-export const IID_ID3D12CommandAllocator = guid("{6102dee4-af59-4b09-b999-b44d73f09b24}");
-export const IID_ID3D12GraphicsCommandList = guid("{5b160d0f-ac1b-4185-8ba8-b3ae42a5a455}");
-export const IID_ID3D12Fence = guid("{0a753dcf-c4d8-4b91-adf6-be5a60d95a76}");
-export const IID_ID3D12Resource = guid("{696442be-a72e-4059-bc79-5b5c98040fad}");
-export const IID_ID3D12Debug = guid("{344488b7-6846-474b-b989-f027448245e0}");
+const IID_ID3D12Device = guid("{189819f1-1db6-4b57-be54-1821339b85f7}");
+const IID_ID3D12CommandQueue = guid("{0ec870a6-5d7e-4c22-8cfc-5baae07616ed}");
+const IID_ID3D12CommandAllocator = guid("{6102dee4-af59-4b09-b999-b44d73f09b24}");
+const IID_ID3D12GraphicsCommandList = guid("{5b160d0f-ac1b-4185-8ba8-b3ae42a5a455}");
+const IID_ID3D12Fence = guid("{0a753dcf-c4d8-4b91-adf6-be5a60d95a76}");
+const IID_ID3D12Resource = guid("{696442be-a72e-4059-bc79-5b5c98040fad}");
+const IID_ID3D12Debug = guid("{344488b7-6846-474b-b989-f027448245e0}");
 
-export const D3D_FEATURE_LEVEL_11_0 = 0xb000;
+const D3D_FEATURE_LEVEL_11_0 = 0xb000;
 
-export const D3D12_COMMAND_LIST_TYPE_DIRECT = 0;
+const D3D12_COMMAND_LIST_TYPE_DIRECT = 0;
 
-export const D3D12_HEAP_TYPE_DEFAULT = 1;
+const D3D12_HEAP_TYPE_DEFAULT = 1;
 export const D3D12_HEAP_TYPE_UPLOAD = 2;
 export const D3D12_HEAP_TYPE_READBACK = 3;
 
@@ -54,7 +54,7 @@ export const D3D12_RESOURCE_STATE_UNORDERED_ACCESS = 0x8;
 export const D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE = 0x40;
 export const D3D12_RESOURCE_STATE_COPY_DEST = 0x400;
 export const D3D12_RESOURCE_STATE_COPY_SOURCE = 0x800;
-export const D3D12_RESOURCE_STATE_GENERIC_READ = 0xac3;
+const D3D12_RESOURCE_STATE_GENERIC_READ = 0xac3;
 
 const DXGI_FORMAT_UNKNOWN = 0;
 export const DXGI_FORMAT_R8G8B8A8_UNORM = 28;
