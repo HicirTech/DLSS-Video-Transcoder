@@ -99,7 +99,7 @@ const STEP_OPTION_NOTE = STEP_KINDS.map((step) => `${VIDEO_STEP_OPTS[step].map(o
 export const RUNTIME_OPT: OptionSpec = { flag: "--runtime DIR", desc: "runtime folder holding the NGX DLLs", def: "<repo>/runtime" };
 export const ADAPTER_OPT: OptionSpec = { flag: "--adapter N", desc: `GPU adapter index as \`probe\` listed it in this session (DXGI indices can change between runs); the adapter must have a CUDA device. auto = ${AUTO_GPU_CHOICE}`, def: "auto" };
 
-export const COMMANDS: readonly CommandSpec[] = [
+export const COMMANDS = [
   {
     name: "probe",
     summary: "Inspect the GPU, driver, NGX core and runtime folder; report whether neural rendering is ready.",
@@ -217,7 +217,10 @@ export const COMMANDS: readonly CommandSpec[] = [
     usage: "bun run src/cli.ts help [command]",
     options: [],
   },
-];
+] as const satisfies readonly CommandSpec[];
+
+/** A command the table defines; the CLI's dispatch table covers all of them except help. */
+export type CommandName = (typeof COMMANDS)[number]["name"];
 
 /**
  * "1.00=DLAA, 1.50=MaxQuality, 1.72=Balanced, 2.00=MaxPerf, 3.00=UltraPerformance": the --factor help
@@ -237,5 +240,5 @@ function containersThatAudio(handling: "copy" | "aac"): string {
 
 /** The table entry of a command whose name is known to be in COMMANDS. */
 export function commandSpec(name: string): CommandSpec {
-  return COMMANDS.find((c) => c.name === name)!;
+  return (COMMANDS as readonly CommandSpec[]).find((c) => c.name === name)!;
 }
