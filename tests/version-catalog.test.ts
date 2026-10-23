@@ -1,4 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { expect, test } from "bun:test";
 import { parseVersionInfo, readVersionInfo } from "../src/native/version-info.ts";
 import {
@@ -142,6 +144,29 @@ test("FEATURES map the four DLSS features to the correct NGX ids and filenames",
   expect(byKey.fg).toMatchObject({ id: 11, dllName: "nvngx_dlssg.dll" });
   expect(byKey.rr).toMatchObject({ id: 13, dllName: "nvngx_dlssd.dll" });
   expect(byKey.nr).toMatchObject({ id: 18, dllName: "nvngx_dlssnr.dll" });
+});
+
+test("buildRuntimeCatalog reads a DLL's version again once the file changes", () => {
+  const runtimeDir = mkdtempSync(join(tmpdir(), "catalog-cache-"));
+  const dll = join(runtimeDir, "dlss", "nvngx_dlss.dll");
+  const srVersion = () => buildRuntimeCatalog(runtimeDir, join(runtimeDir, "no-swapper")).features.find((f) => f.key === "sr")!.versions[0]!.version;
+  try {
+    mkdirSync(dirname(dll), { recursive: true });
+    const original = buildSyntheticPe();
+    writeFileSync(dll, original);
+    expect(srVersion()).toBe("310.7.129.0");
+    expect(srVersion()).toBe("310.7.129.0");
+
+    // A newer build: one byte longer, with fileVersionLS (the synthetic blob's FixedFileInfo + 12) raised to 130.0.
+    const newer = new Uint8Array(original.length + 1);
+    newer.set(original);
+    new DataView(newer.buffer).setUint32(0x1000 + 0x60 + 16 + 12, 0x00820000, true);
+    writeFileSync(dll, newer);
+
+    expect(srVersion()).toBe("310.7.130.0");
+  } finally {
+    rmSync(runtimeDir, { recursive: true, force: true });
+  }
 });
 
 test("buildRuntimeCatalog is total and returns all four features", () => {
