@@ -9,7 +9,7 @@ import { ptr, toArrayBuffer, type Pointer } from "bun:ffi";
 /** Bun represents NULL as 0 or null depending on the call; normalise to a number. */
 export function asPtr(value: Pointer | number | bigint | null | undefined): number {
   if (value === null || value === undefined) return 0;
-  return typeof value === "bigint" ? Number(value) : Number(value);
+  return Number(value);
 }
 
 /** Format a 32-bit value the way Windows tools print HRESULTs and NGX results. */
