@@ -12,7 +12,7 @@ import { createEngineChain } from "./engine.ts";
 import type { ProgressReporter } from "./frame-progress.ts";
 import { describeGpu, openGpu } from "./gpu.ts";
 import { defaultOutputPath } from "./output-path.ts";
-import { attachAlpha, resizePlane, resizeRgba, splitAlpha } from "./resize.ts";
+import { resizePlane, resizeRgba } from "./resize.ts";
 
 export interface ImageJobOptions {
   input: string;
@@ -50,6 +50,30 @@ export interface ImageJobResult {
 }
 
 /**
+ * The alpha plane of an RGBA8 frame, and a copy of the frame with alpha forced
+ * to 255; the inverse is attachAlpha. `rgba` is not modified. Why a still is
+ * split around the neural engines is enhanceStill's to say.
+ */
+export function splitAlpha(rgba: Uint8Array): { colour: Uint8Array; alpha: Uint8Array } {
+  const pixels = rgba.byteLength >> 2;
+  const colour = new Uint8Array(rgba);
+  const alpha = new Uint8Array(pixels);
+  for (let i = 0, a = 3; i < pixels; i++, a += 4) {
+    alpha[i] = rgba[a]!;
+    colour[a] = 255;
+  }
+  return { colour, alpha };
+}
+
+/** Write `alpha` (one byte per pixel, the frame's own size) into the alpha channel of `rgba`, in place. */
+export function attachAlpha(rgba: Uint8Array, alpha: Uint8Array): void {
+  if (rgba.byteLength !== alpha.byteLength * 4) {
+    throw new Error(`attachAlpha: ${alpha.byteLength} alpha bytes do not match ${rgba.byteLength} RGBA bytes`);
+  }
+  for (let i = 0, a = 3; i < alpha.byteLength; i++, a += 4) rgba[a] = alpha[i]!;
+}
+
+/**
  * Run a still through `enhance` on its colour only, then hand the source alpha
  * back at the output's size. The neural engines are defined on colour: DLSS SR
  * resamples a fourth channel like colour and feature 18 writes 255 into it
@@ -62,7 +86,7 @@ export interface ImageJobResult {
 export async function enhanceStill(source: RgbaImage, enhance: (colour: Uint8Array) => RgbaImage | Promise<RgbaImage>): Promise<RgbaImage> {
   const { colour, alpha } = splitAlpha(source.rgba);
   const out = await enhance(colour);
-  attachAlpha(out.rgba, resizePlane(alpha, source.width, source.height, out.width, out.height));
+  attachAlpha(out.rgba, resizePlane(alpha, source, out));
   return out;
 }
 
@@ -119,7 +143,7 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
     });
     try {
       result = await enhanceStill(decoded, async (colour) => {
-        const working = upscaling ? colour : resizeRgba(colour, decoded.width, decoded.height, target.width, target.height);
+        const working = upscaling ? colour : resizeRgba(colour, decoded, target);
         const rgba = await runStillPasses(steps.length > 0, options.warmupFrames ?? DEFAULT_WARMUP_FRAMES, async (reset, total) => {
           // Each pass is synchronous FFI and never yields on its own.
           await throwIfAbortedAfterYield(options.signal);

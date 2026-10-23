@@ -4,8 +4,8 @@
  * measured ones do to alpha — DLSS SR resamples it, feature 18 writes 255.
  */
 import { describe, expect, test } from "bun:test";
-import { enhanceStill } from "../src/pipeline/image.ts";
-import { attachAlpha, resizePlane, resizeRgba, splitAlpha } from "../src/pipeline/resize.ts";
+import { attachAlpha, enhanceStill, splitAlpha } from "../src/pipeline/image.ts";
+import { resizePlane, resizeRgba } from "../src/pipeline/resize.ts";
 
 /** A 4x3 RGBA frame whose colour and alpha are unrelated, so a mix-up shows. */
 function frame(): { rgba: Uint8Array; width: number; height: number } {
@@ -51,8 +51,8 @@ describe("resizePlane", () => {
     const src = frame();
     const { alpha } = splitAlpha(src.rgba);
     for (const [w, h] of [[8, 6], [3, 2], [7, 5], [4, 3]] as const) {
-      const viaRgba = resizeRgba(src.rgba, src.width, src.height, w, h);
-      const viaPlane = resizePlane(alpha, src.width, src.height, w, h);
+      const viaRgba = resizeRgba(src.rgba, src, { width: w, height: h });
+      const viaPlane = resizePlane(alpha, src, { width: w, height: h });
       expect(viaPlane.byteLength).toBe(w * h);
       for (let i = 0; i < w * h; i++) expect(viaPlane[i]).toBe(viaRgba[i * 4 + 3]);
     }
@@ -60,7 +60,7 @@ describe("resizePlane", () => {
 
   test("returns the plane itself at 1:1", () => {
     const alpha = new Uint8Array([1, 2, 3, 4]);
-    expect(resizePlane(alpha, 2, 2, 2, 2)).toBe(alpha);
+    expect(resizePlane(alpha, { width: 2, height: 2 }, { width: 2, height: 2 })).toBe(alpha);
   });
 });
 
@@ -79,8 +79,8 @@ describe("enhanceStill", () => {
 
   test("an upscaling engine gets alpha back at the output size, resized like the colour would be", async () => {
     const src = frame();
-    const out = await enhanceStill(src, (colour) => ({ rgba: resizeRgba(colour, src.width, src.height, 8, 6), width: 8, height: 6 }));
-    const expected = resizePlane(splitAlpha(src.rgba).alpha, src.width, src.height, 8, 6);
+    const out = await enhanceStill(src, (colour) => ({ rgba: resizeRgba(colour, src, { width: 8, height: 6 }), width: 8, height: 6 }));
+    const expected = resizePlane(splitAlpha(src.rgba).alpha, src, { width: 8, height: 6 });
     expect(splitAlpha(out.rgba).alpha).toEqual(expected);
     expect(out.width).toBe(8);
   });
