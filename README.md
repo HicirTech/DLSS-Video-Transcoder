@@ -74,6 +74,9 @@ subfolder.
 - **`nr`** — `--intensity F` (1, 0–2; no further effect above 1), `--style N` (0; Default / Natural / Cinematic),
   `--local-tone F` (1, 0–2), `--local-structure F` (1, 0–2), `--auto-mask`, `--warmup N` (4, 0–64; as for
   `sr`). `--preset`, `--skin-structure` and `--ui-correction` are accepted but ignored by `nvngx_dlssnr.dll` 310.8.2.0.
+  `--stack N` (1, whole number 1–4) runs Neural Rendering N times, each pass on the previous pass's output,
+  for a stronger look than `--intensity` reaches; each pass adds about 1.1 GB of GPU memory at 4K and its
+  time. Writes `<input>.nr.png` by default, `<input>.nrx3.png` with `--stack 3`.
 - **`video`** — one switch per step, run in this order whatever order they are given in: `--sr` upscales
   every frame with DLSS Super Resolution, `--nr` enhances every frame at the output size with DLSS Neural
   Rendering, `--fg` interpolates the result with DLSS Frame Generation. With none, the video is only
@@ -81,11 +84,13 @@ subfolder.
   it (1–8, at most 8192 pixels per side; 1.5 by default); without it, the decode resizes to it with lanczos
   (0.25–8; default: the source size). Each step's options apply only with its switch, and the command
   refuses them otherwise: `--motion none|flow` (none; flow gives Super Resolution motion vectors) and
-  `--sr-version VER` with `--sr`; the `nr` look options and `--nr-version VER` with `--nr`; `--fps`,
+  `--sr-version VER` with `--sr`; the `nr` look options, `--stack N` and `--nr-version VER` with `--nr`; `--fps`,
   `--multiplier`, `--fg-path auto|native|cascade` (`fg`'s `--engine`) and `--fg-version VER` with `--fg`.
   `--codec NAME` and `--quality N` (as for `fg`), `--container mp4|mkv|mov` (mp4; `--fg` writes mp4
-  only), `--no-audio`. Writes `<input>.<steps>.<container>` by default, e.g. `clip.sr-nr-fg.mp4`, or
-  `clip.resize.mp4` and `clip.copy.mp4` without a step. The command line goes through the same request
+  only), `--no-audio`. Writes `<input>.<steps>.<container>` by default, e.g. `clip.sr-nr-fg.mp4` (or
+  `clip.sr-nrx3-fg.mp4` with `--stack 3`), or `clip.resize.mp4` and `clip.copy.mp4` without a step. A
+  stacked `--nr` alone encodes through the threaded pipeline, not the GPU-resident NVENC path a single pass
+  takes. The command line goes through the same request
   validation as `POST /api/jobs`.
 - **`fg`** — `--fps RATE` (a named rate from 23.976 to 480, or an exact `num/den`; default: source fps
   × `--multiplier`), `--multiplier N` (2, whole number 1–16; used when `--fps` is absent),
@@ -132,7 +137,7 @@ the job does not use says why: with Super Resolution on, the resize gives way to
 Resolution sets.
 
 **Image tab** — PNG input only; Super Resolution (only enlarges, to at most 8192 pixels per side; the
-source size runs DLAA) and Neural Rendering (look controls), each with its own DLSS version; a resize
+source size runs DLAA) and Neural Rendering (look controls, and a stack of 1–4 passes), each with its own DLSS version; a resize
 when Super Resolution is off; before/after compare.  
 **Video tab** — the same two steps, plus optical-flow motion for Super Resolution, then Frame
 Generation to 23.976–480 fps or a multiple of the source rate (auto / native / cascade) with its own DLSS
@@ -173,7 +178,8 @@ Same-origin; JSON requests and responses unless a row says otherwise:
 | `WS /ws` | server→client `WsEvent` stream (`hello` / `job` / `log`) |
 
 A job request carries one object per step it runs — `superResolution`, `neuralRendering` and `frameGen`
-(video only), each with its settings and an optional DLL version folder — plus `resize` (only without
+(video only), each with its settings and an optional DLL version folder, and `neuralRendering.stack`
+(1–4, default 1) for how many passes Neural Rendering runs — plus `resize` (only without
 Super Resolution), `encode` (video), `warmupFrames` (image) and `adapterUuid`. The steps run in that
 order; a request without one re-encodes the source. The fields of the one-engine API (`engine`, `motion`,
 `scale`, `settings`, `dllDir`) are refused by name. An `output` path must be absolute and inside the
