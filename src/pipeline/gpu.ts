@@ -26,8 +26,6 @@ export interface GpuOptions {
 }
 
 export interface GpuSession {
-  readonly factory: DxgiFactory;
-  readonly adapters: DxgiAdapter[];
   readonly adapter: DxgiAdapter;
   readonly device: D3D12Device;
   readonly gpu: GpuContext;
@@ -211,8 +209,6 @@ export function openGpu(options: GpuOptions = {}): GpuSession {
   }
   let closed = false;
   return {
-    factory,
-    adapters,
     adapter,
     device,
     gpu,
