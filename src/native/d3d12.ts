@@ -533,3 +533,14 @@ export function linearLayout(width: number, height: number, format: number): { r
   const rowPitch = align(rowBytes, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
   return { rowBytes, rowPitch, totalBytes: align(rowPitch * height, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT) };
 }
+
+/** Copy tightly packed pixel rows into pitched buffer memory laid out by linearLayout. */
+export function packRows(target: Uint8Array, pixels: Uint8Array, layout: { rowBytes: number; rowPitch: number }, height: number): void {
+  if (layout.rowPitch === layout.rowBytes) {
+    target.set(pixels);
+    return;
+  }
+  for (let row = 0; row < height; row++) {
+    target.set(pixels.subarray(row * layout.rowBytes, (row + 1) * layout.rowBytes), row * layout.rowPitch);
+  }
+}
