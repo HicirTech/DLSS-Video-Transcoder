@@ -9,6 +9,7 @@ import {
   DEFAULT_FRAME_GEN_MULTIPLIER,
   DEFAULT_FRAME_GEN_STEP,
   DEFAULT_NR_SETTINGS,
+  DEFAULT_NR_STACK,
   DEFAULT_SCALE_SETTINGS,
   DEFAULT_SR_STEP,
   DEFAULT_WARMUP_FRAMES,
@@ -55,6 +56,8 @@ export interface StoredSettings {
   imageSteps: Record<ImageStepKind, boolean>;
   superResolution: StoredSuperResolution;
   neuralRendering: NrSettings;
+  /** How many times Neural Rendering runs on each frame (NeuralRenderingStep.stack). */
+  nrStack: number;
   frameGen: StoredFrameGen;
   /** The resize a job without Super Resolution runs. */
   resize: ScaleSettings;
@@ -78,6 +81,7 @@ export function defaultSettings(): StoredSettings {
     imageSteps: { sr: false, nr: true },
     superResolution: { scale: { ...DEFAULT_SR_STEP.scale }, motion: DEFAULT_SR_STEP.motion },
     neuralRendering: { ...DEFAULT_NR_SETTINGS },
+    nrStack: DEFAULT_NR_STACK,
     frameGen: { rateBy: "fps", targetFps: DEFAULT_FRAME_GEN_STEP.targetFps, multiplier: DEFAULT_FRAME_GEN_MULTIPLIER, engine: DEFAULT_FRAME_GEN_STEP.engine },
     resize: { ...DEFAULT_SCALE_SETTINGS },
     encode: { ...DEFAULT_ENCODE_SETTINGS },
@@ -175,6 +179,7 @@ function repair(parts: { [K in keyof StoredSettings]?: unknown }): StoredSetting
     imageSteps: mergeKnown(defaults.imageSteps, parts.imageSteps),
     superResolution: repairSuperResolution(parts.superResolution, defaults.superResolution),
     neuralRendering: repairNeuralRendering(parts.neuralRendering, defaults.neuralRendering),
+    nrStack: clamp(parts.nrStack, "stack", defaults.nrStack),
     frameGen: repairFrameGen(parts.frameGen, defaults.frameGen),
     resize: repairScale(parts.resize, defaults.resize),
     encode: repairEncode(parts.encode, defaults.encode),
@@ -248,6 +253,7 @@ export function withServerDefaults(current: StoredSettings, defaults: SettingsDe
     imageSteps: current.imageSteps,
     superResolution: defaults.superResolution,
     neuralRendering: defaults.neuralRendering,
+    nrStack: defaults.nrStack,
     frameGen: {
       rateBy: defaults.frameGen.targetFps !== undefined ? "fps" : "multiplier",
       targetFps: defaults.frameGen.targetFps,

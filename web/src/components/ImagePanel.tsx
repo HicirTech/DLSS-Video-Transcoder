@@ -15,6 +15,7 @@ import { JobCard } from "./JobCard";
 import { InputPathField, OutputPathField } from "./JobFormFields";
 import { MediaSummary } from "./MediaSummary";
 import { NrSettingsEditor } from "./NrSettingsEditor";
+import { NrStackField } from "./NrStackField";
 import { PlanLine } from "./PlanLine";
 import { ResizeField } from "./ResizeField";
 import { Section } from "./Section";
@@ -43,7 +44,7 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
   const source = info?.kind === "image" ? info : null;
   // A still has no frames to generate between.
   const steps = { ...settings.imageSteps, fg: false };
-  const plan = planJob({ kind: "image", input, source, steps, srScale: settings.superResolution.scale, resize: settings.resize, container: settings.encode.container });
+  const plan = planJob({ kind: "image", input, source, steps, srScale: settings.superResolution.scale, resize: settings.resize, nrStack: settings.nrStack, container: settings.encode.container });
   const unused = unusedSettings(steps);
   const outputSize = plan.outputSize ? formatSize(plan.outputSize) : null;
   // Image jobs read PNG only: a file GET /api/media found to be something else would fail the job.
@@ -93,7 +94,10 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
           >
             <Stack spacing={2}>
               <NrSettingsEditor value={settings.neuralRendering} onChange={(neuralRendering) => update({ neuralRendering })} />
-              <VersionSelect feature="nr" value={dllDirs.nr} onChange={setDllDir("nr")} />
+              <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
+                <NrStackField value={settings.nrStack} onChange={(nrStack) => update({ nrStack })} />
+                <VersionSelect feature="nr" value={dllDirs.nr} onChange={setDllDir("nr")} />
+              </Stack>
             </Stack>
           </StepCard>
         </Stack>

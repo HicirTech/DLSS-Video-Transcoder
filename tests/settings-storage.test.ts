@@ -4,7 +4,7 @@
  * current default.
  */
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, DEFAULT_SR_STEP, type SettingsDefaults } from "../src/server/api-types.ts";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_NR_STACK, DEFAULT_SCALE_SETTINGS, DEFAULT_SR_STEP, type SettingsDefaults } from "../src/server/api-types.ts";
 import { defaultSettings, loadSavedSettings, withServerDefaults } from "../web/src/stored-settings.ts";
 
 /** What a build with one engine per job saved: its NR settings carried the warm-up, its one scale served every engine. */
@@ -25,8 +25,14 @@ describe("loadSavedSettings", () => {
   });
 
   test("a v3 copy is read back as it was saved", () => {
-    const saved = { ...defaultSettings(), videoSteps: { sr: true, nr: false, fg: true }, warmupFrames: 9 };
+    const saved = { ...defaultSettings(), videoSteps: { sr: true, nr: false, fg: true }, warmupFrames: 9, nrStack: 3 };
     expect(loadSavedSettings({ ...NOTHING, v3: JSON.stringify(saved) })).toEqual(saved);
+  });
+
+  test("a v3 copy saved before Neural Rendering could be stacked runs it once", () => {
+    const older: Record<string, unknown> = { ...defaultSettings(), warmupFrames: 9 };
+    delete older.nrStack;
+    expect(loadSavedSettings({ ...NOTHING, v3: JSON.stringify(older) }).nrStack).toBe(DEFAULT_NR_STACK);
   });
 
   test("a v2 copy's scale becomes the resize and Super Resolution's size, and its warm-up moves out of the look settings", () => {
@@ -65,11 +71,12 @@ describe("loadSavedSettings", () => {
   test("a malformed or out-of-range value falls back or is held to its range", () => {
     const settings = loadSavedSettings({
       ...NOTHING,
-      v3: JSON.stringify({ videoSteps: { sr: "yes" }, frameGen: { rateBy: "speed", multiplier: 99, targetFps: "61" }, warmupFrames: -3, adapterUuid: "" }),
+      v3: JSON.stringify({ videoSteps: { sr: "yes" }, frameGen: { rateBy: "speed", multiplier: 99, targetFps: "61" }, warmupFrames: -3, nrStack: 9, adapterUuid: "" }),
     });
     expect(settings.videoSteps).toEqual(defaultSettings().videoSteps);
     expect(settings.frameGen).toEqual({ ...defaultSettings().frameGen, multiplier: 16 });
     expect(settings.warmupFrames).toBe(0);
+    expect(settings.nrStack).toBe(4);
     expect(settings.adapterUuid).toBeNull();
     expect(loadSavedSettings({ ...NOTHING, v3: "{not json" })).toEqual(defaultSettings());
   });
@@ -101,6 +108,7 @@ describe("withServerDefaults", () => {
     expect(merged.resize).toEqual(defaults.resize);
     expect(merged.superResolution).toEqual({ scale: defaults.superResolution.scale, motion: "flow" });
     expect(merged.neuralRendering.style).toBe(1);
+    expect(merged.nrStack).toBe(2);
     expect(merged.frameGen).toMatchObject({ rateBy: "multiplier", multiplier: 3, engine: "cascade" });
     expect(merged.encode.quality).toBe(25);
     expect(merged.warmupFrames).toBe(4);

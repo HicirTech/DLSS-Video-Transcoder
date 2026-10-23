@@ -25,6 +25,8 @@ export interface PlanInput {
   steps: Record<StepKind, boolean>;
   srScale: ScaleSettings;
   resize: ScaleSettings;
+  /** How many times Neural Rendering runs on each frame (NeuralRenderingStep.stack); read only when it runs. */
+  nrStack: number;
   /** The container a video job writes, unless frame generation fixes it; an image job writes PNG. */
   container: EncodeSettings["container"];
 }
@@ -32,6 +34,8 @@ export interface PlanInput {
 export interface JobPlan {
   /** The steps that run, in their order. */
   steps: StepKind[];
+  /** How many times Neural Rendering runs on each frame when it is among the steps. */
+  nrStack: number;
   /** The size the job writes, or null while the source's size is unknown. */
   outputSize: FrameSize | null;
   /** Why Super Resolution cannot write outputSize, when it runs and cannot: the job would fail on it. */
@@ -48,7 +52,7 @@ export function planJob(plan: PlanInput): JobPlan {
   const extension = plan.kind === "image" ? "png" : videoContainer(plan.steps, plan.container);
   const input = plan.input.trim();
   const defaultOutputName = input ? `${stemOf(input)}.${stepsSuffix(steps, resized)}.${extension}` : null;
-  return { steps, outputSize, srProblem, defaultOutputName };
+  return { steps, nrStack: plan.nrStack, outputSize, srProblem, defaultOutputName };
 }
 
 /** The container a video job writes: frame generation fixes it to FRAME_GEN_CONTAINER, otherwise the stored choice. */
@@ -107,7 +111,7 @@ export function planStages({ plan, source, srScale, resize, frameGenTarget, writ
   const stages = [source ? `Decode ${formatSize(source)}` : "Decode"];
   if (plan.steps.includes("sr")) stages.push(`${STEP_TITLES.sr} to ${size ?? scaleText(srScale)}`);
   else if (resize.mode !== "none") stages.push(`Resize to ${size ?? scaleText(resize)}`);
-  if (plan.steps.includes("nr")) stages.push(STEP_TITLES.nr);
+  if (plan.steps.includes("nr")) stages.push(plan.nrStack > 1 ? `${STEP_TITLES.nr} ×${plan.nrStack}` : STEP_TITLES.nr);
   if (plan.steps.includes("fg")) stages.push(`${STEP_TITLES.fg} to ${frameGenTarget}`);
   stages.push(writer);
   return stages;

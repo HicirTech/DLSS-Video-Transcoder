@@ -21,7 +21,7 @@ export function videoRequest(form: FormFields, settings: StoredSettings): JobReq
   const steps = settings.videoSteps;
   const request: JobRequest = { kind: "video", input: form.input.trim() };
   if (steps.sr) request.superResolution = { scale: settings.superResolution.scale, motion: settings.superResolution.motion, ...dllDirOf(form, "sr") };
-  if (steps.nr) request.neuralRendering = { settings: settings.neuralRendering, ...dllDirOf(form, "nr") };
+  if (steps.nr) request.neuralRendering = { settings: settings.neuralRendering, stack: settings.nrStack, ...dllDirOf(form, "nr") };
   if (steps.fg) request.frameGen = { ...rateFields(settings.frameGen), engine: settings.frameGen.engine, ...dllDirOf(form, "fg") };
   if (!steps.sr && settings.resize.mode !== "none") request.resize = settings.resize;
   // Frame generation writes one container; the stored choice comes back when it is switched off.
@@ -37,7 +37,7 @@ export function imageRequest(form: FormFields, settings: StoredSettings): JobReq
   const request: JobRequest = { kind: "image", input: form.input.trim(), warmupFrames: settings.warmupFrames };
   // A still has no motion between frames, so Super Resolution gets no motion setting.
   if (steps.sr) request.superResolution = { scale: settings.superResolution.scale, ...dllDirOf(form, "sr") };
-  if (steps.nr) request.neuralRendering = { settings: settings.neuralRendering, ...dllDirOf(form, "nr") };
+  if (steps.nr) request.neuralRendering = { settings: settings.neuralRendering, stack: settings.nrStack, ...dllDirOf(form, "nr") };
   if (!steps.sr && settings.resize.mode !== "none") request.resize = settings.resize;
   if (settings.adapterUuid) request.adapterUuid = settings.adapterUuid;
   if (form.output.trim() !== "") request.output = form.output.trim();

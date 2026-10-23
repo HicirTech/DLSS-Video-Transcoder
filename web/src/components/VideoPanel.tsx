@@ -17,6 +17,7 @@ import { JobCard } from "./JobCard";
 import { InputPathField, OutputPathField } from "./JobFormFields";
 import { MediaSummary } from "./MediaSummary";
 import { NrSettingsEditor } from "./NrSettingsEditor";
+import { NrStackField } from "./NrStackField";
 import { PlanLine } from "./PlanLine";
 import { ResizeField } from "./ResizeField";
 import { Mono } from "./Mono";
@@ -51,7 +52,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
   const info = media.status === "ready" ? media.info : null;
   const source = info?.kind === "video" ? info : null;
   const steps = settings.videoSteps;
-  const plan = planJob({ kind: "video", input, source, steps, srScale: settings.superResolution.scale, resize: settings.resize, container: settings.encode.container });
+  const plan = planJob({ kind: "video", input, source, steps, srScale: settings.superResolution.scale, resize: settings.resize, nrStack: settings.nrStack, container: settings.encode.container });
   const unused = unusedSettings(steps);
   const sourceFps = source ? rateValue(source.nominalFps) : null;
   const outputFps = frameGenOutputFps(settings.frameGen, source?.nominalFps ?? null);
@@ -111,7 +112,10 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
           >
             <Stack spacing={2}>
               <NrSettingsEditor value={settings.neuralRendering} onChange={(neuralRendering) => update({ neuralRendering })} />
-              <VersionSelect feature="nr" value={dllDirs.nr} onChange={setDllDir("nr")} />
+              <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
+                <NrStackField value={settings.nrStack} onChange={(nrStack) => update({ nrStack })} />
+                <VersionSelect feature="nr" value={dllDirs.nr} onChange={setDllDir("nr")} />
+              </Stack>
             </Stack>
           </StepCard>
 

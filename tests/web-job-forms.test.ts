@@ -58,10 +58,12 @@ describe("videoRequest", () => {
       videoSteps: { sr: true, nr: true, fg: false },
       superResolution: { ...defaultSettings().superResolution, motion: "flow" },
       neuralRendering: { ...defaultSettings().neuralRendering, style: 2 },
+      nrStack: 3,
     });
     const request = videoRequest({ ...FORM, output: " C:\\out\\x.mp4 ", dllDirs: { sr: "C:\\dlss\\310", nr: "", fg: "C:\\dlssg\\310" } }, stored);
     expect(request.superResolution?.motion).toBe("flow");
     expect(request.neuralRendering?.settings.style).toBe(2);
+    expect(request.neuralRendering?.stack).toBe(3);
     expect(request.superResolution?.dllDir).toBe("C:\\dlss\\310");
     expect(request.neuralRendering).not.toHaveProperty("dllDir");
     expect(request.frameGen).toBeUndefined();
@@ -73,18 +75,19 @@ describe("videoRequest", () => {
 describe("imageRequest", () => {
   test("every combination of the two switches is a request the API accepts, with no motion and the warm-up passes", () => {
     for (const { sr, nr } of SWITCHES.filter((steps) => !steps.fg)) {
-      const request = imageRequest({ ...FORM, input: "C:\\stills\\a.png" }, settingsWith({ imageSteps: { sr, nr }, superResolution: { ...defaultSettings().superResolution, motion: "flow" }, warmupFrames: 6 }));
+      const request = imageRequest({ ...FORM, input: "C:\\stills\\a.png" }, settingsWith({ imageSteps: { sr, nr }, superResolution: { ...defaultSettings().superResolution, motion: "flow" }, warmupFrames: 6, nrStack: 2 }));
       expect(validateJobRequest(request), JSON.stringify({ sr, nr })).toBeNull();
       expect(request.superResolution?.motion).toBeUndefined();
       expect(request.warmupFrames).toBe(6);
+      expect(request.neuralRendering?.stack).toBe(nr ? 2 : undefined);
     }
   });
 });
 
 describe("planJob", () => {
   const steps = (on: Partial<Record<StepKind, boolean>>) => ({ sr: false, nr: false, fg: false, ...on });
-  const plan = (kind: "image" | "video", on: Partial<Record<StepKind, boolean>>, source: { width: number; height: number } | null) =>
-    planJob({ kind, input: "C:\\clips\\take.2.mov", source, steps: steps(on), srScale: { ...DEFAULT_SCALE_SETTINGS, mode: "factor", factor: 1.5 }, resize: DEFAULT_SCALE_SETTINGS, container: "mkv" });
+  const plan = (kind: "image" | "video", on: Partial<Record<StepKind, boolean>>, source: { width: number; height: number } | null, nrStack = 1) =>
+    planJob({ kind, input: "C:\\clips\\take.2.mov", source, steps: steps(on), srScale: { ...DEFAULT_SCALE_SETTINGS, mode: "factor", factor: 1.5 }, resize: DEFAULT_SCALE_SETTINGS, nrStack, container: "mkv" });
 
   test("sizes the output as the jobs do: a video's sides even, a still's as they come", () => {
     expect(plan("video", { sr: true }, { width: 1281, height: 721 }).outputSize).toEqual({ width: 1922, height: 1082 });
@@ -101,7 +104,7 @@ describe("planJob", () => {
   });
 
   test("says when Super Resolution cannot write the size, before the job is sent", () => {
-    const shrink = planJob({ kind: "video", input: "C:\\a.mp4", source: { width: 3840, height: 2160 }, steps: steps({ sr: true }), srScale: { ...DEFAULT_SCALE_SETTINGS, mode: "size", width: 1920, height: 1080 }, resize: DEFAULT_SCALE_SETTINGS, container: "mp4" });
+    const shrink = planJob({ kind: "video", input: "C:\\a.mp4", source: { width: 3840, height: 2160 }, steps: steps({ sr: true }), srScale: { ...DEFAULT_SCALE_SETTINGS, mode: "size", width: 1920, height: 1080 }, resize: DEFAULT_SCALE_SETTINGS, nrStack: 1, container: "mp4" });
     expect(shrink.srProblem).toMatch(/^DLSS Super Resolution only enlarges/);
     expect(plan("video", { sr: true }, { width: 1280, height: 720 }).srProblem).toBeNull();
   });
@@ -115,6 +118,11 @@ describe("planJob", () => {
       "Frame generation to 60 fps",
       "H.264 in MP4",
     ]);
+  });
+
+  test("the plan line counts a stacked Neural Rendering's passes", () => {
+    const planned = plan("image", { nr: true }, { width: 800, height: 600 }, 3);
+    expect(planStages({ plan: planned, source: { width: 800, height: 600 }, srScale: DEFAULT_SCALE_SETTINGS, resize: DEFAULT_SCALE_SETTINGS, frameGenTarget: "", writer: "PNG" })).toEqual(["Decode 800×600", "Neural Rendering ×3", "PNG"]);
   });
 });
 
