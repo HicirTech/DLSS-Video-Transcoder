@@ -28,7 +28,7 @@ export function FeaturesTable({ features }: { features: ProbeFeature[] }) {
                 <TableCell>{feature.id}</TableCell>
                 <TableCell sx={{ fontWeight: highlight ? 600 : 400 }}>{feature.name}</TableCell>
                 <TableCell>
-                  <SupportChip support={feature.support} />
+                  <SupportChip label={feature.support} level={feature.supportLevel} />
                 </TableCell>
                 <TableCell align="right">{feature.supportCode ?? "-"}</TableCell>
                 <TableCell>{feature.minHwArchitecture !== null ? <Mono>{formatHex(feature.minHwArchitecture, 3)}</Mono> : "-"}</TableCell>

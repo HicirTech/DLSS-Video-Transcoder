@@ -7,7 +7,16 @@ import { FFIType, JSCallback } from "bun:ffi";
 import { callableAt } from "../native/com.ts";
 import { asPtr } from "../native/memory.ts";
 import { LOAD_WITH_ALTERED_SEARCH_PATH, NativeModule } from "../native/win32.ts";
-import { FORWARDER_EXPORTS, writeForwarder, writeForwarderSync } from "./forwarder.ts";
+import { FORWARDER_EXPORTS, type ForwarderExportName } from "./forwarder.ts";
+import { type ShimWrite, writeForwarder, writeForwarderSync } from "./forwarder-install.ts";
+
+// The shim's call signatures: CreateFeature, EvaluateFeature and ReleaseFeature as NGX declares them, and a
+// seven-argument call (as Init_ProjectID) whose last three arguments ride the stack.
+const SET_SLOTS_SIGNATURE = { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.void };
+const CREATE_SIGNATURE = { args: [FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 };
+const EVALUATE_SIGNATURE = { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 };
+const RELEASE_SIGNATURE = { args: [FFIType.ptr], returns: FFIType.i32 };
+const STACK_CALL_SIGNATURE = { args: [FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 };
 
 export interface ForwarderModule {
   readonly path: string;
@@ -50,17 +59,17 @@ export function shimPath(dir: string): string {
 }
 
 /** Generate the shim under `dir` (as `nvngx.dll`) and load it. */
-export async function prepareForwarder(dir: string): Promise<{ forwarder: ForwarderModule; wrote: boolean }> {
+export async function prepareForwarder(dir: string): Promise<{ forwarder: ForwarderModule; status: ShimWrite }> {
   const path = shimPath(dir);
-  const { wrote } = await writeForwarder(path);
-  return { forwarder: loadForwarder(path), wrote };
+  const { status } = await writeForwarder(path);
+  return { forwarder: loadForwarder(path), status };
 }
 
 /** Synchronous sibling of prepareForwarder, for callers that cannot await (engine factories). */
-export function prepareForwarderSync(dir: string): { forwarder: ForwarderModule; wrote: boolean } {
+export function prepareForwarderSync(dir: string): { forwarder: ForwarderModule; status: ShimWrite } {
   const path = shimPath(dir);
-  const { wrote } = writeForwarderSync(path);
-  return { forwarder: loadForwarder(path), wrote };
+  const { status } = writeForwarderSync(path);
+  return { forwarder: loadForwarder(path), status };
 }
 
 export interface SelfTestResult {

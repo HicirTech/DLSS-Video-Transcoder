@@ -32,6 +32,7 @@ const DEFAULT_IMAGE_BASE = 0x180000000n;
  * through GetProcAddress.
  */
 export const FORWARDER_EXPORTS = ["fwd_create", "fwd_evaluate", "fwd_release", "fwd_set_slots"] as const;
+export type ForwarderExportName = (typeof FORWARDER_EXPORTS)[number];
 
 function align(value: number, to: number): number {
   return Math.ceil(value / to) * to;

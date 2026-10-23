@@ -24,7 +24,11 @@ export function ForwarderSection({ forwarder }: { forwarder: ProbeReport["forwar
           },
           {
             label: "Self-test",
-            value: forwarder.selfTest ? <SupportChip support={forwarder.selfTest} /> : <Mono dim>not run</Mono>,
+            value: forwarder.selfTest ? (
+              <SupportChip label={`${forwarder.selfTest.ok ? "ok" : "failed"}: ${forwarder.selfTest.detail}`} level={forwarder.selfTest.ok ? "supported" : "blocked"} />
+            ) : (
+              <Mono dim>not run</Mono>
+            ),
           },
         ]}
       />
