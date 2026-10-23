@@ -43,14 +43,22 @@ function storeTab(value: number): void {
   }
 }
 
+interface TabPanelProps {
+  id: string;
+  /** The id of the tab that names this panel. */
+  labelledBy: string;
+  active: boolean;
+  children: ReactNode;
+}
+
 /**
  * Every tab stays mounted so form state survives switching; inactive ones are hidden. Two panels can
  * therefore render the same component at once, so an element id comes from useId, never a constant:
  * a fixed id would appear twice in one document.
  */
-function TabPanel({ active, children }: { active: boolean; children: ReactNode }) {
+function TabPanel({ id, labelledBy, active, children }: TabPanelProps) {
   return (
-    <Box role="tabpanel" hidden={!active} sx={{ display: active ? "block" : "none" }}>
+    <Box role="tabpanel" id={id} aria-labelledby={labelledBy} hidden={!active} sx={{ display: active ? "block" : "none" }}>
       {children}
     </Box>
   );

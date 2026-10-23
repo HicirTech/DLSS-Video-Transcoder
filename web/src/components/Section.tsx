@@ -16,6 +16,7 @@ export function Section({ title, action, children, sx }: SectionProps) {
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
         <Typography
           variant="subtitle2"
+          component="h2"
           sx={{ color: "text.secondary", textTransform: "uppercase", letterSpacing: 0.6, fontSize: 11 }}
         >
           {title}
