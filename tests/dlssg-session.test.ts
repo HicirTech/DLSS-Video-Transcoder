@@ -69,6 +69,12 @@ function isReleased(name: string): boolean {
  */
 const READY_THEN_TOO_MANY_FRAMES = `const input = Bun.stdin.stream().getReader(); await input.read(); process.stdout.write(new Uint8Array(new Uint32Array([0x31524746, 0, 5, 0]).buffer)); await input.read(); process.stdout.write(new Uint8Array(new Uint32Array([0x324f4746, 0, ${GENERATED_COUNT + 1}, 0]).buffer)); setTimeout(() => process.exit(0), 300);`;
 
+/** A host that writes `stderr`, reads the setup and answers it with 16 bytes that are no setup reply. */
+const GARBAGE_SETUP_REPLY = `const input = Bun.stdin.stream().getReader(); await input.read(); console.error("garbage sender"); process.stdout.write(new Uint8Array(16).fill(0x41)); setTimeout(() => process.exit(0), 300);`;
+
+/** A host that answers the setup ready, then answers the first frame header with 16 bytes that are no frame reply. */
+const READY_THEN_GARBAGE_FRAME_REPLY = `const input = Bun.stdin.stream().getReader(); await input.read(); process.stdout.write(new Uint8Array(new Uint32Array([0x31524746, 0, 5, 0]).buffer)); await input.read(); console.error("garbage sender"); process.stdout.write(new Uint8Array(16).fill(0x41)); setTimeout(() => process.exit(0), 300);`;
+
 /** A host that never answers anything, as one wedged in D3D12 or NGX bring-up would. */
 const SILENT_HOST = "setInterval(() => {}, 1000)";
 
@@ -144,6 +150,23 @@ describe("DlssgSession against a host process", () => {
 
   test("a maximum below the request is refused here with the lower-multiplier message", async () => {
     expect(await failure(openSession(servingHost(["--maximum", "2"])))).toMatch(/can generate at most 2 in-between frame\(s\) per source frame; 3 was requested\. Use a lower multiplier\./);
+  }, TEST_TIMEOUT_MS);
+
+  test("a setup reply that does not decode is reported with the host's stderr and the hint", async () => {
+    const message = await failure(openSession(fakeHost([process.execPath, "-e", GARBAGE_SETUP_REPLY])));
+    expect(message).toStartWith(`${HOST_PROCESS_NAME} sent a setup reply that is not part of the protocol (`);
+    expect(message).toContain("it said: garbage sender");
+    expect(message).toEndWith(". Check the fake.");
+    expect(isReleased(startedMappings.at(-1)!)).toBe(true);
+  }, TEST_TIMEOUT_MS);
+
+  test("a frame reply that does not decode is reported with the host's stderr and the hint", async () => {
+    const session = await openSession(fakeHost([process.execPath, "-e", READY_THEN_GARBAGE_FRAME_REPLY]));
+    opened.push(session);
+    const message = await failure(sendFrame(session, 0));
+    expect(message).toStartWith(`${HOST_PROCESS_NAME} sent a reply to frame 0 that is not part of the protocol (`);
+    expect(message).toContain("it said: garbage sender");
+    expect(message).toEndWith(". Check the fake.");
   }, TEST_TIMEOUT_MS);
 
   test("a cancel while the host has not answered the setup stops the host and releases the shared memory", async () => {
@@ -236,12 +259,12 @@ describe("probeDlssgHost", () => {
     const probe = await probeDlssgHost(fakeHost([process.execPath, "-e", "console.error('no runtime here'); process.exit(3)"]));
     expect(probe.available).toBe(false);
     expect(probe.workerVersion).toBe("");
-    expect(probe.detail).toBe(`${HOST_PROCESS_NAME} exited 3 without reporting: no runtime here`);
+    expect(probe.detail).toBe(`${HOST_PROCESS_NAME} exited 3 without reporting: no runtime here. Check the fake.`);
   }, TEST_TIMEOUT_MS);
 
   test("a host that crashes while probing is quoted up to Bun's panic line", async () => {
     const probe = await probeDlssgHost(fakeHost(crashingCommand("probing the runtime")));
-    expect(probe.detail).toBe(`${HOST_PROCESS_NAME} exited 3 without reporting: probing the runtime / panic(main thread): Segmentation fault at address 0x8`);
+    expect(probe.detail).toBe(`${HOST_PROCESS_NAME} exited 3 without reporting: probing the runtime / panic(main thread): Segmentation fault at address 0x8. Check the fake.`);
   }, TEST_TIMEOUT_MS);
 
   test("a probe that does not finish in time is stopped and reported unavailable", async () => {
