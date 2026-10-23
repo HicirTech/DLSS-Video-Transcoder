@@ -21,9 +21,12 @@ function option(name: string): number | null {
   return text === null ? null : Number(text);
 }
 
+/** Larger than any generated count a test session asks for (the fake's maximum is 5), so each (source frame, generated frame) pair gets a distinct byte. */
+const GENERATED_FRAME_STRIDE = 8;
+
 /** The byte every pixel of generated frame k (1-based) of source frame i carries. */
 export function generatedByte(frameId: number, index: number): number {
-  return (frameId * 8 + index) & 0xff;
+  return (frameId * GENERATED_FRAME_STRIDE + index) & 0xff;
 }
 
 export function rgbaByte(frameId: number): number {

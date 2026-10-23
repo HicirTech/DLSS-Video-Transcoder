@@ -212,6 +212,6 @@ describe("--probe line", () => {
   });
 
   test("rejects a line that is not JSON", () => {
-    expect(() => decodeProbeLine("host ready")).toThrow();
+    expect(() => decodeProbeLine("host ready")).toThrow(SyntaxError);
   });
 });
