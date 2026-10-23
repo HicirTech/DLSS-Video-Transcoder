@@ -48,7 +48,7 @@ import { noFramesGeneratedMessage } from "./framegen-host-messages.ts";
 import { estimatedFrameProgress, type ProgressReporter } from "./frame-progress.ts";
 import { FrameReader, type FrameSource } from "./frame-reader.ts";
 import { type RunParams, runOverlapped, runSequential } from "./framegen-run.ts";
-import { defaultOutputPath } from "./output-path.ts";
+import { defaultOutputPath, inputAsOutputProblem } from "./output-path.ts";
 import { removePartialOutput } from "./partial-output.ts";
 import { ProcessedFrames } from "./processed-frames.ts";
 import { Stage, openGuideWorker } from "./framegen-stage.ts";
@@ -357,6 +357,8 @@ async function planFrameGen(options: FrameGenOptions): Promise<FrameGenJob> {
   const estimatedOutput = Math.ceil(sourceSeconds * ratToNumber(targetRate));
   const expectsGeneration = plan.generatedPerInterval > 0;
   const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resized), `.${FRAME_GEN_CONTAINER}`);
+  const inputProblem = inputAsOutputProblem(options.input, output);
+  if (inputProblem) throw new Error(inputProblem);
   // Read before anything can write there: it decides what the failure path may delete.
   const outputExisted = existsSync(output);
   const detail =
