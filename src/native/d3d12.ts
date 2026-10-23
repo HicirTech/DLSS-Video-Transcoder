@@ -282,16 +282,16 @@ export class D3D12GraphicsCommandList extends ComObject {
   }
 
   copyTextureRegion(dst: CopyLocation, src: CopyLocation): void {
-    const d = copyLocation(dst);
-    const s = copyLocation(src);
+    const destination = copyLocation(dst);
+    const source = copyLocation(src);
     this.call(
       16,
       { args: [FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.void },
-      d.bytes,
+      destination.bytes,
       0,
       0,
       0,
-      s.bytes,
+      source.bytes,
       null,
     );
   }

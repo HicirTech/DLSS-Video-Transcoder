@@ -65,14 +65,14 @@ export class AsyncSubmit {
     return this.lists[slot]!;
   }
 
-  /** Execute slot `k`'s list; returns the fence value the GPU will reach once that list has retired. */
-  submit(k: number): bigint {
-    const list = this.lists[k]!;
+  /** Execute `slot`'s list; returns the fence value the GPU will reach once that list has retired. */
+  submit(slot: number): bigint {
+    const list = this.lists[slot]!;
     list.close();
     this.queue.executeCommandList(list);
     this.value += 1n;
     this.queue.signal(this.fence, this.value);
-    this.slotValue[k] = this.value;
+    this.slotValue[slot] = this.value;
     return this.value;
   }
 
@@ -92,8 +92,8 @@ export class AsyncSubmit {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    for (const l of this.lists) l.release();
-    for (const a of this.allocators) a.release();
+    for (const list of this.lists) list.release();
+    for (const allocator of this.allocators) allocator.release();
     this.event.close();
   }
 
