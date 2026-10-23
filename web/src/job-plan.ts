@@ -45,10 +45,15 @@ export function planJob(plan: PlanInput): JobPlan {
   const resized = resizesFrames({ superResolution: plan.steps.sr ? { scale: plan.srScale } : undefined, resize: plan.resize });
   const outputSize = plan.source ? plannedSize(plan, plan.source) : null;
   const srProblem = plan.steps.sr && plan.source && outputSize ? srOutputProblem(plan.source, outputSize) : null;
-  const extension = plan.kind === "image" ? "png" : plan.steps.fg ? FRAME_GEN_CONTAINER : plan.container;
+  const extension = plan.kind === "image" ? "png" : videoContainer(plan.steps, plan.container);
   const input = plan.input.trim();
   const defaultOutputName = input ? `${stemOf(input)}.${stepsSuffix(steps, resized)}.${extension}` : null;
   return { steps, outputSize, srProblem, defaultOutputName };
+}
+
+/** The container a video job writes: frame generation fixes it to FRAME_GEN_CONTAINER, otherwise the stored choice. */
+export function videoContainer(steps: Record<StepKind, boolean>, stored: EncodeSettings["container"]): EncodeSettings["container"] {
+  return steps.fg ? FRAME_GEN_CONTAINER : stored;
 }
 
 /** The size the job gives `source`, as the jobs work it out: a video's sides rounded to even for 4:2:0, a still's as they are. */

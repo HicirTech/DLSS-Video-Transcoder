@@ -3,9 +3,10 @@
  * settings, and the form's own fields. Only what the job runs goes in, so a request never carries a step's
  * settings with the step switched off.
  */
-import { FRAME_GEN_CONTAINER, type FrameGenStep, type JobRequest, type StepKind } from "../../src/server/api-types";
+import type { FrameGenStep, JobRequest, StepKind } from "../../src/server/api-types";
 import { takesGpuChoice } from "../../src/server/settings-in-use";
-import type { StoredFrameGen, StoredSettings } from "./hooks/useSettings";
+import { videoContainer } from "./job-plan";
+import type { StoredFrameGen, StoredSettings } from "./stored-settings";
 
 /** What a form holds itself rather than in the stored settings. */
 export interface FormFields {
@@ -24,7 +25,7 @@ export function videoRequest(form: FormFields, settings: StoredSettings): JobReq
   if (steps.fg) request.frameGen = { ...rateFields(settings.frameGen), engine: settings.frameGen.engine, ...dllDirOf(form, "fg") };
   if (!steps.sr && settings.resize.mode !== "none") request.resize = settings.resize;
   // Frame generation writes one container; the stored choice comes back when it is switched off.
-  request.encode = steps.fg ? { ...settings.encode, container: FRAME_GEN_CONTAINER } : settings.encode;
+  request.encode = { ...settings.encode, container: videoContainer(steps, settings.encode.container) };
   // Frame generation picks its GPU in its host process, so a job that runs it alone is sent no GPU choice.
   if (settings.adapterUuid && takesGpuChoice(steps)) request.adapterUuid = settings.adapterUuid;
   if (form.output.trim() !== "") request.output = form.output.trim();
