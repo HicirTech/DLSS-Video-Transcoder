@@ -18,7 +18,7 @@ import "../src/ngx/nr.ts";
 import "../src/ngx/sr-engine.ts";
 import { DEFAULT_RUNTIME_DIR } from "../src/paths.ts";
 import { processImage } from "../src/pipeline/image.ts";
-import { BUNDLED_FFMPEG_DIR } from "../src/pipeline/tools.ts";
+import { findTool } from "../src/pipeline/tools.ts";
 import { processVideo } from "../src/pipeline/video.ts";
 import { DEFAULT_NR_SETTINGS, type EncodeSettings, type MotionKind, type NeuralRenderingStep, type NrSettings, type ScaleSettings, type SuperResolutionStep } from "../src/server/api-types.ts";
 
@@ -39,16 +39,19 @@ async function sha(path: string): Promise<string> {
  * this is what actually proves a refactor left the pixels alone.
  */
 function streamHash(path: string): string {
-  const ffmpeg = join(BUNDLED_FFMPEG_DIR, "ffmpeg.exe");
+  // The ffmpeg the pipeline itself found: processVideo has already refused the row when there is none.
+  const ffmpeg = findTool("ffmpeg");
+  if (ffmpeg === null) return "NOFFMPEG";
   try {
     const proc = Bun.spawnSync([ffmpeg, "-v", "error", "-i", path, "-map", "0:v:0", "-c", "copy", "-f", "md5", "-"], {
       stdout: "pipe",
       stderr: "pipe",
     });
+    if (proc.exitCode !== 0) return `HASHFAIL(exit ${proc.exitCode})`;
     const out = new TextDecoder().decode(proc.stdout).trim();
     return out.startsWith("MD5=") ? out.slice(4, 20) : "NOSTREAM";
-  } catch {
-    return "NOSTREAM";
+  } catch (error) {
+    return `HASHFAIL(${(error as Error).message.slice(0, 40)})`;
   }
 }
 
