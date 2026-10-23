@@ -21,6 +21,12 @@ export interface PeSection {
   characteristics: number;
 }
 
+/** One IMAGE_DATA_DIRECTORY: where a table such as the exports or the resources lives; rva 0 means it is absent. */
+export interface PeDataDirectory {
+  rva: number;
+  size: number;
+}
+
 export interface PeInfo {
   machine: number;
   is64: boolean;
@@ -28,11 +34,15 @@ export interface PeInfo {
   imageBase: bigint;
   sizeOfImage: number;
   entryPoint: number;
+  /** IMAGE_OPTIONAL_HEADER's DataDirectory[], indexed by IMAGE_DIRECTORY_ENTRY_* (export 0, resource 2, ...). */
+  dataDirectories: PeDataDirectory[];
   sections: PeSection[];
   exports: PeExport[];
 }
 
 const IMAGE_FILE_DLL = 0x2000;
+const IMAGE_NUMBEROF_DIRECTORY_ENTRIES = 16;
+const IMAGE_DIRECTORY_ENTRY_EXPORT = 0;
 
 function readAscii(bytes: Uint8Array, offset: number, maxLength: number): string {
   let end = offset;
@@ -41,32 +51,47 @@ function readAscii(bytes: Uint8Array, offset: number, maxLength: number): string
   return new TextDecoder("latin1").decode(bytes.subarray(offset, end));
 }
 
-/** The export table at the first data directory, or none when the directory is empty. */
-function readExports(bytes: Uint8Array, view: DataView, directoriesOffset: number, rvaToOffset: (rva: number) => number): PeExport[] {
-  const exportRva = view.getUint32(directoriesOffset, true);
-  const exportSize = view.getUint32(directoriesOffset + 4, true);
-  if (exportRva === 0 || exportSize === 0) return [];
-  const exports: PeExport[] = [];
-  const dir = rvaToOffset(exportRva);
-  const ordinalBase = view.getUint32(dir + 16, true);
-  const functionCount = view.getUint32(dir + 20, true);
-  const nameCount = view.getUint32(dir + 24, true);
-  const functionsOffset = rvaToOffset(view.getUint32(dir + 28, true));
-  const namesOffset = rvaToOffset(view.getUint32(dir + 32, true));
-  const ordinalsOffset = rvaToOffset(view.getUint32(dir + 36, true));
-  const named = new Map<number, string>();
+/** The file offset of an RVA, through the section that maps it; an RVA below the first section lies in the headers. */
+export function rvaToOffset(sections: readonly PeSection[], rva: number): number {
+  for (const section of sections) {
+    const size = Math.max(section.virtualSize, section.rawSize);
+    if (rva >= section.virtualAddress && rva < section.virtualAddress + size) {
+      return section.rawPointer + (rva - section.virtualAddress);
+    }
+  }
+  if (rva < (sections[0]?.rawPointer ?? 0)) return rva;
+  throw new Error(`RVA 0x${rva.toString(16)} is outside every section`);
+}
+
+/** The export table, or none when its data directory is empty. Every name a function is exported under is listed. */
+function readExports(bytes: Uint8Array, view: DataView, directory: PeDataDirectory, toOffset: (rva: number) => number): PeExport[] {
+  if (directory.rva === 0 || directory.size === 0) return [];
+  // IMAGE_EXPORT_DIRECTORY (winnt.h): Base @16, NumberOfFunctions @20, NumberOfNames @24, AddressOfFunctions @28,
+  // AddressOfNames @32, AddressOfNameOrdinals @36.
+  const exportDirectory = toOffset(directory.rva);
+  const ordinalBase = view.getUint32(exportDirectory + 16, true);
+  const functionCount = view.getUint32(exportDirectory + 20, true);
+  const nameCount = view.getUint32(exportDirectory + 24, true);
+  const functionsOffset = toOffset(view.getUint32(exportDirectory + 28, true));
+  const namesOffset = toOffset(view.getUint32(exportDirectory + 32, true));
+  const ordinalsOffset = toOffset(view.getUint32(exportDirectory + 36, true));
+  const namesByIndex = new Map<number, string[]>();
   for (let i = 0; i < nameCount; i++) {
     const nameRva = view.getUint32(namesOffset + i * 4, true);
     const ordinalIndex = view.getUint16(ordinalsOffset + i * 2, true);
-    named.set(ordinalIndex, readAscii(bytes, rvaToOffset(nameRva), 4096));
+    const name = readAscii(bytes, toOffset(nameRva), 4096);
+    const aliases = namesByIndex.get(ordinalIndex);
+    if (aliases) aliases.push(name);
+    else namesByIndex.set(ordinalIndex, [name]);
   }
+  const exports: PeExport[] = [];
   for (let i = 0; i < functionCount; i++) {
     const rva = view.getUint32(functionsOffset + i * 4, true);
     if (rva === 0) continue;
     // PE spec: an export RVA pointing back inside the export directory is a
     // forwarder string ("OtherDll.Function"), not the address of code.
-    const forwarder = rva >= exportRva && rva < exportRva + exportSize ? readAscii(bytes, rvaToOffset(rva), 512) : null;
-    exports.push({ name: named.get(i) ?? `#${ordinalBase + i}`, ordinal: ordinalBase + i, rva, forwarder });
+    const forwarder = rva >= directory.rva && rva < directory.rva + directory.size ? readAscii(bytes, toOffset(rva), 512) : null;
+    for (const name of namesByIndex.get(i) ?? [`#${ordinalBase + i}`]) exports.push({ name, ordinal: ordinalBase + i, rva, forwarder });
   }
   return exports;
 }
@@ -94,6 +119,10 @@ export function parsePe(bytes: Uint8Array): PeInfo {
   const sizeOfImage = view.getUint32(optional + 56, true);
   const directoriesOffset = optional + (is64 ? 112 : 96);
   const directoryCount = view.getUint32(optional + (is64 ? 108 : 92), true);
+  const dataDirectories: PeDataDirectory[] = [];
+  for (let i = 0; i < Math.min(directoryCount, IMAGE_NUMBEROF_DIRECTORY_ENTRIES); i++) {
+    dataDirectories.push({ rva: view.getUint32(directoriesOffset + i * 8, true), size: view.getUint32(directoriesOffset + i * 8 + 4, true) });
+  }
 
   const sections: PeSection[] = [];
   let sectionOffset = optional + optionalSize;
@@ -108,18 +137,8 @@ export function parsePe(bytes: Uint8Array): PeInfo {
     });
   }
 
-  const rvaToOffset = (rva: number): number => {
-    for (const section of sections) {
-      const size = Math.max(section.virtualSize, section.rawSize);
-      if (rva >= section.virtualAddress && rva < section.virtualAddress + size) {
-        return section.rawPointer + (rva - section.virtualAddress);
-      }
-    }
-    if (rva < (sections[0]?.rawPointer ?? 0)) return rva; // inside the headers
-    throw new Error(`RVA 0x${rva.toString(16)} is outside every section`);
-  };
-
-  const exports = directoryCount > 0 ? readExports(bytes, view, directoriesOffset, rvaToOffset) : [];
+  const exportDirectory = dataDirectories[IMAGE_DIRECTORY_ENTRY_EXPORT];
+  const exports = exportDirectory ? readExports(bytes, view, exportDirectory, (rva) => rvaToOffset(sections, rva)) : [];
   exports.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
   return {
@@ -129,6 +148,7 @@ export function parsePe(bytes: Uint8Array): PeInfo {
     imageBase,
     sizeOfImage,
     entryPoint,
+    dataDirectories,
     sections,
     exports,
   };
