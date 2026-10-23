@@ -462,6 +462,7 @@ export interface ProbeFeature {
   name: string;
   /** Human readable support verdict, e.g. "supported", "driver too old", "adapter unsupported", "not implemented". */
   support: string;
+  supportLevel: SupportLevel;
   supportCode: number | null;
   minHwArchitecture: number | null;
   minOsVersion: string | null;

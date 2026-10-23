@@ -20,7 +20,8 @@ import type { ProbeAdapter, ProbeFeature, ProbeReport } from "../server/api-type
 import { FeatureCommonInfo, NgxCore, locateNgxCores } from "./core.ts";
 import { prepareForwarder, selfTestForwarder } from "./forwarder-runtime.ts";
 import { NgxParam, NgxParameters, NrParam } from "./params.ts";
-import { NGX_APPLICATION_ID, NgxFeature, featureName, ngxName, ngxOk } from "./results.ts";
+import { NGX_APPLICATION_ID, NgxResult, SUPPORT_NOT_QUERIED, SUPPORT_NOT_REPORTED, SUPPORT_QUERY_FAILED, featureName, ngxName, ngxOk } from "./results.ts";
+import { FEATURES, featureByKey } from "./runtime-catalog.ts";
 import { runtimeReport } from "./runtime-inventory.ts";
 import { SpyParameter } from "./spy.ts";
 
@@ -28,7 +29,14 @@ import { SpyParameter } from "./spy.ts";
 export const PROBE_ENTRIES = ["loader", "core"] as const;
 export type ProbeEntry = (typeof PROBE_ENTRIES)[number];
 
-/** The Init exports `--init` can exercise; see the branches in runProbe. */
+/**
+ * Init_ProjectID's arguments for the --project-init diagnostic: a GUID made up for this probe (not one NVIDIA
+ * issued) and a placeholder engine version.
+ */
+const PROBE_PROJECT_ID = "b0c4f6a2-7c3e-4a3f-9f1e-0a6d2e9c1b45";
+const PROBE_ENGINE_VERSION = "0.1";
+
+/** The Init exports `--init` can exercise; see the branches in initializeNgx. */
 export const PROBE_INITS = ["ext", "plain", "spy"] as const;
 export type ProbeInit = (typeof PROBE_INITS)[number];
 
@@ -292,7 +300,7 @@ function initializeNgx({ options, report, reasons, say, runtimeDir, appDataPath 
     }
     if (!ngxOk(result) && options.projectInit) {
       trace("NVSDK_NGX_D3D12_Init_ProjectID");
-      result = core.initProjectId(device.ptr, "b0c4f6a2-7c3e-4a3f-9f1e-0a6d2e9c1b45", "0.1", appDataPath, new FeatureCommonInfo([runtimeDir]));
+      result = core.initProjectId(device.ptr, PROBE_PROJECT_ID, PROBE_ENGINE_VERSION, appDataPath, new FeatureCommonInfo([runtimeDir]));
       say(`Init_ProjectID -> ${ngxName(result)}`);
     }
     report.ngxInit.result = ngxName(result);
@@ -347,11 +355,12 @@ function readCapabilities({ report, say }: ProbeContext, core: NgxCore): void {
 
 function queryFeatureRequirements({ report, say, runtimeDir, appDataPath }: ProbeContext, core: NgxCore, adapter: DxgiAdapter): void {
   const searchPaths = new FeatureCommonInfo([runtimeDir]);
-  for (const id of [NgxFeature.SuperSampling, NgxFeature.FrameGeneration, NgxFeature.RayReconstruction, NgxFeature.NeuralRendering]) {
+  for (const { id } of FEATURES) {
     const feature: ProbeFeature = {
       id,
       name: featureName(id),
-      support: "not queried",
+      support: SUPPORT_NOT_QUERIED,
+      supportLevel: "unknown",
       supportCode: null,
       minHwArchitecture: null,
       minOsVersion: null,
@@ -361,6 +370,7 @@ function queryFeatureRequirements({ report, say, runtimeDir, appDataPath }: Prob
       trace(`NVSDK_NGX_D3D12_GetFeatureRequirements(${id})`);
       const r = core.featureRequirements(adapter.ptr, id, NGX_APPLICATION_ID, appDataPath, searchPaths);
       feature.support = r.support;
+      feature.supportLevel = r.supportLevel;
       feature.supportCode = r.supportedBits;
       feature.minHwArchitecture = r.minHwArchitecture;
       feature.minOsVersion = r.minOsVersion;
@@ -368,9 +378,13 @@ function queryFeatureRequirements({ report, say, runtimeDir, appDataPath }: Prob
       // NotImplemented here means the driver declines to answer, not that the
       // feature is missing — the features still work, so do not say "query
       // failed". Readiness is judged from the prerequisites below.
-      if ((r.result >>> 0) === 0xbad00012) feature.support = "not reported by this driver";
+      if ((r.result >>> 0) === NgxResult.NotImplemented) {
+        feature.support = SUPPORT_NOT_REPORTED;
+        feature.supportLevel = "unknown";
+      }
     } catch (error) {
-      feature.support = "query failed";
+      feature.support = SUPPORT_QUERY_FAILED;
+      feature.supportLevel = "blocked";
       feature.detail = (error as Error).message;
     }
     report.features.push(feature);

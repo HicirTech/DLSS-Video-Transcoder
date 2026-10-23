@@ -2,7 +2,7 @@
  * The text NgxError gives the NGX results users see (src/ngx/results.ts). No GPU.
  */
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_SR_PRESET, describeSupport, DlssRenderPreset, NgxError } from "../src/ngx/results.ts";
+import { DEFAULT_SR_PRESET, describeSupport, DlssRenderPreset, NgxError, supportLevel } from "../src/ngx/results.ts";
 
 describe("NgxError", () => {
   test("PlatformError names the call and the result, and no feature, since any feature's call can return it", () => {
@@ -40,5 +40,23 @@ describe("describeSupport", () => {
   test("a bit the header does not define is reported by value", () => {
     expect(describeSupport(0x20)).toBe("unknown bits 0x00000020");
     expect(describeSupport(0x02 | 0x100)).toBe("driver too old, unknown bits 0x00000100");
+  });
+});
+
+describe("supportLevel", () => {
+  test("zero is supported, and each bit alone gives its own level", () => {
+    expect(supportLevel(0)).toBe("supported");
+    expect(supportLevel(0x01)).toBe("unknown");
+    expect(supportLevel(0x02)).toBe("outdated");
+    expect(supportLevel(0x04)).toBe("blocked");
+    expect(supportLevel(0x08)).toBe("outdated");
+    expect(supportLevel(0x10)).toBe("blocked");
+  });
+
+  test("several bits give the most severe of their levels, and a bit the header does not define counts as unknown", () => {
+    expect(supportLevel(0x02 | 0x04)).toBe("blocked");
+    expect(supportLevel(0x01 | 0x08)).toBe("outdated");
+    expect(supportLevel(0x20)).toBe("unknown");
+    expect(supportLevel(0x02 | 0x100)).toBe("outdated");
   });
 });
