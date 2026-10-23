@@ -2,6 +2,8 @@
  * The CLI's command table, the single source of truth: it renders the help *and* tells the
  * positional-argument parser which flags consume a following value token.
  */
+import { featureByKey, type FeatureKey } from "../ngx/features.ts";
+import { DEFAULT_PROBE_ENTRY, DEFAULT_PROBE_INIT, PROBE_ENTRIES, PROBE_INITS } from "../ngx/probe-options.ts";
 import { DEFAULT_SR_PRESET, DLSS_RATIO, perfQualityName } from "../ngx/results.ts";
 import { cpuSiblingCodec, FFMPEG_NVENC_ENCODERS, isNvenc } from "../pipeline/encode-select.ts";
 import { AAC_KBPS, AUDIO_IN_CONTAINER, AUTO_GPU_CHOICE, DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, DEFAULT_SR_STEP, DEFAULT_WARMUP_FRAMES, DLSS_SR_MAX_OUTPUT_SIDE, ENCODE_CODECS, ENCODE_CONTAINERS, FRAME_GEN_AUTO_PATH, FRAME_GEN_CONTAINER, FRAME_GEN_FPS_CHOICES, FRAME_GEN_GPU_CHOICE, MOTION_KINDS, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, NVENC_MAX_SIDE, SETTING_RANGES, SR_FACTOR_MIN, type StepKind } from "../server/api-types.ts";
@@ -104,8 +106,8 @@ export const COMMANDS: readonly CommandSpec[] = [
       { flag: "--log", desc: "append the internal probe log lines to the output" },
       ADAPTER_OPT,
       RUNTIME_OPT,
-      { flag: "--entry loader|core", desc: "NGX entry point to initialise through", def: "core" },
-      { flag: "--init ext|plain|spy", desc: "which NGX Init variant to call", def: "ext" },
+      { flag: `--entry ${PROBE_ENTRIES.join("|")}`, desc: "NGX entry point to initialise through", def: DEFAULT_PROBE_ENTRY },
+      { flag: `--init ${PROBE_INITS.join("|")}`, desc: "which NGX Init variant to call", def: DEFAULT_PROBE_INIT },
       { flag: "--project-init", desc: "use the project-scoped Init (app id + project path) instead of the app Init" },
       { flag: "--null-feature-info", desc: "pass a null FeatureCommonInfo to Init (diagnostic)" },
       { flag: "--no-requirements", desc: "skip the per-feature GetFeatureRequirements queries" },

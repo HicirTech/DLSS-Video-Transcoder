@@ -65,6 +65,18 @@ describe("sr --factor", () => {
   });
 });
 
+describe("sr --preset", () => {
+  test("the row names exactly the presets DlssRenderPreset defines, and the default", () => {
+    // The row writes the letters as ranges; spelled out, they must be the enum's keys in order.
+    const letters = (first: string, last: string) =>
+      Array.from({ length: last.charCodeAt(0) - first.charCodeAt(0) + 1 }, (_, offset) => String.fromCharCode(first.charCodeAt(0) + offset));
+    const { desc, def } = optionRow("sr", "--preset");
+    expect(desc).toContain("Default, A-F or J-O");
+    expect(Object.keys(DlssRenderPreset)).toEqual(["Default", ...letters("A", "F"), ...letters("J", "O")]);
+    expect(def).toBe(DEFAULT_SR_PRESET);
+  });
+});
+
 describe("video", () => {
   test("shares its encode and rate rows with fg and its look rows with nr, so the pages cannot disagree", () => {
     for (const flag of ["--codec", "--quality", "--fps", "--multiplier"]) expect(optionRow("video", flag)).toBe(optionRow("fg", flag));

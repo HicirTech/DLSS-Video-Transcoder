@@ -26,10 +26,7 @@ import { NGX_APPLICATION_ID, NgxResult, SUPPORT_NOT_QUERIED, SUPPORT_NOT_REPORTE
 import { FEATURES, featureByKey } from "./runtime-catalog.ts";
 import { runtimeReport } from "./runtime-inventory.ts";
 import { SpyParameter } from "./spy.ts";
-
-/** The NGX module `--entry` can enter through; ProbeOptions derives its type so the two cannot drift. */
-export const PROBE_ENTRIES = ["loader", "core"] as const;
-export type ProbeEntry = (typeof PROBE_ENTRIES)[number];
+import { DEFAULT_PROBE_ENTRY, DEFAULT_PROBE_INIT, type ProbeEntry, type ProbeInit } from "./probe-options.ts";
 
 /**
  * Init_ProjectID's arguments for the --project-init diagnostic: a GUID made up for this probe (not one NVIDIA
@@ -37,10 +34,6 @@ export type ProbeEntry = (typeof PROBE_ENTRIES)[number];
  */
 const PROBE_PROJECT_ID = "b0c4f6a2-7c3e-4a3f-9f1e-0a6d2e9c1b45";
 const PROBE_ENGINE_VERSION = "0.1";
-
-/** The Init exports `--init` can exercise; see the branches in initializeNgx. */
-export const PROBE_INITS = ["ext", "plain", "spy"] as const;
-export type ProbeInit = (typeof PROBE_INITS)[number];
 
 export interface ProbeOptions {
   adapterIndex?: number;
@@ -249,8 +242,9 @@ async function loadNgxCore({ options, report, reasons, say }: ProbeContext): Pro
       say(`could not read the NGX core's version and exports: ${(error as Error).message}`);
     }
     try {
-      trace(`LoadLibraryExW ${location.path} (entry=${options.entry ?? "core"})`);
-      core = NgxCore.load(location, options.entry ?? "core");
+      const entry = options.entry ?? DEFAULT_PROBE_ENTRY;
+      trace(`LoadLibraryExW ${location.path} (entry=${entry})`);
+      core = NgxCore.load(location, entry);
       report.driver.ngxCorePath = core.location.path;
       say(`NGX entry module loaded: ${core.location.path}`);
     } catch (error) {
@@ -305,7 +299,7 @@ function initializeNgx({ options, report, reasons, say, runtimeDir, appDataPath 
   report.ngxInit.attempted = true;
   try {
     let result: number;
-    const mode = options.init ?? "ext";
+    const mode = options.init ?? DEFAULT_PROBE_INIT;
     if (mode === "plain") {
       trace("NVSDK_NGX_D3D12_Init (4 arguments)");
       result = core.initPlain(device.ptr, NGX_APPLICATION_ID, appDataPath);
