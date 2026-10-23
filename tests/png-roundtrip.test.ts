@@ -38,13 +38,15 @@ describe("round trip", () => {
     });
   }
 
-  test("compression levels 0 and 9 both round-trip", () => {
-    const image = randomImage(17, 9, 42);
+  test("compression levels 0 and 9 both round-trip, and the level reaches deflate", () => {
+    // Banded, so a real level compresses it and the two sizes tell the levels apart.
+    const image = bandedFrame(300, 200);
     const stored = encodePng(image, { level: 0 });
     const best = encodePng(image, { level: 9 });
-    expectSameImage(decodePng(stored), 17, 9, image.rgba);
-    expectSameImage(decodePng(best), 17, 9, image.rgba);
-    expect(stored.length).toBeGreaterThan(17 * 9 * 4);
+    expectSameImage(decodePng(stored), 300, 200, image.rgba);
+    expectSameImage(decodePng(best), 300, 200, image.rgba);
+    expect(stored.length).toBeGreaterThan(300 * 200 * 4); // level 0 stores the data uncompressed
+    expect(best.length).toBeLessThan(stored.length / 10);
   });
 
   test("compressible images actually compress and still round-trip", () => {
