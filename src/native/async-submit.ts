@@ -57,16 +57,12 @@ export class AsyncSubmit {
     }
   }
 
-  /** Wait for slot `k`'s previous submit to finish on the GPU before reusing its allocator; returns the reset, open list. */
-  begin(k: number, timeoutMs = 30_000): D3D12GraphicsCommandList {
-    const want = this.slotValue[k]!;
-    if (this.fence.completedValue() < want) {
-      this.fence.setEventOnCompletion(want, this.event);
-      if (!this.event.wait(timeoutMs)) throw new Error(`AsyncSubmit.begin(${k}): GPU did not reach fence ${want} within ${timeoutMs} ms`);
-    }
-    this.allocators[k]!.reset();
-    this.lists[k]!.reset(this.allocators[k]!);
-    return this.lists[k]!;
+  /** Wait for `slot`'s previous submit to finish on the GPU before reusing its allocator; returns the reset, open list. */
+  begin(slot: number, timeoutMs = FENCE_WAIT_TIMEOUT_MS): D3D12GraphicsCommandList {
+    this.waitFor(this.slotValue[slot]!, `AsyncSubmit.begin(${slot})`, timeoutMs);
+    this.allocators[slot]!.reset();
+    this.lists[slot]!.reset(this.allocators[slot]!);
+    return this.lists[slot]!;
   }
 
   /** Execute slot `k`'s list; returns the fence value the GPU will reach once that list has retired. */
