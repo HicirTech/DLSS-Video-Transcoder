@@ -6,7 +6,7 @@ import { featureByKey, type FeatureKey } from "../ngx/features.ts";
 import { DEFAULT_PROBE_ENTRY, DEFAULT_PROBE_INIT, PROBE_ENTRIES, PROBE_INITS } from "../ngx/probe-options.ts";
 import { DEFAULT_SR_PRESET, DLSS_RATIO, perfQualityName } from "../ngx/results.ts";
 import { cpuSiblingCodec, FFMPEG_NVENC_ENCODERS, isNvenc } from "../pipeline/encode-select.ts";
-import { AAC_KBPS, AUDIO_IN_CONTAINER, AUTO_GPU_CHOICE, DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, DEFAULT_SR_STEP, DEFAULT_WARMUP_FRAMES, DLSS_SR_MAX_OUTPUT_SIDE, ENCODE_CODECS, ENCODE_CONTAINERS, FRAME_GEN_AUTO_PATH, FRAME_GEN_CONTAINER, FRAME_GEN_FPS_CHOICES, FRAME_GEN_GPU_CHOICE, MOTION_KINDS, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, NVENC_MAX_SIDE, SETTING_RANGES, SR_FACTOR_MIN, type StepKind } from "../server/api-types.ts";
+import { AAC_KBPS, AUDIO_IN_CONTAINER, AUTO_GPU_CHOICE, DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, DEFAULT_SR_STEP, DEFAULT_WARMUP_FRAMES, DLSS_SR_MAX_OUTPUT_SIDE, ENCODE_CODECS, ENCODE_CONTAINERS, FRAME_GEN_AUTO_PATH, FRAME_GEN_CONTAINER, FRAME_GEN_FPS_CHOICES, FRAME_GEN_GPU_CHOICE, MOTION_KINDS, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, NVENC_MAX_SIDE, SETTING_RANGES, SR_FACTOR_MIN, STEP_KINDS, type StepKind } from "../server/api-types.ts";
 
 interface OptionSpec {
   /** As typed on the command line, e.g. "--factor N" or "--json". */
@@ -78,20 +78,23 @@ export const NR_SETTING_OPTS: readonly OptionSpec[] = [
   { flag: "--ui-correction", desc: `protect overlays / text / sharp UI edges from being re-rendered; ${NR_IGNORED_NOTE}`, def: "off" },
 ];
 
-/** `video`'s per-step version row: a specific installed DLL of the step's feature, as `versions` lists them. */
-function stepVersionOpt(step: StepKind, feature: string): OptionSpec {
-  return { flag: `--${step}-version VER`, desc: `load a specific installed ${feature} DLL version (prefix match ok); list them with \`versions\``, def: "bundled runtime DLL" };
+/** A version row, sr's and fg's `--dlss-version` and video's per-step `--<step>-version`: an installed DLL of the feature, as `versions` lists them. */
+function versionOpt(flag: string, feature: FeatureKey): OptionSpec {
+  return { flag: `${flag} VER`, desc: `load a specific installed ${featureByKey(feature).name} DLL version (310.7 picks the newest 310.7.x); list them with \`versions\``, def: "bundled runtime DLL" };
 }
 
 /** The `video` options that configure one step, which the command refuses unless that step's switch is given. */
 export const VIDEO_STEP_OPTS: Record<StepKind, readonly OptionSpec[]> = {
   sr: [
     { flag: "--motion MODE", desc: `Super Resolution's motion vectors: ${MOTION_KINDS.join(" or ")}; flow estimates optical flow between frames, with NVIDIA's NVOFA when it starts and a CPU estimator otherwise`, def: DEFAULT_SR_STEP.motion },
-    stepVersionOpt("sr", "DLSS Super Resolution"),
+    versionOpt("--sr-version", "sr"),
   ],
-  nr: [...NR_SETTING_OPTS, stepVersionOpt("nr", "DLSS Neural Rendering")],
-  fg: [FG_FPS_OPT, FG_MULTIPLIER_OPT, { flag: "--fg-path MODE", desc: FG_PATH_DESC, def: "auto" }, stepVersionOpt("fg", "DLSS Frame Generation")],
+  nr: [...NR_SETTING_OPTS, versionOpt("--nr-version", "nr")],
+  fg: [FG_FPS_OPT, FG_MULTIPLIER_OPT, { flag: "--fg-path MODE", desc: FG_PATH_DESC, def: "auto" }, versionOpt("--fg-version", "fg")],
 };
+
+/** "--motion, --sr-version with --sr; ...": which options each step's switch enables, read from VIDEO_STEP_OPTS. */
+const STEP_OPTION_NOTE = STEP_KINDS.map((step) => `${VIDEO_STEP_OPTS[step].map(optionName).join(", ")} with --${step}`).join("; ");
 
 export const RUNTIME_OPT: OptionSpec = { flag: "--runtime DIR", desc: "runtime folder holding the NGX DLLs", def: "<repo>/runtime" };
 export const ADAPTER_OPT: OptionSpec = { flag: "--adapter N", desc: `GPU adapter index as \`probe\` listed it in this session (DXGI indices can change between runs); the adapter must have a CUDA device. auto = ${AUTO_GPU_CHOICE}`, def: "auto" };
@@ -136,7 +139,7 @@ export const COMMANDS: readonly CommandSpec[] = [
       { flag: "--factor N", desc: `upscale factor ${SR_FACTOR_OPTION.min}..${SR_FACTOR_OPTION.max}: the output is the source size times N, each side rounded to even, as in an image job, and at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side; DLSS runs in the mode whose ratio is nearest (${srModeList()}), and 1 runs DLAA`, def: String(SR_FACTOR_OPTION.fallback) },
       WARMUP_OPT,
       { flag: "--preset NAME", desc: "render preset: Default, A-F or J-O; the installed nvngx_dlss.dll decides which model each selects", def: DEFAULT_SR_PRESET },
-      { flag: "--dlss-version VER", desc: "use a specific installed SR DLL version (prefix match ok); list them with `versions`", def: "bundled runtime DLL" },
+      versionOpt("--dlss-version", "sr"),
       RUNTIME_OPT,
       ADAPTER_OPT,
     ],
@@ -177,7 +180,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     ],
     notes: [
       "The steps run in the order Super Resolution, Neural Rendering, frame generation, whatever order the switches come in. With none of them, the video is only re-encoded, resized when --factor or --size is given.",
-      `A step's options apply only with its switch: --motion and --sr-version with --sr; --intensity to --ui-correction and --nr-version with --nr; --fps, --multiplier, --fg-path and --fg-version with --fg. --preset is Neural Rendering's model preset hint: Super Resolution runs render preset ${DEFAULT_SR_PRESET}, as every Super Resolution job does.`,
+      `A step's options apply only with its switch: ${STEP_OPTION_NOTE}. --preset is Neural Rendering's model preset hint: Super Resolution runs render preset ${DEFAULT_SR_PRESET}, as every Super Resolution job does.`,
       `Frame generation's GPU: ${FRAME_GEN_GPU_CHOICE}.`,
       "The command line becomes a POST /api/jobs request and passes the same request validation before the GPU opens.",
     ],
@@ -196,7 +199,7 @@ export const COMMANDS: readonly CommandSpec[] = [
       { flag: "--engine MODE", desc: FG_PATH_DESC, def: "auto" },
       CODEC_OPT,
       QUALITY_OPT,
-      { flag: "--dlss-version VER", desc: "use a specific installed DLSS Frame Generation DLL version (prefix match ok); list them with `versions`", def: "bundled runtime DLL" },
+      versionOpt("--dlss-version", "fg"),
       RUNTIME_OPT,
     ],
     notes: ["A target at or below the source frame rate (--multiplier 1, or a lower --fps) generates no frames: the video is only resampled to it."],
