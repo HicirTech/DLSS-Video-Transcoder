@@ -104,12 +104,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const text = await response.text();
   if (!response.ok) {
-    throw new ApiError(response.status, bodyErrorMessage(text) ?? `${response.status} ${response.statusText}`);
+    throw new Error(
+      bodyErrorMessage(text) ??
+        `${init?.method ?? "GET"} ${path} failed with ${response.status} ${response.statusText} and no message. Check the server console, then try again.`,
+    );
   }
   try {
     return JSON.parse(text) as T;
   } catch {
-    throw new ApiError(response.status, `The server sent an unreadable response (invalid JSON) from ${path}`);
+    throw new Error(
+      `The server sent an unreadable response (invalid JSON) from ${path}. The page and the server may be different versions: reload the page, and restart the server if it keeps happening.`,
+    );
   }
 }
 
