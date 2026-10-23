@@ -24,6 +24,7 @@ import {
   isActiveState,
   isTerminalState,
   jobSteps,
+  resizesFrames,
   stepsSuffix,
 } from "../src/server/api-types.ts";
 import { resolveTargetRate } from "../src/pipeline/framegen-plan.ts";
@@ -88,6 +89,15 @@ describe("steps", () => {
     expect(stepsSuffix(["nr"], true)).toBe("nr");
     expect(stepsSuffix([], true)).toBe("resize");
     expect(stepsSuffix([], false)).toBe("copy");
+  });
+
+  test("a job resizes its frames only with a factor or size resize and no Super Resolution", () => {
+    const factor = { ...DEFAULT_SCALE_SETTINGS, mode: "factor" as const, factor: 1.5 };
+    expect(resizesFrames({ resize: factor })).toBe(true);
+    expect(resizesFrames({ resize: { ...DEFAULT_SCALE_SETTINGS, mode: "size" as const, width: 1280, height: 720 } })).toBe(true);
+    expect(resizesFrames({ superResolution: DEFAULT_SR_STEP, resize: factor })).toBe(false);
+    expect(resizesFrames({ resize: { ...DEFAULT_SCALE_SETTINGS, mode: "none" as const } })).toBe(false);
+    expect(resizesFrames({})).toBe(false);
   });
 });
 
