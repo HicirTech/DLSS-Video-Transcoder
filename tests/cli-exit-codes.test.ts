@@ -30,7 +30,7 @@ describe("a help page ends with exit status 0", () => {
     expect(out).toContain("exit status:");
     expect(out).toContain("  0  the command succeeded (probe: neural rendering is ready)");
     expect(out).toContain(`  ${EXIT_FAILED}  the run failed (probe: neural rendering is not ready)`);
-    expect(out).toContain(`  ${EXIT_USAGE}  the command line is wrong: an unknown command or option, a value an option does not accept, or a missing argument`);
+    expect(out).toContain(`  ${EXIT_USAGE}  the command line is wrong: an unknown command or option, an argument the command does not take, a value an option does not accept, or a missing argument`);
   }, SPAWN_TIMEOUT_MS);
 });
 
