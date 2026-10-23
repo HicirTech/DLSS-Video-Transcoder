@@ -6,15 +6,14 @@ import { errorMessage } from "../errors";
 /** How long typing must pause before the path is read, so a path typed out costs one request, not one per key. */
 const SETTLE_MS = 400;
 
-export interface MediaState {
-  /** The trimmed path this state describes; empty while there is none. */
-  path: string;
-  info: MediaInfo | null;
-  error: string | null;
-  loading: boolean;
-}
+/** What GET /api/media has said about the typed path: nothing yet without a path, then loading, then its answer. */
+export type MediaState =
+  | { status: "none" }
+  | { status: "loading" }
+  | { status: "ready"; info: MediaInfo }
+  | { status: "failed"; error: string };
 
-const NO_MEDIA: MediaState = { path: "", info: null, error: null, loading: false };
+const NO_MEDIA: MediaState = { status: "none" };
 
 /** What GET /api/media says about the file at `path`, read once typing has paused there. */
 export function useMediaInfo(path: string): MediaState {
@@ -27,11 +26,11 @@ export function useMediaInfo(path: string): MediaState {
       return;
     }
     let active = true;
-    setState({ path: trimmed, info: null, error: null, loading: true });
+    setState({ status: "loading" });
     const timer = setTimeout(() => {
       api.media(trimmed).then(
-        (info) => active && setState({ path: trimmed, info, error: null, loading: false }),
-        (err: unknown) => active && setState({ path: trimmed, info: null, error: errorMessage(err), loading: false }),
+        (info) => active && setState({ status: "ready", info }),
+        (err: unknown) => active && setState({ status: "failed", error: errorMessage(err) }),
       );
     }, SETTLE_MS);
     return () => {

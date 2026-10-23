@@ -39,14 +39,15 @@ export function ImagePanel({ jobs, now }: ImagePanelProps) {
   const [output, setOutput] = useState("");
   const [dllDirs, setDllDirs] = useState<DllDirs>(BUNDLED_DLLS);
   const media = useMediaInfo(input);
-  const source = media.info?.kind === "image" ? media.info : null;
+  const info = media.status === "ready" ? media.info : null;
+  const source = info?.kind === "image" ? info : null;
   // A still has no frames to generate between.
   const steps = { ...settings.imageSteps, fg: false };
   const plan = planJob({ kind: "image", input, source, steps, srScale: settings.superResolution.scale, resize: settings.resize, container: settings.encode.container });
   const unused = unusedSettings(steps);
   const outputSize = plan.outputSize ? formatSize(plan.outputSize) : null;
   // Image jobs read PNG only: a file GET /api/media found to be something else would fail the job.
-  const notPng = media.info !== null && media.info.kind !== "image";
+  const notPng = info !== null && source === null;
   const canRun = input.trim() !== "" && !runner.submitting && plan.srProblem === null && !notPng;
 
   const setStep = (step: ImageStepKind, on: boolean): void => update({ imageSteps: { ...settings.imageSteps, [step]: on } });
