@@ -152,16 +152,16 @@ export const DEFAULT_SR_PRESET = "L" satisfies keyof typeof DlssRenderPreset;
 
 /**
  * The per-quality-mode preset parameter name, keyed by PerfQuality value. DLSS SR
- * exposes six per-mode preset params, not one bare hint; MaxPerf(0) uses the
+ * exposes six per-mode preset params, not one bare hint; MaxPerf uses the
  * .Performance slot. Verified verbatim in nvngx_dlss.dll.
  */
 export const DLSS_PRESET_PARAM: Record<number, string> = {
-  0: "DLSS.Hint.Render.Preset.Performance",
-  1: "DLSS.Hint.Render.Preset.Balanced",
-  2: "DLSS.Hint.Render.Preset.Quality",
-  3: "DLSS.Hint.Render.Preset.UltraPerformance",
-  4: "DLSS.Hint.Render.Preset.UltraQuality",
-  5: "DLSS.Hint.Render.Preset.DLAA",
+  [PerfQuality.MaxPerf]: "DLSS.Hint.Render.Preset.Performance",
+  [PerfQuality.Balanced]: "DLSS.Hint.Render.Preset.Balanced",
+  [PerfQuality.MaxQuality]: "DLSS.Hint.Render.Preset.Quality",
+  [PerfQuality.UltraPerformance]: "DLSS.Hint.Render.Preset.UltraPerformance",
+  [PerfQuality.UltraQuality]: "DLSS.Hint.Render.Preset.UltraQuality",
+  [PerfQuality.DLAA]: "DLSS.Hint.Render.Preset.DLAA",
 };
 
 /**
@@ -190,7 +190,11 @@ export function perfQualityName(value: number): string {
  * is unavailable, not the ratio. Measured by tests/diag-sr-quality-modes.ts.
  */
 export const DLSS_RATIO: Record<number, number> = {
-  5: 1.0, 2: 1.5, 1: 1.7241379, 0: 2.0, 3: 3.0,
+  [PerfQuality.DLAA]: 1.0,
+  [PerfQuality.MaxQuality]: 1.5,
+  [PerfQuality.Balanced]: 1.7241379,
+  [PerfQuality.MaxPerf]: 2.0,
+  [PerfQuality.UltraPerformance]: 3.0,
 };
 
 /**
