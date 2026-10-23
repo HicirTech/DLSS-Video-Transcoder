@@ -93,7 +93,7 @@ function stepsOf(steps: Steps, scale: ScaleSettings, nr: NrSettings, motion: Mot
   return { superResolution, neuralRendering, resize: superResolution ? undefined : scale };
 }
 
-async function imageJob(name: string, steps: Steps, scale: ScaleSettings, nr = settings): Promise<void> {
+async function imageJob({ name, steps, scale, nr = settings }: { name: string; steps: Steps; scale: ScaleSettings; nr?: NrSettings }): Promise<void> {
   const output = join(outDir, `img-${safe(name)}.png`);
   const where = provenance();
   try {
@@ -123,19 +123,26 @@ async function videoJob(name: string, steps: Steps, motion: MotionKind, scale: S
 
 for (const engine of ["bypass", "nr", "sr"] as const) {
   for (const [scaleName, scale] of [["none", NONE], ["factor2", FACTOR2], ["size", SIZE]] as const) {
-    await imageJob(`${engine} scale=${scaleName}`, engine, scale);
+    await imageJob({ name: `${engine} scale=${scaleName}`, steps: engine, scale });
   }
 }
-await imageJob("nr all-settings", "nr", NONE, {
-  ...settings,
-  intensity: 1.5,
-  style: 2,
-  preset: 1,
-  localTone: 0.5,
-  localStructure: 1.5,
-  skinStructure: 0,
-  autoMask: true,
-  uiCorrection: true,
+// Intensity at or below NR_INTENSITY_EFFECTIVE_MAX, where the runtime still responds to it, so a value that is not
+// passed on shows in the hash; preset, skinStructure and uiCorrection are in NR_SETTINGS_IGNORED_BY_RUNTIME.
+await imageJob({
+  name: "nr all-settings",
+  steps: "nr",
+  scale: NONE,
+  nr: {
+    ...settings,
+    intensity: 0.5,
+    style: 2,
+    preset: 1,
+    localTone: 0.5,
+    localStructure: 1.5,
+    skinStructure: 0,
+    autoMask: true,
+    uiCorrection: true,
+  },
 });
 
 for (const engine of ["bypass", "nr", "sr"] as const) {
@@ -162,7 +169,7 @@ for (const [codec, container] of [
 await videoJob("nr scale=size copyAudio", "nr", "none", SIZE, { codec: "h264", quality: 20, container: "mp4", copyAudio: true });
 
 // Both steps in one job, which a job of one engine could not run.
-await imageJob("sr+nr scale=factor2", "sr+nr", FACTOR2);
+await imageJob({ name: "sr+nr scale=factor2", steps: "sr+nr", scale: FACTOR2 });
 for (const motion of ["none", "flow"] as const) {
   await videoJob(`sr+nr motion=${motion}`, "sr+nr", motion, FACTOR2, { codec: "h264", quality: 20, container: "mp4", copyAudio: false });
 }
