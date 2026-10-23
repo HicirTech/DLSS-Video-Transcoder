@@ -136,14 +136,16 @@ export function cudaDevicesForLuids(luids: readonly { luidLow: number; luidHigh:
   } catch (error) {
     return { ordinals, uuids, deviceCount: null, error: (error as Error).message };
   }
+  const deviceOut = new OutU32();
   const luid = new Uint8Array(8);
   const view = new DataView(luid.buffer);
   const nodeMask = new Uint32Array(1);
   for (let ordinal = 0; ordinal < count; ordinal++) {
-    const dev = device(ordinal);
-    luid.fill(0);
-    // Not every driver/device pair supports the query; a failure just means this
+    // Not every driver/device pair answers these queries; a failure just means this
     // device cannot be matched, not that the whole lookup failed.
+    if ((cu().cuDeviceGet(deviceOut.bytes, ordinal) as number) !== 0) continue;
+    const dev = deviceOut.value | 0;
+    luid.fill(0);
     if ((cu().cuDeviceGetLuid(luid, nodeMask, dev) as number) !== 0) continue;
     const low = view.getUint32(0, true);
     const high = view.getInt32(4, true);
