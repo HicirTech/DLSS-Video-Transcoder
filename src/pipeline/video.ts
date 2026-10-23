@@ -116,7 +116,7 @@ function rateParts(text: string): { num: number; den: number } {
 /** What every encode path of a job shares, settled once before a path is chosen. */
 interface VideoJob {
   options: VideoJobOptions;
-  progress: NonNullable<VideoJobOptions["onProgress"]>;
+  progress: ProgressReporter;
   ffmpeg: string;
   info: VideoInfo;
   /** The size the output is written at: the scale setting applied, then rounded to even. */
@@ -144,7 +144,7 @@ interface EnginePath {
   /** Decode argv without the binary; both encode paths spawn it themselves. */
   decodeArgs: ReturnType<typeof decodeArgv>;
   frameBytes: number;
-  guide: (rgba: Uint8Array, index: number) => { reset: boolean; motion: Float32Array | null; sceneCut: boolean };
+  guide: FrameGuide["guide"];
 }
 
 async function prepareVideoJob(options: VideoJobOptions): Promise<VideoJob> {
