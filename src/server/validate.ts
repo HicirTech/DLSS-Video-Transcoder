@@ -4,7 +4,9 @@
  * Node module, because the mock backends in web/ call it too.
  *
  * The limits come from api-types.ts, which the web UI clamps to as well, so a
- * value the UI accepts is never rejected here and vice versa.
+ * value the UI sends is never rejected here; the UI may offer less (intensity up
+ * to NR_INTENSITY_EFFECTIVE_MAX, no uiCorrection, only the named
+ * FRAME_GEN_FPS_CHOICES rates).
  */
 import { DEVICE_UUID_GROUP_LENGTHS, DEVICE_UUID_PATTERN } from "../native/device-uuid.ts";
 import { resolveTargetRate } from "../pipeline/framegen-plan.ts";

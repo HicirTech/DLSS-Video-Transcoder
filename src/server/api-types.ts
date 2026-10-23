@@ -1,28 +1,12 @@
 /**
- * Shared contract between the Bun server (src/server) and the React UI (web/).
- *
- * HTTP endpoints (all JSON unless noted):
- *   GET  /api/probe                 -> ProbeReport      (runs the hardware / runtime probe in a process of its own, can take a few seconds;
- *                                                        500 { error } if that process fails or does not finish in time)
- *   GET  /api/runtime               -> ProbeReport["runtime"]  (reads the runtime folder only; no probe runs)
- *   GET  /api/settings/defaults     -> SettingsDefaults
- *   GET  /api/jobs                  -> JobStatus[]
- *   POST /api/jobs   body JobRequest -> JobStatus
- *   GET  /api/jobs/:id              -> JobStatus
- *   POST /api/jobs/:id/cancel       -> JobStatus
- *   GET  /api/file?path=<abs path>  -> raw file bytes (previews of inputs/outputs; local paths only)
- *   POST /api/upload?name=<file name>  body: the file's bytes -> UploadResult (streamed to disk, any size; the path is usable as a job input)
- *   GET  /api/tools                 -> ToolsReport      (ffmpeg / ffprobe availability)
- *   GET  /api/catalog               -> RuntimeManifest  (installed DLSS runtime DLL versions; see each step's dllDir)
- *   GET  /api/media?path=<abs path> -> MediaInfo        (size, rate and length of a file a job would read; 404 when it is not a file, 400 when it cannot be read)
- * WebSocket:
- *   /ws  server -> client messages are WsEvent JSON; the client never needs to send anything.
+ * Shared contract between the Bun server (src/server) and the React UI (web/): the HTTP request and response shapes,
+ * the WebSocket events and the accepted setting values; README.md lists the endpoints.
  */
 
 // The accepted values for every constrained setting, in one place: the UI clamps
-// to these and the API rejects outside them, so the two cannot drift apart. Each
-// union below is derived from its array, and the order is the order menus and
-// messages list the values in.
+// within these (sometimes to less) and the API rejects outside them, so the UI
+// never sends a value the API refuses. Each union below is derived from its array,
+// and the order is the order menus and messages list the values in.
 export const JOB_KINDS = ["image", "video"] as const;
 type JobKind = (typeof JOB_KINDS)[number];
 /** The processing steps a job can run, in the order they run: Super Resolution, Neural Rendering, frame generation. */
@@ -215,14 +199,19 @@ export const NR_INTENSITY_EFFECTIVE_MAX = 1;
 
 /** Inclusive `[min, max]` for each numeric setting; `integer` fields reject fractions. */
 export const SETTING_RANGES = {
+  // NR strengths: the community-tool ranges described on NrSettings.
   intensity: { min: 0, max: 2, integer: false },
   localTone: { min: 0, max: 2, integer: false },
   localStructure: { min: 0, max: 2, integer: false },
   skinStructure: { min: -1, max: 2, integer: false },
+  // Chosen cap on extra still-image passes, not a runtime limit.
   warmupFrames: { min: 0, max: 64, integer: true },
+  // Chosen bounds for the decode resize; an sr job also starts at SR_FACTOR_MIN.
   factor: { min: 0.25, max: 8, integer: false },
+  // Chosen sanity bounds; the real per-side limits are NVENC_MAX_SIDE and DLSS_SR_MAX_OUTPUT_SIDE, checked in output-size.ts.
   width: { min: 16, max: 16384, integer: true },
   height: { min: 16, max: 16384, integer: true },
+  // The x264/x265 CRF and NVENC CQ scale; libsvtav1 accepts up to 63 but is held to the same 0..51.
   quality: { min: 0, max: 51, integer: true },
   // 16 is as far as the frame-generation rate table reaches from a 30 fps source (480 fps).
   multiplier: { min: 1, max: 16, integer: true },
@@ -570,6 +559,7 @@ export interface ToolsReport {
   nvenc: boolean | null;
 }
 
+/** Messages the server sends on /ws, as JSON; the client never sends anything. */
 export type WsEvent =
   | { type: "hello"; serverTime: string }
   | { type: "job"; job: JobStatus }
