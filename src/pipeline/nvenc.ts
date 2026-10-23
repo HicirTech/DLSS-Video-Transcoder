@@ -4,12 +4,9 @@
  * (NV_ENCODE_API_FUNCTION_LIST). Sessions run on the CUDA context shared with
  * NVOFA (src/native/cuda.ts), so input frames live in CUDA device memory
  * (NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR) and the output is an Annex-B
- * elementary stream the caller only has to mux.
- *
- * ABI from the NVIDIA Video Codec SDK 13.1.15 header (nvEncodeAPI.h): natural
- * alignment, no #pragma pack; NVENCAPI (__stdcall) is a no-op on x64, so the
- * default bun:ffi convention applies. NVENCSTATUS 0 = NV_ENC_SUCCESS. A 16-byte
- * GUID passed by value is a hidden pointer on Win64, so GUID params bind as "ptr".
+ * elementary stream the caller only has to mux. The DLL is loaded on first use
+ * rather than at import, so probeNvencCaps reports a missing one as unavailable
+ * and importers that only need NVENC_PRESET need no driver.
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import { callableAt, type OwnedCallable, type Signature } from "../native/com.ts";
@@ -110,10 +107,20 @@ const NVENC_STATUS: Record<number, string> = {
   23: "RESOURCE_REGISTER_FAILED", 24: "RESOURCE_NOT_REGISTERED", 25: "RESOURCE_NOT_MAPPED",
 };
 
-const lib = dlopen("nvEncodeAPI64.dll", {
-  NvEncodeAPICreateInstance: { args: [FFIType.ptr], returns: FFIType.i32 },
-  NvEncodeAPIGetMaxSupportedVersion: { args: [FFIType.ptr], returns: FFIType.i32 },
-});
+function load() {
+  return dlopen("nvEncodeAPI64.dll", {
+    NvEncodeAPICreateInstance: { args: [FFIType.ptr], returns: FFIType.i32 },
+    NvEncodeAPIGetMaxSupportedVersion: { args: [FFIType.ptr], returns: FFIType.i32 },
+  });
+}
+
+let lib: ReturnType<typeof load> | null = null;
+
+/** The DLL's entry points, loaded on first use; throws the dlopen error when NVENC is not installed. */
+function nvencSymbols(): ReturnType<typeof load>["symbols"] {
+  lib ??= load();
+  return lib.symbols;
+}
 
 let fnList: bigint[] | null = null;
 
@@ -123,7 +130,7 @@ function functions(): bigint[] {
   // NV_ENCODE_API_FUNCTION_LIST: version@0, reserved@4, 43 pointers @8.., reserved2[275]. Size 2552.
   const list = new Uint8Array(2552);
   new DataView(list.buffer).setUint32(0, STRUCT_VER.FUNCTION_LIST, true);
-  const st = lib.symbols.NvEncodeAPICreateInstance(list) as number;
+  const st = nvencSymbols().NvEncodeAPICreateInstance(list) as number;
   if (st !== OK) throw new Error(`NvEncodeAPICreateInstance failed: NVENC ${statusName(st)}`);
   const dv = new DataView(list.buffer);
   const out: bigint[] = [];
@@ -168,7 +175,7 @@ function openEncodeSession(context: bigint): { status: number; session: bigint }
 export function nvencMaxSupportedVersion(): { major: number; minor: number; raw: number } | null {
   try {
     const out = new Uint32Array(1);
-    const st = lib.symbols.NvEncodeAPIGetMaxSupportedVersion(out) as number;
+    const st = nvencSymbols().NvEncodeAPIGetMaxSupportedVersion(out) as number;
     if (st !== OK) return null;
     const raw = out[0]!;
     return { major: raw >> 4, minor: raw & 0xf, raw };
