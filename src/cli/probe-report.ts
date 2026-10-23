@@ -11,9 +11,9 @@ function opticalFlowLine(flow: ProbeOpticalFlow): string {
   const grid = flow.pipelineGrid;
   if (flow.status === "not queried") return `not queried — ${flow.detail}`;
   if (flow.status === "unavailable" || !flow.limits || !flow.outGridSizes) return `unavailable on CUDA device ${flow.cudaOrdinal} — ${flow.detail}`;
-  const l = flow.limits;
-  const fits = opticalFlowGridFits(l, grid);
-  return `ok on CUDA device ${flow.cudaOrdinal}; input ${l.widthMin}..${l.widthMax} x ${l.heightMin}..${l.heightMax} px; output grids ${flow.outGridSizes.join(", ")}; the pipeline feeds it a ${grid.minSide}..${grid.maxLongSide} px grid, which ${fits ? "fits" : "does NOT fit"}`;
+  const limits = flow.limits;
+  const fits = opticalFlowGridFits(limits, grid);
+  return `ok on CUDA device ${flow.cudaOrdinal}; input ${limits.widthMin}..${limits.widthMax} x ${limits.heightMin}..${limits.heightMax} px; output grids ${flow.outGridSizes.join(", ")}; the pipeline feeds it a ${grid.minSide}..${grid.maxLongSide} px grid, which ${fits ? "fits" : "does NOT fit"}`;
 }
 
 export function printProbe(report: ProbeReport): void {
