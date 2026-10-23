@@ -128,13 +128,12 @@ export class DlssNrSession {
 
   /**
    * Async zero-copy path: records upload, evaluate and a GPU copy of the output
-   * into `dst` onto the caller's `list` without submitting it, so the caller can
+   * into `target.dst` onto `target.list` without submitting it, so the caller can
    * submit once and signal a fence that a CUDA encoder waits on — the frame never
-   * reaches the CPU. `staging` must be an UPLOAD buffer of at least
-   * linearLayout(width, height, RGBA8).totalBytes, and `dst` a row-major RGBA
-   * texture of `rowPitch` bytes per row.
+   * reaches the CPU.
    */
-  recordEvaluateInto(list: D3D12GraphicsCommandList, staging: D3D12Resource, colorRgba: Uint8Array, reset: boolean, dst: D3D12Resource, rowPitch: number): void {
+  recordEvaluateInto(colorRgba: Uint8Array, reset: boolean, target: NrEvaluateIntoTarget): void {
+    const { list, staging, dst, rowPitch } = target;
     const expected = this.width * this.height * 4;
     if (colorRgba.byteLength !== expected) throw new Error(`DLSS NR: expected ${expected} color bytes, got ${colorRgba.byteLength}`);
     const layout = linearLayout(this.width, this.height, DXGI_FORMAT_R8G8B8A8_UNORM);
@@ -174,4 +173,15 @@ export class DlssNrSession {
     // No Shutdown1: the standalone dlssnr DLL survives it, but the SR path cannot
     // (see sr.ts), so both leave NGX to process exit. The session owns the device.
   }
+}
+
+/** Where recordEvaluateInto records and copies an evaluated frame. */
+export interface NrEvaluateIntoTarget {
+  list: D3D12GraphicsCommandList;
+  /** UPLOAD buffer of at least linearLayout(width, height, RGBA8).totalBytes. */
+  staging: D3D12Resource;
+  /** Row-major RGBA texture the output is copied into. */
+  dst: D3D12Resource;
+  /** Bytes per row of `dst`. */
+  rowPitch: number;
 }
