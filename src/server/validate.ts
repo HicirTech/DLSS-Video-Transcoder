@@ -136,15 +136,38 @@ function checkFrameGen(step: unknown, kind: unknown): string | null {
   return first(step.engine === undefined ? null : checkEnum(step.engine, FRAME_GEN_ENGINES, "frameGen.engine"), checkDllDirType(step, "frameGen"));
 }
 
-/** Frame generation writes FRAME_GEN_CONTAINER only, so a request must not ask for another container or extension. */
-function checkFrameGenOutput(v: Record<string, unknown>): string | null {
+/** Frame generation writes FRAME_GEN_CONTAINER only, so a request must not ask for another container. */
+function checkFrameGenContainer(v: Record<string, unknown>): string | null {
   if (isObject(v.encode) && v.encode.container !== FRAME_GEN_CONTAINER) {
     return `Frame generation writes ${FRAME_GEN_CONTAINER} only; set encode.container to "${FRAME_GEN_CONTAINER}" (got ${JSON.stringify(v.encode.container)}).`;
   }
-  if (typeof v.output === "string" && !v.output.toLowerCase().endsWith(`.${FRAME_GEN_CONTAINER}`)) {
-    return `Frame generation writes ${FRAME_GEN_CONTAINER} only; give the output path a .${FRAME_GEN_CONTAINER} extension or omit it.`;
-  }
   return null;
+}
+
+/**
+ * An explicit output has to end in the extension of what the job writes: ffmpeg picks the muxer from the name, so
+ * another one would quietly not honour encode.container, and an image job writes PNG whatever the name says.
+ */
+function checkOutputExtension(v: Record<string, unknown>): string | null {
+  if (typeof v.output !== "string") return null;
+  const endsWith = (extension: string): boolean => (v.output as string).toLowerCase().endsWith(`.${extension}`);
+  if (v.kind === "image") return endsWith("png") ? null : "output must end in .png: an image job writes PNG; rename it or omit it.";
+  if (v.frameGen !== undefined) {
+    return endsWith(FRAME_GEN_CONTAINER) ? null : `Frame generation writes ${FRAME_GEN_CONTAINER} only; give the output path a .${FRAME_GEN_CONTAINER} extension or omit it.`;
+  }
+  const container = isObject(v.encode) ? String(v.encode.container) : DEFAULT_ENCODE_SETTINGS.container;
+  return endsWith(container) ? null : `output must end in .${container}, the encode.container this job writes; rename it or set encode.container to match.`;
+}
+
+/** A resize is the job's own size change; Super Resolution sets the output size itself. */
+function checkResize(v: Record<string, unknown>): string | null {
+  if (v.superResolution !== undefined) return "resize does not apply with superResolution, which sets the output size itself; omit it.";
+  return checkScale(v.resize, "resize");
+}
+
+function checkWarmupFrames(v: Record<string, unknown>): string | null {
+  if (v.kind !== "image") return "warmupFrames applies to image jobs only.";
+  return checkNumber(v.warmupFrames, "warmupFrames", "warmupFrames");
 }
 
 function checkEncode(value: unknown, kind: unknown): string | null {
@@ -193,10 +216,12 @@ export function validateJobRequest(value: unknown): string | null {
     v.superResolution === undefined ? null : checkSuperResolution(v.superResolution, v.kind),
     v.neuralRendering === undefined ? null : checkNeuralRendering(v.neuralRendering),
     v.frameGen === undefined ? null : checkFrameGen(v.frameGen, v.kind),
-    v.frameGen === undefined ? null : checkFrameGenOutput(v),
-    v.resize === undefined ? null : v.superResolution !== undefined ? "resize does not apply with superResolution, which sets the output size itself; omit it." : checkScale(v.resize, "resize"),
+    v.frameGen === undefined ? null : checkFrameGenContainer(v),
+    v.resize === undefined ? null : checkResize(v),
     v.encode === undefined ? null : checkEncode(v.encode, v.kind),
-    v.warmupFrames === undefined ? null : v.kind !== "image" ? "warmupFrames applies to image jobs only." : checkNumber(v.warmupFrames, "warmupFrames", "warmupFrames"),
+    // After checkEncode, so an unknown container is reported as one rather than as a wrong extension.
+    checkOutputExtension(v),
+    v.warmupFrames === undefined ? null : checkWarmupFrames(v),
     v.adapterUuid === undefined ? null : checkAdapterUuid(v),
   );
 }
