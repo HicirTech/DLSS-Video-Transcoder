@@ -1,8 +1,6 @@
 /**
  * NVIDIA hardware Optical Flow (NVOFA) via the CUDA interface of nvofapi64.dll:
- * the flow session, its GPU buffers, and the FlowBackend (block-match.ts) that wraps them.
- * Turing and later run this on a dedicated engine, separate from the CUDA and
- * graphics cores, so it costs neither shader nor CPU time.
+ * the flow session, its GPU buffers, and the FlowBackend (flow-backend.ts) that wraps them.
  *
  * ABI is from github.com/NVIDIA/NVIDIAOpticalFlowSDK (nvOpticalFlowCommon.h +
  * nvOpticalFlowCuda.h); API version 2.0. NV_OF_STATUS 0 = NV_OF_SUCCESS.
@@ -286,7 +284,7 @@ function toByte(v: number): number {
 }
 
 /**
- * Wrap an NVOFA session as a FlowBackend (block-match.ts): it receives the estimator's
+ * Wrap an NVOFA session as a FlowBackend (flow-backend.ts): it receives the estimator's
  * downscaled Float32 grayscale grids, runs hardware optical flow, and returns the
  * grid-resolution (dx, dy) field in grid pixels (current -> previous, matching
  * the block-match sign convention).
