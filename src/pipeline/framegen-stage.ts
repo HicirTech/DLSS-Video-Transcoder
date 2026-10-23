@@ -8,7 +8,7 @@
  * A cascade chains several of these in memory; a native run uses one.
  */
 import { DlssgSession } from "./dlssg.ts";
-import type { TimedFrame } from "./framegen-plan.ts";
+import type { TimedFrame } from "./nearest-timestamp-writer.ts";
 import { type Rational, ratAdd, ratMul, ratSub, rational } from "./rational.ts";
 import { ABORT_TIMEOUT_MS } from "./worker-abort.ts";
 

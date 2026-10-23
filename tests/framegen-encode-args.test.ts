@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { buildFrameGenEncodeArgs } from "../src/pipeline/framegen-encode-sink.ts";
-import { FRAMEGEN_CUDA_DEVICE } from "../src/pipeline/framegen-plan.ts";
+import { FRAMEGEN_CUDA_DEVICE } from "../src/pipeline/framegen-device.ts";
 import { rational } from "../src/pipeline/rational.ts";
 
 const base = {
