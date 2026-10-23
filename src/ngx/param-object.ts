@@ -1,14 +1,6 @@
 /**
- * Our own NVSDK_NGX_Parameter object, for driving a feature snippet DLL directly.
- *
- * The snippet DLLs (nvngx_dlss.dll, nvngx_dlssg.dll, nvngx_dlssnr.dll) export
- * CreateFeature / EvaluateFeature but NOT AllocateParameters /
- * GetCapabilityParameters — those live only in the driver's NGX core — so a
- * snippet driven in-process must be handed a parameter object we own: a
- * C++-style object whose first field points at a vtable of Set / Get / Reset
- * methods, laid out in MSVC's reverse-declaration order (the "msvc" layout in
- * params.ts). It is backed by a plain JavaScript map, so the runtime and our own
- * code read and write one store.
+ * Our own NVSDK_NGX_Parameter object for driving a feature snippet DLL directly, laid out in params.ts's MSVC vtable
+ * order and backed by a JavaScript map that the runtime and our own code both read and write.
  */
 import { FFIType, JSCallback } from "bun:ffi";
 import { NativeStruct, asPtr, readCString, viewNative } from "../native/memory.ts";
@@ -47,6 +39,11 @@ const GETTERS: ReadonlyArray<{ slot: keyof Slots; write: Writer }> = [
   { slot: "getU64", write: writeU64 },
 ];
 
+/**
+ * The snippet DLLs (nvngx_dlss.dll, nvngx_dlssg.dll, nvngx_dlssnr.dll) export CreateFeature / EvaluateFeature but not
+ * AllocateParameters / GetCapabilityParameters, which live only in the driver's NGX core, so a snippet driven
+ * in-process is handed this object: its first field points at a vtable of Set / Get / Reset callbacks.
+ */
 export class NgxParamObject {
   private readonly store = new Map<string, Value>();
   private readonly callbacks: JSCallback[] = [];

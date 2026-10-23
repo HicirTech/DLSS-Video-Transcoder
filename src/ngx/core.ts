@@ -54,7 +54,7 @@ export function locateNgxCores(): NgxCoreLocation[] {
   return found;
 }
 
-/** Builds NVSDK_NGX_FeatureCommonInfo (40 bytes) with a path list; keeps the backing buffers alive. */
+/** Builds NVSDK_NGX_FeatureCommonInfo (nvsdk_ngx_defs.h, NVIDIA/DLSS v310.9.1; 40 bytes) with a path list; keeps the backing buffers alive. */
 export class FeatureCommonInfo {
   readonly struct = new NativeStruct(40);
   private readonly keep: Uint8Array[] = [];
@@ -88,8 +88,8 @@ export interface FeatureRequirementResult {
  * There is no shutdown here on purpose: NVSDK_NGX_D3D12_Shutdown1 on this driver
  * core releases the D3D12 device it was given and leaves the process unable to
  * create another on that adapter (issue #75), and it faults outright once a
- * feature exists (sr.ts). Every caller leaves NGX to process exit and releases
- * only the objects it owns.
+ * feature exists. Every caller leaves NGX to process exit and releases only the
+ * objects it owns: reuse one session across jobs, or run one job per short-lived process.
  */
 export class NgxCore {
   private readonly module: NativeModule;
@@ -222,7 +222,7 @@ export class NgxCore {
   /** Static capability query; does not require Init. */
   featureRequirements(adapter: number, featureId: number, appId: bigint, appDataPath: string, featureInfo: FeatureCommonInfo | null): FeatureRequirementResult {
     const path = wstring(appDataPath);
-    // NVSDK_NGX_FeatureDiscoveryInfo: SDKVersion, FeatureID, Identifier{type, union}, ApplicationDataPath, FeatureInfo
+    // NVSDK_NGX_FeatureDiscoveryInfo (nvsdk_ngx_defs.h, NVIDIA/DLSS v310.9.1): SDKVersion, FeatureID, Identifier{type, union}, ApplicationDataPath, FeatureInfo
     const info = new NativeStruct(56);
     info.u32(0, NGX_VERSION_API);
     info.u32(4, featureId);
@@ -230,6 +230,7 @@ export class NgxCore {
     info.u64(16, appId);
     info.pointer(40, ptr(path));
     info.pointer(48, featureInfo ? featureInfo.ptr : 0);
+    // NVSDK_NGX_FeatureRequirement (nvsdk_ngx_defs.h): FeatureSupported u32, MinHWArchitecture u32, MinOSVersion char[255]
     const out = new NativeStruct(264);
     // NGX reads `path` and `featureInfo` through `info`, and a local is no GC root after its last use (memory.ts).
     this.callOwners = [path, featureInfo];

@@ -57,6 +57,8 @@ export class DlssNrSession {
       throw new Error(`${nr.name} needs ${nr.dllName} in ${dllDir}: place it there (README "Runtime folder"), or pick an installed version with --nr-version or neuralRendering.dllDir (the probe and GET /api/catalog list them).`);
     }
 
+    // Feature 18 ships as a self-contained provider that exports the NVSDK_NGX_D3D12 API but not the parameter
+    // allocator, so the DLL is loaded in place of the driver core and handed our own NgxParamObject.
     const core = NgxCore.load({ path: dll, folder: dllDir, source: "driverstore", modifiedAt: statSync(dll).mtime });
     startNgxCore(core, session.device.ptr, {
       callerDir: callerDir(opts.runtimeDir),
@@ -170,8 +172,8 @@ export class DlssNrSession {
     this.params.close();
     this.color.release();
     this.output.release();
-    // No Shutdown1: the standalone dlssnr DLL survives it, but the SR path cannot
-    // (see sr.ts), so both leave NGX to process exit. The session owns the device.
+    // NGX is left to process exit (see NgxCore); the standalone dlssnr DLL would survive Shutdown1, but the SR path
+    // shares the core. The session owns the device.
   }
 }
 

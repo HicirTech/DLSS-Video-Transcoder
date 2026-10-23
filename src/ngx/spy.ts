@@ -1,8 +1,6 @@
 /**
- * A "spy" NVSDK_NGX_Parameter: a C++-style object whose vtable slots are all
- * JavaScript callbacks. Handing it to the driver reveals which virtual slots
- * it calls and which parameter names it asks for, without any guessing about
- * the vtable layout. Every call is answered with UnsupportedParameter.
+ * A "spy" NVSDK_NGX_Parameter whose vtable slots are all JavaScript callbacks: handed to the driver, it reveals which
+ * slots it calls and which parameter names it asks for, without guessing the layout, and answers UnsupportedParameter.
  */
 import { FFIType, JSCallback } from "bun:ffi";
 import { NativeStruct, asPtr, readCString } from "../native/memory.ts";
