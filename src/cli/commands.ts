@@ -13,6 +13,16 @@ interface OptionSpec {
   readonly def?: string;
 }
 
+/** The flag as matched in argv: the first token of `flag` ("--factor N" -> "--factor"). */
+export function optionName(option: OptionSpec): string {
+  return option.flag.split(/\s+/)[0]!;
+}
+
+/** Whether the flag consumes a following value token ("--factor N" does, "--json" does not). */
+export function takesValue(option: OptionSpec): boolean {
+  return /\s/.test(option.flag.trim());
+}
+
 export interface CommandSpec {
   readonly name: string;
   readonly summary: string;

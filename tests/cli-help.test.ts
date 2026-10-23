@@ -3,13 +3,13 @@
  * SETTING_RANGES entry the option is checked against. No GPU.
  */
 import { describe, expect, test } from "bun:test";
-import { commandSpec, FG_MULTIPLIER_OPTION, SR_FACTOR_OPTION, VIDEO_STEP_OPTS, WARMUP_OPTION } from "../src/cli/commands.ts";
-import { DLSS_RATIO, PerfQuality, perfQualityName } from "../src/ngx/results.ts";
+import { commandSpec, FG_MULTIPLIER_OPTION, optionName, SR_FACTOR_OPTION, VIDEO_STEP_OPTS, WARMUP_OPTION } from "../src/cli/commands.ts";
+import { DEFAULT_SR_PRESET, DLSS_RATIO, DlssRenderPreset, PerfQuality, perfQualityName } from "../src/ngx/results.ts";
 import { DEFAULT_ENCODE_SETTINGS, DEFAULT_WARMUP_FRAMES, DLSS_SR_MAX_OUTPUT_SIDE, SETTING_RANGES } from "../src/server/api-types.ts";
 
 /** The help row of `flag` ("--intensity") in `command`'s table entry. */
 function optionRow(command: string, flag: string) {
-  const row = commandSpec(command).options.find((option) => option.flag.split(/\s+/)[0] === flag);
+  const row = commandSpec(command).options.find((option) => optionName(option) === flag);
   if (!row) throw new Error(`${command} has no ${flag} row`);
   return row;
 }
@@ -75,10 +75,10 @@ describe("video", () => {
   });
 
   test("every step's options are on the page, after the step switches", () => {
-    const flags = commandSpec("video").options.map((option) => option.flag.split(/\s+/)[0]!);
+    const flags = commandSpec("video").options.map(optionName);
     for (const step of ["sr", "nr", "fg"] as const) {
       expect(flags.indexOf(`--${step}`), step).toBeGreaterThanOrEqual(0);
-      for (const row of VIDEO_STEP_OPTS[step]) expect(flags.indexOf(row.flag.split(/\s+/)[0]!), row.flag).toBeGreaterThan(flags.indexOf("--fg"));
+      for (const row of VIDEO_STEP_OPTS[step]) expect(flags.indexOf(optionName(row)), row.flag).toBeGreaterThan(flags.indexOf("--fg"));
     }
   });
 
