@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_SCALE_SETTINGS, FRAME_GEN_CONTAINER, jobSteps, type StepKind } from "../src/server/api-types.ts";
 import { validateJobRequest } from "../src/server/validate.ts";
-import { defaultSettings, type StoredSettings } from "../web/src/hooks/useSettings.tsx";
+import { defaultSettings, type StoredSettings } from "../web/src/stored-settings.ts";
 import { frameGenOutputFps, planJob, planStages } from "../web/src/job-plan.ts";
 import { imageRequest, videoRequest } from "../web/src/job-requests.ts";
 
