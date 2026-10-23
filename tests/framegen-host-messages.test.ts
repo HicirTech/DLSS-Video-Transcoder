@@ -10,7 +10,7 @@ import { type InterpolationPlan, chooseInterpolationPlan } from "../src/pipeline
 import { rational } from "../src/pipeline/rational.ts";
 
 function nativePlan(multiplier: number): InterpolationPlan {
-  return chooseInterpolationPlan(rational(30), rational(30 * multiplier), "native", 6, { cfr: true, hagsEnabled: true });
+  return chooseInterpolationPlan({ sourceRate: rational(30), targetRate: rational(30 * multiplier), engine: "native", nativeMultiplierMax: 6, hagsEnabled: true });
 }
 
 describe("noFramesGeneratedMessage", () => {
@@ -33,7 +33,7 @@ describe("noFramesGeneratedMessage", () => {
   });
 
   test("a cascade that produced nothing is not sent to the cascade engine it already ran on", () => {
-    const cascade = chooseInterpolationPlan(rational(30), rational(120), "cascade", 6, { cfr: true, hagsEnabled: true });
+    const cascade = chooseInterpolationPlan({ sourceRate: rational(30), targetRate: rational(120), engine: "cascade", nativeMultiplierMax: 6, hagsEnabled: true });
     const message = noFramesGeneratedMessage(cascade, { disabledFrames: 0, hagsEnabled: true });
     expect(message).toContain("(30 -> 120 fps via Cascade). 2x generation itself failed");
     expect(message).not.toContain("cascade engine");

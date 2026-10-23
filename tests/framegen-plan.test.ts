@@ -59,26 +59,30 @@ describe("target rates", () => {
 
 describe("exactNativeMultiplier", () => {
   const s30 = rational(30);
+  const multiplier = (sourceRate: Rational, targetRate: Rational, nativeMultiplierMax: number) => exactNativeMultiplier({ sourceRate, targetRate, nativeMultiplierMax });
   test("integer ratios within the maximum", () => {
-    expect(exactNativeMultiplier(s30, rational(60), 5)).toBe(2);
-    expect(exactNativeMultiplier(s30, rational(120), 5)).toBe(4);
-    expect(exactNativeMultiplier(rational(30000, 1001), rational(60000, 1001), 5)).toBe(2);
+    expect(multiplier(s30, rational(60), 5)).toBe(2);
+    expect(multiplier(s30, rational(120), 5)).toBe(4);
+    expect(multiplier(rational(30000, 1001), rational(60000, 1001), 5)).toBe(2);
   });
   test("not above source -> 1; non-integer or above max -> null", () => {
-    expect(exactNativeMultiplier(s30, s30, 5)).toBe(1);
-    expect(exactNativeMultiplier(rational(60), s30, 5)).toBe(1);
-    expect(exactNativeMultiplier(s30, rational(144), 5)).toBeNull();
-    expect(exactNativeMultiplier(rational(24), rational(60), 5)).toBeNull(); // 2.5x
-    expect(exactNativeMultiplier(s30, rational(180), 5)).toBeNull(); // 6 > 5
-    expect(exactNativeMultiplier(s30, rational(180), 6)).toBe(6);
+    expect(multiplier(s30, s30, 5)).toBe(1);
+    expect(multiplier(rational(60), s30, 5)).toBe(1);
+    expect(multiplier(s30, rational(144), 5)).toBeNull();
+    expect(multiplier(rational(24), rational(60), 5)).toBeNull(); // 2.5x
+    expect(multiplier(s30, rational(180), 5)).toBeNull(); // 6 > 5
+    expect(multiplier(s30, rational(180), 6)).toBe(6);
   });
 });
 
 describe("chooseInterpolationPlan", () => {
   const s30 = rational(30);
+  /** A plan from a 30 fps source unless `sourceRate` says otherwise, on a runtime whose native maximum is 5x. */
+  const planTo = (targetRate: Rational, request: Partial<InterpolationRequest> = {}) =>
+    chooseInterpolationPlan({ sourceRate: s30, targetRate, engine: "auto", nativeMultiplierMax: 5, ...request });
 
   test("30 -> 60 auto with HAGS: native 2x", () => {
-    const plan = chooseInterpolationPlan(s30, rational(60), "auto", 5, { hagsEnabled: true });
+    const plan = planTo(rational(60), { hagsEnabled: true });
     expect(plan.path).toBe("Native DLSSG");
     expect(plan.nativeMultiplier).toBe(2);
     expect(plan.generatedPerInterval).toBe(1);
@@ -87,12 +91,12 @@ describe("chooseInterpolationPlan", () => {
   });
 
   test("30 -> 120 auto: native 4x with HAGS, cascade of 2 stages without", () => {
-    const withHags = chooseInterpolationPlan(s30, rational(120), "auto", 5, { hagsEnabled: true });
+    const withHags = planTo(rational(120), { hagsEnabled: true });
     expect(withHags.path).toBe("Native DLSSG");
     expect(withHags.nativeMultiplier).toBe(4);
     expect(withHags.generatedPerInterval).toBe(3);
 
-    const noHags = chooseInterpolationPlan(s30, rational(120), "auto", 5, { hagsEnabled: false });
+    const noHags = planTo(rational(120), { hagsEnabled: false });
     expect(noHags.path).toBe("Cascade");
     expect(noHags.cascadeStages).toBe(2);
     expect(noHags.gridMultiplier).toBe(4);
@@ -102,20 +106,20 @@ describe("chooseInterpolationPlan", () => {
   });
 
   test("30 -> 60 auto without HAGS: still native 2x (only 3x and above need HAGS)", () => {
-    const plan = chooseInterpolationPlan(s30, rational(60), "auto", 5, { hagsEnabled: false });
+    const plan = planTo(rational(60), { hagsEnabled: false });
     expect(plan.path).toBe("Native DLSSG");
     expect(plan.nativeMultiplier).toBe(2);
     expect(plan.generatedPerInterval).toBe(1);
   });
 
   test("engine native forces the native path even without HAGS", () => {
-    const plan = chooseInterpolationPlan(s30, rational(120), "native", 5, { hagsEnabled: false });
+    const plan = planTo(rational(120), { engine: "native", hagsEnabled: false });
     expect(plan.path).toBe("Native DLSSG");
     expect(plan.nativeMultiplier).toBe(4);
   });
 
   test("30 -> 144: cascade of 3 stages on an 8x grid, error 1/480 s", () => {
-    const plan = chooseInterpolationPlan(s30, rational(144), "auto", 5, { hagsEnabled: true });
+    const plan = planTo(rational(144), { hagsEnabled: true });
     expect(plan.path).toBe("Cascade");
     expect(plan.cascadeStages).toBe(3);
     expect(plan.gridMultiplier).toBe(8);
@@ -123,25 +127,34 @@ describe("chooseInterpolationPlan", () => {
     expect(eq(plan.maximumTemporalError, rational(1, 480))).toBe(true);
   });
 
+  test("30 -> 240 past the native maximum: cascade of 3 stages whose 8x grid is exact, error 0", () => {
+    const plan = planTo(rational(240), { nativeMultiplierMax: 4, hagsEnabled: true });
+    expect(plan.path).toBe("Cascade");
+    expect(plan.cascadeStages).toBe(3);
+    expect(plan.gridMultiplier).toBe(8);
+    expect(plan.generatedPerInterval).toBe(7);
+    expect(eq(plan.maximumTemporalError, rational(0))).toBe(true);
+  });
+
   test("engine native rejects a non-integer grid", () => {
-    expect(() => chooseInterpolationPlan(s30, rational(144), "native", 5)).toThrow(/not an exact native DLSSG grid.*native maximum 5x/);
+    expect(() => planTo(rational(144), { engine: "native" })).toThrow(/not an exact native DLSSG grid.*native maximum 5x/);
   });
 
   test("29.97 -> 59.94 auto: native 2x", () => {
-    const plan = chooseInterpolationPlan(rational(30000, 1001), rational(60000, 1001), "auto", 5, { hagsEnabled: true });
+    const plan = planTo(rational(60000, 1001), { sourceRate: rational(30000, 1001), hagsEnabled: true });
     expect(plan.path).toBe("Native DLSSG");
     expect(plan.nativeMultiplier).toBe(2);
   });
 
   test("24 -> 60 (2.5x): cascade of 3 stages, error 1/384 s", () => {
-    const plan = chooseInterpolationPlan(rational(24), rational(60), "auto", 5, { hagsEnabled: true });
+    const plan = planTo(rational(60), { sourceRate: rational(24), hagsEnabled: true });
     expect(plan.path).toBe("Cascade");
     expect(plan.cascadeStages).toBe(3);
     expect(eq(plan.maximumTemporalError, rational(1, 384))).toBe(true);
   });
 
   test("engine cascade forces a 1-stage cascade for 2x", () => {
-    const plan = chooseInterpolationPlan(s30, rational(60), "cascade", 5, { hagsEnabled: true });
+    const plan = planTo(rational(60), { engine: "cascade", hagsEnabled: true });
     expect(plan.path).toBe("Cascade");
     expect(plan.cascadeStages).toBe(1);
     expect(plan.gridMultiplier).toBe(2);
@@ -149,25 +162,24 @@ describe("chooseInterpolationPlan", () => {
   });
 
   test("target at or below source: source-frame resampling", () => {
-    const same = chooseInterpolationPlan(s30, s30, "auto", 5);
+    const same = planTo(s30);
     expect(same.path).toBe("Source-frame resampling");
     expect(same.generatedPerInterval).toBe(0);
     expect(eq(same.maximumTemporalError, rational(1, 60))).toBe(true);
-    expect(chooseInterpolationPlan(rational(60), s30, "auto", 5).path).toBe("Source-frame resampling");
+    expect(planTo(s30, { sourceRate: rational(60) }).path).toBe("Source-frame resampling");
   });
 
   test("validation", () => {
-    for (const engine of FRAME_GEN_ENGINES) expect(() => chooseInterpolationPlan(s30, rational(60), engine, 5), engine).not.toThrow();
-    expect(() => chooseInterpolationPlan(s30, rational(60), "turbo" as never, 5)).toThrow(/Unknown frame-generation engine "turbo"\. Choose one of: auto, native, cascade\./);
-    expect(() => chooseInterpolationPlan(s30, rational(60), "native", 5, { cfr: false })).toThrow(/constant-frame-rate/);
-    expect(() => chooseInterpolationPlan(rational(0), rational(60), "auto", 5)).toThrow(/positive/);
+    for (const engine of FRAME_GEN_ENGINES) expect(() => planTo(rational(60), { engine }), engine).not.toThrow();
+    expect(() => planTo(rational(60), { engine: "turbo" as never })).toThrow(/Unknown frame-generation engine "turbo"\. Choose one of: auto, native, cascade\./);
+    expect(() => planTo(rational(60), { sourceRate: rational(0) })).toThrow(/positive/);
   });
 });
 
 describe("isNativeMultiFramePlan", () => {
   /** The plan a 30 fps source gets on a host that reports MultiFrameCountMax 5 (native up to 6x). */
   const planTo = (targetFps: number, engine: FrameGenEngine = "auto", hagsEnabled = true) =>
-    chooseInterpolationPlan(rational(30), rational(targetFps), engine, 6, { cfr: true, hagsEnabled });
+    chooseInterpolationPlan({ sourceRate: rational(30), targetRate: rational(targetFps), engine, nativeMultiplierMax: 6, hagsEnabled });
 
   test("a native session that generates two or more frames per interval is one", () => {
     expect(isNativeMultiFramePlan(planTo(90))).toBe(true); // native 3x
