@@ -12,7 +12,7 @@
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import { formatDeviceUuid } from "./device-uuid.ts";
-import { OutU32, OutU64 } from "./memory.ts";
+import { NativeStruct, OutU32, OutU64 } from "./memory.ts";
 
 const SYMBOLS = {
   cuInit: { args: [FFIType.u32], returns: FFIType.i32 },
@@ -37,8 +37,10 @@ const CU_NAMES: Record<number, string> = {
   0: "SUCCESS", 1: "INVALID_VALUE", 2: "OUT_OF_MEMORY", 3: "NOT_INITIALIZED", 100: "NO_DEVICE",
   101: "INVALID_DEVICE", 201: "INVALID_CONTEXT", 209: "NO_BINARY_FOR_GPU", 304: "OPERATING_SYSTEM", 999: "UNKNOWN",
 };
-function ck(r: number, what: string): void {
-  if (r !== 0) throw new Error(`CUDA ${what} failed: ${CU_NAMES[r] ?? "error"} (${r})`);
+
+/** Throws when a CUDA Driver API call returned anything but CUDA_SUCCESS, naming the result where it is known. */
+export function checkCuResult(result: number, what: string): void {
+  if (result !== 0) throw new Error(`CUDA ${what} failed: ${CU_NAMES[result] ?? "error"} (${result})`);
 }
 
 const CU_MEMORYTYPE_HOST = 1;
@@ -54,7 +56,7 @@ let lib: ReturnType<typeof load> | null = null;
 function cu(): ReturnType<typeof load>["symbols"] {
   if (!lib) {
     const loaded = load();
-    ck(loaded.symbols.cuInit(0) as number, "cuInit");
+    checkCuResult(loaded.symbols.cuInit(0) as number, "cuInit");
     lib = loaded;
   }
   return lib.symbols;
@@ -62,7 +64,7 @@ function cu(): ReturnType<typeof load>["symbols"] {
 
 function device(ordinal: number): number {
   const dev = new OutU32();
-  ck(cu().cuDeviceGet(dev.bytes, ordinal) as number, "cuDeviceGet");
+  checkCuResult(cu().cuDeviceGet(dev.bytes, ordinal) as number, "cuDeviceGet");
   return dev.value | 0;
 }
 
@@ -70,21 +72,28 @@ function device(ordinal: number): number {
 export function cudaCreateContext(ordinal: number): bigint {
   const dev = device(ordinal);
   const ctx = new OutU64();
-  ck(cu().cuDevicePrimaryCtxRetain(ctx.bytes, dev) as number, "cuDevicePrimaryCtxRetain");
-  ck(cu().cuCtxPushCurrent_v2(ctx.value) as number, "cuCtxPushCurrent");
+  checkCuResult(cu().cuDevicePrimaryCtxRetain(ctx.bytes, dev) as number, "cuDevicePrimaryCtxRetain");
+  const pushed = cu().cuCtxPushCurrent_v2(ctx.value) as number;
+  if (pushed !== 0) {
+    // The caller gets no context to release, so the retain is handed back here; the push error is the one reported.
+    cu().cuDevicePrimaryCtxRelease_v2(dev);
+    checkCuResult(pushed, "cuCtxPushCurrent");
+  }
   return ctx.value;
 }
 
 /**
- * Undo cudaCreateContext on this thread: pop the context and drop the retain.
- * Job workers skip this because they are terminated whole; a long-lived thread
- * (the server's, running the probe) must call it or its context stack grows by
- * one entry per probe.
+ * Undo cudaCreateContext on this thread: pop the context and drop the retain, the retain even when the pop fails.
+ * Job workers skip this because they are terminated whole; probeNvof calls it so a probe leaves its thread's context
+ * stack as it found it, which keeps repeated probes in one process from growing that stack by one entry each.
  */
 export function cudaReleaseContext(ordinal: number): void {
   const popped = new OutU64();
-  ck(cu().cuCtxPopCurrent_v2(popped.ptr) as number, "cuCtxPopCurrent");
-  ck(cu().cuDevicePrimaryCtxRelease_v2(device(ordinal)) as number, "cuDevicePrimaryCtxRelease");
+  try {
+    checkCuResult(cu().cuCtxPopCurrent_v2(popped.bytes) as number, "cuCtxPopCurrent");
+  } finally {
+    checkCuResult(cu().cuDevicePrimaryCtxRelease_v2(device(ordinal)) as number, "cuDevicePrimaryCtxRelease");
+  }
 }
 
 /** What the CUDA driver says about a set of DXGI adapters, resolved in one pass. */
@@ -122,7 +131,7 @@ export function cudaDevicesForLuids(luids: readonly { luidLow: number; luidHigh:
   let count: number;
   try {
     const out = new OutU32();
-    ck(cu().cuDeviceGetCount(out.bytes) as number, "cuDeviceGetCount");
+    checkCuResult(cu().cuDeviceGetCount(out.bytes) as number, "cuDeviceGetCount");
     count = out.value;
   } catch (error) {
     return { ordinals, uuids, deviceCount: null, error: (error as Error).message };
@@ -156,23 +165,49 @@ function deviceUuid(dev: number): string | null {
 }
 
 export function cudaSynchronize(): void {
-  ck(cu().cuCtxSynchronize() as number, "cuCtxSynchronize");
+  checkCuResult(cu().cuCtxSynchronize() as number, "cuCtxSynchronize");
 }
 
 /** Allocate `bytes` of device memory; returns the CUdeviceptr. */
 export function cudaMalloc(bytes: number): bigint {
   const out = new OutU64();
-  ck(cu().cuMemAlloc_v2(out.bytes, BigInt(bytes)) as number, "cuMemAlloc");
+  checkCuResult(cu().cuMemAlloc_v2(out.bytes, BigInt(bytes)) as number, "cuMemAlloc");
   return out.value;
 }
 
-export function cudaFree(device: bigint): void {
-  ck(cu().cuMemFree_v2(device) as number, "cuMemFree");
+export function cudaFree(devPtr: bigint): void {
+  checkCuResult(cu().cuMemFree_v2(devPtr) as number, "cuMemFree");
 }
 
 /** Copy `bytes` from a host buffer into a device pointer (tightly packed). */
 export function cudaMemcpyHtoD(dst: bigint, src: Uint8Array, bytes: number): void {
-  ck(cu().cuMemcpyHtoD_v2(dst, src, BigInt(bytes)) as number, "cuMemcpyHtoD");
+  if (!Number.isInteger(bytes) || bytes < 0 || bytes > src.byteLength) {
+    throw new RangeError(`cudaMemcpyHtoD: ${bytes} bytes do not fit the ${src.byteLength}-byte host buffer`);
+  }
+  checkCuResult(cu().cuMemcpyHtoD_v2(dst, src, BigInt(bytes)) as number, "cuMemcpyHtoD");
+}
+
+/** Throws when `height` rows of `widthBytes` at `pitch` reach past the host buffer the driver would read or write. */
+function checkHostSpan(host: Uint8Array, pitch: number, widthBytes: number, height: number, what: string): void {
+  if (widthBytes > pitch) throw new RangeError(`${what}: a row of ${widthBytes} bytes does not fit its ${pitch}-byte pitch`);
+  const needed = height > 0 ? (height - 1) * pitch + widthBytes : 0;
+  if (needed > host.byteLength) throw new RangeError(`${what}: the copy needs ${needed} host bytes, the buffer has ${host.byteLength}`);
+}
+
+/** One side of a 2D copy: host memory (kept referenced by the caller until the copy returns) or a device pointer. */
+type CopySide = { host: Uint8Array; pitch: number } | { device: bigint; pitch: number };
+
+function copy2D(src: CopySide, dst: CopySide, widthBytes: number, height: number): void {
+  // CUDA_MEMCPY2D v2 (cuda.h, x64, 128 bytes): src XInBytes@0, Y@8, memoryType@16, host@24, device@32, array@40,
+  // pitch@48; dst = src + 56; WidthInBytes@112, Height@120.
+  const desc = new NativeStruct(128);
+  for (const [base, side] of [[0, src], [56, dst]] as const) {
+    if ("host" in side) desc.u64(base + 16, CU_MEMORYTYPE_HOST).u64(base + 24, ptr(side.host));
+    else desc.u64(base + 16, CU_MEMORYTYPE_DEVICE).u64(base + 32, side.device);
+    desc.u64(base + 48, side.pitch);
+  }
+  desc.u64(112, widthBytes).u64(120, height);
+  checkCuResult(cu().cuMemcpy2D_v2(desc.bytes) as number, "cuMemcpy2D");
 }
 
 /**
@@ -187,21 +222,8 @@ export function cudaMemcpy2DHtoD(opts: {
   widthBytes: number;
   height: number;
 }): void {
-  const desc = new Uint8Array(128);
-  const dv = new DataView(desc.buffer);
-  // CUDA_MEMCPY2D v2 (cuda.h, x64, 128 bytes):
-  //   src XInBytes@0, Y@8, memoryType@16, host@24, device@32, array@40, pitch@48
-  dv.setBigUint64(16, BigInt(CU_MEMORYTYPE_HOST), true);
-  dv.setBigUint64(24, BigInt(ptr(opts.src)), true);
-  dv.setBigUint64(48, BigInt(opts.srcPitch), true);
-  //   dst XInBytes@56, Y@64, memoryType@72, host@80, device@88, array@96, pitch@104;
-  //   WidthInBytes@112, Height@120
-  dv.setBigUint64(72, BigInt(CU_MEMORYTYPE_DEVICE), true);
-  dv.setBigUint64(88, opts.dstDevice, true);
-  dv.setBigUint64(104, BigInt(opts.dstPitch), true);
-  dv.setBigUint64(112, BigInt(opts.widthBytes), true);
-  dv.setBigUint64(120, BigInt(opts.height), true);
-  ck(cu().cuMemcpy2D_v2(desc) as number, "cuMemcpy2D");
+  checkHostSpan(opts.src, opts.srcPitch, opts.widthBytes, opts.height, "cudaMemcpy2DHtoD");
+  copy2D({ host: opts.src, pitch: opts.srcPitch }, { device: opts.dstDevice, pitch: opts.dstPitch }, opts.widthBytes, opts.height);
 }
 
 /**
@@ -216,15 +238,6 @@ export function cudaMemcpy2DDtoH(opts: {
   widthBytes: number;
   height: number;
 }): void {
-  const desc = new Uint8Array(128);
-  const dv = new DataView(desc.buffer);
-  dv.setBigUint64(16, BigInt(CU_MEMORYTYPE_DEVICE), true);
-  dv.setBigUint64(32, opts.srcDevice, true);
-  dv.setBigUint64(48, BigInt(opts.srcPitch), true);
-  dv.setBigUint64(72, BigInt(CU_MEMORYTYPE_HOST), true);
-  dv.setBigUint64(80, BigInt(ptr(opts.dst)), true);
-  dv.setBigUint64(104, BigInt(opts.dstPitch), true);
-  dv.setBigUint64(112, BigInt(opts.widthBytes), true);
-  dv.setBigUint64(120, BigInt(opts.height), true);
-  ck(cu().cuMemcpy2D_v2(desc) as number, "cuMemcpy2D");
+  checkHostSpan(opts.dst, opts.dstPitch, opts.widthBytes, opts.height, "cudaMemcpy2DDtoH");
+  copy2D({ device: opts.srcDevice, pitch: opts.srcPitch }, { host: opts.dst, pitch: opts.dstPitch }, opts.widthBytes, opts.height);
 }
