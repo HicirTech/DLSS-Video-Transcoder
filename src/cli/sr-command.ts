@@ -62,7 +62,7 @@ export async function srCommand(args: string[]): Promise<void> {
   } finally {
     session.close();
   }
-  await Bun.write(output, encodePng(enhanced, { level: 6 }));
+  await Bun.write(output, encodePng(enhanced));
   // The mode name, not the PerfQuality index: the index is meaningless to a user
   // and does not run in order of quality or speed (0 is MaxPerf, 3 UltraPerformance, 5 DLAA).
   console.log(`DLSS SR: ${image.width}x${image.height} -> ${target.width}x${target.height} (${perfQualityName(quality)} mode, preset ${presetKey}, ${warmupFrames + 1} passes) in ${(performance.now() - started).toFixed(1)} ms`);

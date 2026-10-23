@@ -201,7 +201,7 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
   options.onFinishing?.();
   progress(ENCODING_PROGRESS, "encoding PNG");
   const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resizesFrames(options)), ".png");
-  await Bun.write(output, encodePng(enhanced.image, { level: 6 }));
+  await Bun.write(output, encodePng(enhanced.image));
   progress(1, "done");
   return {
     output,

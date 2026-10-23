@@ -44,7 +44,7 @@ export async function nrCommand(args: string[]): Promise<void> {
   } finally {
     session.close();
   }
-  await Bun.write(output, encodePng(enhanced, { level: 6 }));
+  await Bun.write(output, encodePng(enhanced));
   // Only settings the runtime acts on are worth reporting; the preset is not one of them.
   console.log(`DLSS NR: ${image.width}x${image.height} enhanced (style ${settings.style}, intensity ${settings.intensity}, ${warmupFrames + 1} passes) in ${(performance.now() - started).toFixed(1)} ms`);
   console.log(`wrote ${output}`);
