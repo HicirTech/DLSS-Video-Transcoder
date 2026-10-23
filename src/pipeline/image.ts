@@ -139,12 +139,17 @@ async function enhanceOnEngine(engine: Engine, still: StillPasses): Promise<{ im
   return { image, passes };
 }
 
+/** The PNG-only refusal of every still path, an image job and the sr and nr commands: they decode PNG and nothing else. */
+export function requirePng(path: string, bytes: Uint8Array, reader: string): void {
+  if (!isPng(bytes)) throw new Error(`${path}: ${reader} accepts PNG input only. Convert the file to PNG and try again.`);
+}
+
 export async function processImage(options: ImageJobOptions): Promise<ImageJobResult> {
   const started = performance.now();
   const progress = options.onProgress ?? (() => {});
   progress(0, "reading input");
   const bytes = new Uint8Array(await Bun.file(options.input).arrayBuffer());
-  if (!isPng(bytes)) throw new Error(`${options.input}: image jobs currently accept PNG input only. Convert the file to PNG and try again.`);
+  requirePng(options.input, bytes, "an image job");
   const decoded = decodePng(bytes);
   const sr = options.superResolution;
   const target = resolveTargetSize(decoded.width, decoded.height, sr?.scale ?? options.resize ?? DEFAULT_SCALE_SETTINGS);
