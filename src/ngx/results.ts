@@ -32,30 +32,9 @@ export const NgxResult = {
   NotImplemented: 0xbad00012,
 } as const;
 
-export const NGX_SUCCESS = 0x1;
+export const NGX_SUCCESS = NgxResult.Success;
 
-const RESULT_NAMES: Record<number, string> = {
-  0x1: "Success",
-  0xbad00000: "Fail",
-  0xbad00001: "FeatureNotSupported",
-  0xbad00002: "PlatformError",
-  0xbad00003: "FeatureAlreadyExists",
-  0xbad00004: "FeatureNotFound",
-  0xbad00005: "InvalidParameter",
-  0xbad00006: "ScratchBufferTooSmall",
-  0xbad00007: "NotInitialized",
-  0xbad00008: "UnsupportedInputFormat",
-  0xbad00009: "RWFlagMissing",
-  0xbad0000a: "MissingInput",
-  0xbad0000b: "UnableToInitializeFeature",
-  0xbad0000c: "OutOfDate",
-  0xbad0000d: "OutOfGPUMemory",
-  0xbad0000e: "UnsupportedFormat",
-  0xbad0000f: "UnableToWriteToAppDataPath",
-  0xbad00010: "UnsupportedParameter",
-  0xbad00011: "Denied",
-  0xbad00012: "NotImplemented",
-};
+const RESULT_NAMES: Record<number, string> = Object.fromEntries(Object.entries(NgxResult).map(([name, code]) => [code, name]));
 
 export function ngxOk(result: number): boolean {
   return (result >>> 0) === NGX_SUCCESS;
@@ -77,7 +56,7 @@ export class NgxError extends Error {
 
 function hint(result: number): string {
   switch (result >>> 0) {
-    case 0xbad00002:
+    case NgxResult.PlatformError:
       // Any feature's call can return this (the DLSS-G host has seen it from EvaluateFeature after
       // thousands of good intervals), so the text names no feature and no single cause.
       return " - a platform error inside the NGX runtime; the runtime also returns it to callers outside a module named nvngx.dll, which is why every NGX call goes through the nvngx.dll shim";
@@ -85,7 +64,7 @@ function hint(result: number): string {
       return " - the feature could not start; check the driver version and GPU architecture (`probe` reports both), or try another installed feature DLL (`versions` lists them)";
     case NgxResult.NotImplemented:
       return " - this driver's NGX core does not know the feature; a newer driver is required";
-    case 0xbad00001:
+    case NgxResult.FeatureNotSupported:
       return " - the feature is not supported on this GPU or driver";
     default:
       return "";

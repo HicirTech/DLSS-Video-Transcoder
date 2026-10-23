@@ -15,7 +15,7 @@ import { NativeStruct, asPtr, readCString, viewNative } from "../native/memory.t
 import { MSVC, type Slots } from "./params.ts";
 import { NGX_SUCCESS, NgxResult } from "./results.ts";
 
-const NOT_FOUND = 0xbad00004 | 0; // NVSDK_NGX_Result_FeatureNotFound, used for "parameter unset"
+const NOT_FOUND = NgxResult.FeatureNotFound | 0; // the answer to a get of a parameter never set; FFI i32 return
 
 type Value = number | bigint;
 
