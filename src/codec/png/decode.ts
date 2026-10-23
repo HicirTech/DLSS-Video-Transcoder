@@ -92,7 +92,9 @@ function inflateFilteredData(compressed: Uint8Array, expectedBytes: number, widt
   // Past this the filtered data alone would exceed what zlib will produce, so the
   // image cannot be decoded at all — say so now instead of inflating gigabytes first.
   if (expectedBytes > MAX_INFLATE_BYTES) {
-    throw new PngError(`image ${width}x${height} is too large to decode: its scanlines alone would need ${expectedBytes} bytes`);
+    throw new PngError(
+      `image ${width}x${height} is too large to decode: its scanlines alone would need ${expectedBytes} bytes, more than the ${MAX_INFLATE_BYTES} node:zlib can inflate; downscale it and try again`,
+    );
   }
 
   let data: Uint8Array;
@@ -106,7 +108,7 @@ function inflateFilteredData(compressed: Uint8Array, expectedBytes: number, widt
     // zlib reports the cap as a Buffer-size error; say what actually happened.
     if (/larger than/i.test(message)) {
       throw new PngError(
-        `IDAT expands past what a ${width}x${height} image can hold (${expectedBytes} bytes); the file declares a small image but carries a much larger compressed stream`,
+        `IDAT expands past what a ${width}x${height} image can hold (${expectedBytes} bytes): the file is corrupt or its header understates the image size; re-export the PNG`,
       );
     }
     throw new PngError(`zlib inflate failed: ${message}`);
