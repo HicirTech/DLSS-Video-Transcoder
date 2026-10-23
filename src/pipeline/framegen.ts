@@ -45,7 +45,7 @@ import { decodeArgv } from "./ffmpeg-args.ts";
 import { ffmpegFailedMessage, NoFramesDecodedError } from "./ffmpeg-failure.ts";
 import { EncodeSink, buildFrameGenEncodeArgs } from "./framegen-encode-sink.ts";
 import { noFramesGeneratedMessage } from "./framegen-host-messages.ts";
-import { estimatedFrameProgress, type ProgressReporter } from "./frame-progress.ts";
+import { estimatedFrameProgress, FRAME_GENERATION_BUSY_PROGRESS, FRAME_GENERATION_VERIFY_PROGRESS, type ProgressReporter } from "./frame-progress.ts";
 import { FrameReader, type FrameSource } from "./frame-reader.ts";
 import { type RunParams, runOverlapped, runSequential } from "./framegen-run.ts";
 import { defaultOutputPath, inputAsOutputProblem } from "./output-path.ts";
@@ -537,7 +537,7 @@ async function runPipeline(
     // wall time is the bottleneck.
     const wall = (performance.now() - runStarted) / 1000;
     const parts = Object.entries(run.busy).sort(([a], [b]) => a.localeCompare(b)).map(([name, ms]) => `${name} ${(ms / 1000).toFixed(1)}`);
-    progress(0.97, `pipeline busy (s) over ${wall.toFixed(1)} s wall: ${parts.join(", ")}`);
+    progress(FRAME_GENERATION_BUSY_PROGRESS, `pipeline busy (s) over ${wall.toFixed(1)} s wall: ${parts.join(", ")}`);
   }
   // Clips shorter than the probe window still must not pass off a duplicate-frame resample as generation.
   failIfNoneGenerated(1);
@@ -552,7 +552,7 @@ function finishFrameGen(
   { progress, ffprobe, steps, width, height, sourceRate, targetRate, plan, caps, frameBytes, output }: FrameGenJob,
   { writer, stages, run: { mode, inputFrames, peak }, started }: { writer: NearestTimestampWriter; stages: Stage[]; run: PipelineRun; started: number },
 ): FrameGenResult {
-  progress(0.98, "verifying output");
+  progress(FRAME_GENERATION_VERIFY_PROGRESS, "verifying output");
   // writer.outputCount: fixed by endAt() from the decoded count, so it is the
   // length that was actually written, whatever the container declared.
   verifyOutputVideo(ffprobe, output, targetRate, writer.outputCount);
