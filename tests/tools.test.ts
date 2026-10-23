@@ -21,6 +21,13 @@ test("FFMPEG_PATH and FFPROBE_PATH pin the tools, and requireFfmpegTools hands b
   expect(requireFfmpegTools("video jobs")).toEqual({ ffmpeg: process.execPath, ffprobe: process.execPath });
 });
 
+test("an FFMPEG_PATH that points nowhere is refused with its value and the way out, not skipped for another ffmpeg", () => {
+  const missing = resolve(PROJECT_ROOT, "no-such-folder", "ffmpeg.exe");
+  process.env.FFMPEG_PATH = missing;
+  expect(() => findTool("ffmpeg")).toThrow(`FFMPEG_PATH=${missing} does not exist; point it at your ffmpeg.exe or unset it to search PATH and the runtime/ffmpeg/bin folder.`);
+  expect(() => requireFfmpegTools("video jobs")).toThrow("FFMPEG_PATH=");
+});
+
 test("the hint shared with the web banner names every way the tools are found, and its folder is the bundled one", () => {
   for (const way of ["FFMPEG_PATH", "FFPROBE_PATH", "PATH", "runtime/ffmpeg/bin", "winget install Gyan.FFmpeg"]) expect(FFMPEG_SUPPLY_HINT).toContain(way);
   expect(resolve(PROJECT_ROOT, "runtime/ffmpeg/bin")).toBe(BUNDLED_FFMPEG_DIR);
