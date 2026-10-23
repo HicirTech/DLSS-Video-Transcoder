@@ -171,12 +171,12 @@ function probeAdapters({ options, report, reasons, say }: ProbeContext): ProbeGp
     // there can never disagree. An ineligible choice is still diagnosed below:
     // its D3D12 and NGX results are what a user needs to see next to the reason.
     const choice = chooseGpu(candidates, cuda, options.adapterIndex);
-    for (const reason of choice.reasons) {
+    for (const reason of choice.eligible ? [] : choice.reasons) {
       reasons.push(reason);
       say(reason);
     }
     adapter = choice.index === null ? null : (adapters.find((a) => a.info.index === choice.index) ?? null);
-    cudaOrdinal = choice.cudaOrdinal;
+    cudaOrdinal = choice.eligible ? choice.cudaOrdinal : null;
     if (adapter) {
       report.selectedAdapter = adapter.info.index;
       say(`selected adapter ${adapter.info.index}: ${adapter.info.name}${cudaOrdinal === null ? "" : ` (CUDA device ${cudaOrdinal})`}`);
