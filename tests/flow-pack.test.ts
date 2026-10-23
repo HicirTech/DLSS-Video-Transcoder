@@ -132,24 +132,24 @@ describe("DisMotionEstimator.processPacked", () => {
   }
 
   test("packed field equals the packed float32 field from process(), decisions identical", () => {
-    const a = createMotionEstimator(width, height, { backend: fakeBackend() });
-    const b = createMotionEstimator(width, height, { backend: fakeBackend() });
-    const first = a.process(frameA);
-    const firstPacked = b.processPacked(frameA);
+    const floatEstimator = createMotionEstimator(width, height, { backend: fakeBackend() });
+    const packedEstimator = createMotionEstimator(width, height, { backend: fakeBackend() });
+    const first = floatEstimator.process(frameA);
+    const firstPacked = packedEstimator.processPacked(frameA);
     expect(first.reset).toBe(true);
     expect(firstPacked.reset).toBe(true);
     expect(firstPacked.half).toBeNull();
 
-    const second = a.process(frameB);
-    const secondPacked = b.processPacked(frameB);
+    const second = floatEstimator.process(frameB);
+    const secondPacked = packedEstimator.processPacked(frameB);
     expect(second.reset).toBe(false);
     expect(second.motion).not.toBeNull();
     expect(secondPacked.reset).toBe(false);
     expect(secondPacked.confidence).toBe(1);
     expect(secondPacked.sceneScore).toBe(second.sceneScore);
     expect(secondPacked.half).toEqual(encodeMotionR16G16(second.motion!));
-    a.close();
-    b.close();
+    floatEstimator.close();
+    packedEstimator.close();
   });
 
   test("forceReset yields no motion and reset=true on both paths", () => {
@@ -175,13 +175,13 @@ describe("DisMotionEstimator.processPacked", () => {
         return out;
       },
     };
-    const a = createMotionEstimator(width, height, { backend });
-    a.processPacked(frameA);
-    const r = a.processPacked(frameB);
-    expect(r.confidence).toBeLessThan(1);
-    expect(r.confidence).toBeGreaterThan(0.9); // a single grid sample only touches a few output pixels
-    expect(r.reset).toBe(false);
-    expect(r.half).not.toBeNull();
-    a.close();
+    const estimator = createMotionEstimator(width, height, { backend });
+    estimator.processPacked(frameA);
+    const result = estimator.processPacked(frameB);
+    expect(result.confidence).toBeLessThan(1);
+    expect(result.confidence).toBeGreaterThan(0.9); // a single grid sample only touches a few output pixels
+    expect(result.reset).toBe(false);
+    expect(result.half).not.toBeNull();
+    estimator.close();
   });
 });

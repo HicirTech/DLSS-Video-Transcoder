@@ -12,33 +12,33 @@ function referenceSmallGray(rgba: Uint8Array, width: number, height: number, flo
       const x0 = Math.floor((ox * width) / flowW);
       const x1 = Math.max(x0 + 1, Math.floor(((ox + 1) * width) / flowW));
       let sum = 0;
-      let n = 0;
+      let sampleCount = 0;
       for (let y = y0; y < y1 && y < height; y++) {
         let base = (y * width + x0) * 4;
         for (let x = x0; x < x1 && x < width; x++, base += 4) {
           sum += luma(rgba[base]!, rgba[base + 1]!, rgba[base + 2]!);
-          n++;
+          sampleCount++;
         }
       }
-      out[oy * flowW + ox] = n ? sum / n : 0;
+      out[oy * flowW + ox] = sampleCount ? sum / sampleCount : 0;
     }
   }
   return out;
 }
 
 function noise(width: number, height: number, seed: number): Uint8Array {
-  let s = seed >>> 0;
+  let state = seed >>> 0;
   const rgba = new Uint8Array(width * height * 4);
   for (let i = 0; i < rgba.length; i++) {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    rgba[i] = i % 4 === 3 ? 255 : s >>> 24;
+    state = (state * 1664525 + 1013904223) >>> 0;
+    rgba[i] = i % 4 === 3 ? 255 : state >>> 24;
   }
   return rgba;
 }
 
 describe("smallGray", () => {
   test("integer downscale ratios are bit-identical to the general box average", () => {
-    for (const [w, h, fw, fh] of [
+    for (const [width, height, flowW, flowH] of [
       [1280, 720, 640, 360], // the production 720p case: 2x2 blocks
       [1920, 1080, 640, 360], // 3x3 blocks: the 1080p case
       [64, 36, 32, 18],
@@ -46,8 +46,8 @@ describe("smallGray", () => {
       [40, 30, 8, 6], // 5x5 blocks
       [16, 9, 16, 9], // 1x1: a plain luma pass
     ] as const) {
-      const rgba = noise(w, h, w * 31 + h);
-      expect(smallGray(rgba, { width: w, height: h }, { flowW: fw, flowH: fh })).toEqual(referenceSmallGray(rgba, w, h, fw, fh));
+      const rgba = noise(width, height, width * 31 + height);
+      expect(smallGray(rgba, { width, height }, { flowW, flowH })).toEqual(referenceSmallGray(rgba, width, height, flowW, flowH));
     }
   });
 
