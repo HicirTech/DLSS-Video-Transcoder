@@ -1,9 +1,10 @@
-/* The jobs both mocks start with, one or more in every state, timestamped relative to `now`. */
+/* The jobs both mocks start with, one or more in every state, timestamped relative to the moment they are created. */
 import type { JobStatus } from "../../../src/server/api-types";
 import { CANCELLED_MESSAGE } from "../../../src/server/api-types";
 
-/** A handful of jobs in every state; the running and queued ones keep moving inside MockJobEngine. */
-export function createSeedJobs(now: number = Date.now()): JobStatus[] {
+/** The running and queued jobs keep moving inside MockJobEngine. */
+export function createSeedJobs(): JobStatus[] {
+  const now = Date.now();
   const at = (secondsAgo: number): string => new Date(now - secondsAgo * 1000).toISOString();
   return [
     {
