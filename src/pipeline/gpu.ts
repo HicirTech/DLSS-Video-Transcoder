@@ -207,7 +207,11 @@ export function openGpu(options: GpuOptions = {}): GpuSession {
     close() {
       if (closed) return;
       closed = true;
+      // Read before gpu.close() releases the fence it reads. A busy context is left to the process exit
+      // (GpuContext.close), and so is the device it still runs on.
+      const idle = gpu.idle;
       gpu.close();
+      if (!idle) return;
       device.release();
       for (const a of adapters) a.release();
       factory.release();

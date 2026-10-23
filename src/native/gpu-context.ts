@@ -263,7 +263,10 @@ export class GpuContext {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    for (const b of this.uploadRing) b.release();
+    // A submit whose wait timed out may still use the list, the queue and the staging buffers, and its fence may
+    // still signal the event, so all of them are left to the process exit.
+    if (!this.idle) return;
+    for (const buffer of this.uploadRing) buffer.release();
     this.readbackBuffer?.release();
     this.list.release();
     this.allocator.release();
