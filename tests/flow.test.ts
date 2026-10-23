@@ -33,7 +33,7 @@ test("encodeMotionR16G16 packs an interleaved (x,y) field to halves (R=x, G=y)",
   for (let i = 0; i < motion.length; i++) expect(halfToFloat(half[i]!)).toBe(motion[i]!);
 });
 
-// -- scene score --------------------------------------------------------------
+// -- frame fixture ------------------------------------------------------------
 
 function solid(width: number, height: number, r: number, g: number, b: number): Uint8Array {
   const buf = new Uint8Array(width * height * 4);
@@ -144,31 +144,31 @@ test("a backend is told when a calc starts a sequence: first, after a cut or for
 });
 
 test("estimator recovers a +5px x shift as backward MV.x ~ -5, MV.y ~ 0", () => {
-  const w = 96;
-  const h = 64;
-  const est = createMotionEstimator(w, h);
-  est.process(textured(w, h, 0)); // previous
-  const res = est.process(textured(w, h, 5)); // content shifted +5 in x
+  const width = 96;
+  const height = 64;
+  const est = createMotionEstimator(width, height);
+  est.process(textured(width, height, 0)); // previous
+  const res = est.process(textured(width, height, 5)); // content shifted +5 in x
   expect(res.reset).toBe(false);
   expect(res.motion).not.toBeNull();
   expect(res.confidence).toBeCloseTo(1, 5);
 
   const mv = res.motion!;
-  expect(mv.length).toBe(w * h * 2);
+  expect(mv.length).toBe(width * height * 2);
   // Average MV over an interior region clear of the border (no previous content
   // exists for the leftmost `shift` columns).
-  let sx = 0;
-  let sy = 0;
-  let n = 0;
-  for (let y = 16; y < h - 16; y++) {
-    for (let x = 16; x < w - 16; x++) {
-      const o = (y * w + x) * 2;
-      sx += mv[o]!;
-      sy += mv[o + 1]!;
-      n++;
+  let sumX = 0;
+  let sumY = 0;
+  let sampleCount = 0;
+  for (let y = 16; y < height - 16; y++) {
+    for (let x = 16; x < width - 16; x++) {
+      const offset = (y * width + x) * 2;
+      sumX += mv[offset]!;
+      sumY += mv[offset + 1]!;
+      sampleCount++;
     }
   }
-  expect(sx / n).toBeCloseTo(-5, 0); // backward flow: current -> previous is -shift
-  expect(Math.abs(sy / n)).toBeLessThan(1);
+  expect(sumX / sampleCount).toBeCloseTo(-5, 0); // backward flow: current -> previous is -shift
+  expect(Math.abs(sumY / sampleCount)).toBeLessThan(1);
   est.close();
 });
