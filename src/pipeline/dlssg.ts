@@ -187,13 +187,18 @@ const PROBE_TIMEOUT_MS = 30_000;
 
 /** Run `host`'s `--probe` and report whether frame generation is available; probeDlssg memoises it, tests script a process. */
 export async function probeDlssgHost(host: DlssgHost, timeoutMs = PROBE_TIMEOUT_MS): Promise<DlssgProbe> {
-  const proc = Bun.spawn(host.command({ mode: "--probe" }), {
-    cwd: host.cwd,
-    env: host.env,
-    stdout: "pipe",
-    stderr: "pipe",
-    windowsHide: true,
-  });
+  let proc: Subprocess<"ignore", "pipe", "pipe">;
+  try {
+    proc = Bun.spawn(host.command({ mode: "--probe" }), {
+      cwd: host.cwd,
+      env: host.env,
+      stdout: "pipe",
+      stderr: "pipe",
+      windowsHide: true,
+    });
+  } catch (error) {
+    return unansweredProbe(`${HOST_PROCESS_NAME} could not be started in ${host.cwd}: ${(error as Error).message}. ${host.hint}`);
+  }
   // Drain stdout AND stderr concurrently; reading only stdout would deadlock if
   // the host filled the unread stderr pipe before finishing its stdout.
   const stderr = new StderrTail(proc.stderr);
@@ -211,9 +216,13 @@ export async function probeDlssgHost(host: DlssgHost, timeoutMs = PROBE_TIMEOUT_
   // "not available: " with nothing after it tells the user nothing they can act
   // on, so its stderr and exit code become the reason instead — that is where a
   // missing redistributable or a blocked executable actually reports itself.
-  if (!line) {
-    const said = stderr.quote();
-    return unansweredProbe(said ? `${HOST_PROCESS_NAME} exited ${exitCode} without reporting: ${said}` : `${HOST_PROCESS_NAME} exited ${exitCode} without reporting anything. ${host.hint}`);
+  const said = stderr.quote();
+  if (!line) return unansweredProbe(`${HOST_PROCESS_NAME} exited ${exitCode} without reporting${said ? `: ${said}.` : " anything."} ${host.hint}`);
+  let probeLine: DlssgProbeLine;
+  try {
+    probeLine = decodeProbeLine(line);
+  } catch {
+    return unansweredProbe(`${HOST_PROCESS_NAME} exited ${exitCode} with a last stdout line that is not a probe report: ${JSON.stringify(line.slice(0, 200))}${said ? `; it said: ${said}` : ""}. ${host.hint}`);
   }
   return { ...decodeProbeLine(line), hagsEnabled: probeHags() };
 }
@@ -249,6 +258,15 @@ async function setupRefusal(child: HostChild, status: number, requested: number)
 /** The host ended before it answered the setup: its NGX or D3D12 start failed, or it never ran. */
 async function setupStoppedError(child: HostChild): Promise<Error> {
   return new Error(`${await withHostReport(child, `${HOST_PROCESS_NAME} stopped before answering the DLSS Frame Generation setup`)}. ${child.host.hint}`);
+}
+
+/** `bytes` decoded as `decode` reads them; a reply that does not decode is reported with the host's own report and hint. */
+async function decodeReply<T>(child: HostChild, bytes: Uint8Array, decode: (bytes: Uint8Array) => T, what: string): Promise<T> {
+  try {
+    return decode(bytes);
+  } catch (error) {
+    throw new Error(`${await withHostReport(child, `${HOST_PROCESS_NAME} sent ${what} that is not part of the protocol (${(error as Error).message})`)}. ${child.host.hint}`);
+  }
 }
 
 /** File-mapping names share one namespace per Windows session, so each session of frame generation needs a name of its own; a random UUID cannot clash. */
@@ -347,14 +365,19 @@ export class DlssgSession {
 
   /** Starts the host process on `frames` and waits for its setup reply; a failure ends the process. */
   private static async startHost(host: DlssgHost, opts: DlssgOptions, frames: FrameMemory): Promise<DlssgSession> {
-    const proc = Bun.spawn(host.command({ mode: "--serve", sharedMemoryName: frames.name }), {
-      cwd: host.cwd,
-      env: host.env,
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      windowsHide: true,
-    });
+    let proc: Subprocess<"pipe", "pipe", "pipe">;
+    try {
+      proc = Bun.spawn(host.command({ mode: "--serve", sharedMemoryName: frames.name }), {
+        cwd: host.cwd,
+        env: host.env,
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        windowsHide: true,
+      });
+    } catch (error) {
+      throw new Error(`${HOST_PROCESS_NAME} could not be started in ${host.cwd}: ${(error as Error).message}. ${host.hint}`);
+    }
     const child: HostChild = { host, proc, stderr: new StderrTail(proc.stderr) };
 
     // Every exit from here to the constructor must end the child: by the time it
@@ -377,7 +400,7 @@ export class DlssgSession {
 
       const replyBytes = await raceAbort(opts.signal, reader.next(SETUP_REPLY_BYTES));
       if (!replyBytes) throw await setupStoppedError(child);
-      const reply = decodeSetupReply(replyBytes);
+      const reply = await decodeReply(child, replyBytes, decodeSetupReply, "a setup reply");
       if (reply.outcome === "refused") throw await setupRefusal(child, reply.status, opts.generatedCount);
       const { maximum } = reply;
       if (opts.generatedCount > maximum) throw new Error(`This GPU/runtime can generate at most ${maximum} in-between frame(s) per source frame; ${opts.generatedCount} was requested. ${USE_LOWER_MULTIPLIER}`);
@@ -407,7 +430,7 @@ export class DlssgSession {
 
     const resultBytes = await this.reader.next(FRAME_RESULT_BYTES);
     if (!resultBytes) throw await this.stoppedError(index);
-    const result = decodeFrameResult(resultBytes);
+    const result = await decodeReply(this.child, resultBytes, decodeFrameResult, `a reply to frame ${index}`);
     if (result.outcome === "failed") {
       throw new Error(`${await withHostReport(this.child, `DLSS Frame Generation failed while processing frame ${index}: ${HOST_PROCESS_NAME} replied status ${result.status}`)}. ${this.child.host.hint}`);
     }
