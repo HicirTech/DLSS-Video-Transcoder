@@ -10,7 +10,8 @@
  * blocks and DLSS frame i+1 overlaps NVENC frame i on the GPU.
  */
 import { ffmpegFailedMessage } from "../ffmpeg-failure.ts";
-import { NvencEncoder, type NvencSdkCodec } from "../nvenc.ts";
+import { MuxSink } from "../mux-sink.ts";
+import { NvencEncoder, type NvencEncoderOptions } from "../nvenc.ts";
 import { type AbortedReply, type AbortRequest, answerAbort } from "../worker-abort.ts";
 import { importD3D12Buffer, importD3D12Fence, waitExternalSemaphore, releaseD3D12Buffer, destroyExternalSemaphore, type ImportedBuffer } from "../../native/cuda-interop.ts";
 import { cudaCreateContext, cudaSynchronize } from "../../native/cuda.ts";
@@ -22,9 +23,18 @@ import { closeHandle } from "../../native/win32.ts";
  */
 export interface AsyncEncodeOpen {
   type: "open";
-  ffmpeg: string; sinkArgs: string[];
-  bufHandles: number[]; fenceHandle: number; size: number;
-  width: number; height: number; pitch: number; fpsNum: number; fpsDen: number; codec: NvencSdkCodec; cq: number; ordinal: number;
+  ffmpeg: string;
+  sinkArgs: string[];
+  /** NT handles of the shared D3D12 buffers, one per pool slot; the worker closes every one. */
+  bufferHandles: number[];
+  /** NT handle of the shared D3D12 fence; the worker closes it. */
+  fenceHandle: number;
+  /** Byte size of EACH shared buffer (every slot is the same size), as imported by cuImportExternalMemory. */
+  bufferBytes: number;
+  /** Bytes per row of each shared buffer: >= width*4, aligned to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256). */
+  rowPitch: number;
+  /** NVENC's settings; its inputs are the imported buffers. */
+  enc: Omit<NvencEncoderOptions, "inputs">;
 }
 /** Encode pool slot `slot` once the fence reaches `value`, then ack the slot as free. */
 export interface AsyncEncodeFrame { type: "frame"; slot: number; value: bigint }
@@ -41,8 +51,8 @@ export type AsyncEncodeOut =
 declare const self: Worker;
 
 const post = (message: AsyncEncodeOut): void => self.postMessage(message);
-let enc: NvencEncoder | null = null;
-let sink: ReturnType<typeof Bun.spawn> | null = null;
+let encoder: NvencEncoder | null = null;
+let sink: MuxSink | null = null;
 let extSem = 0n;
 let imported: ImportedBuffer[] = [];
 let chain: Promise<void> = Promise.resolve();
@@ -58,9 +68,9 @@ const fail = (message: string): void => { if (!stopped) { stopped = true; post({
  */
 function releaseEncoder(): void {
   try {
-    enc?.close();
+    encoder?.close();
   } finally {
-    enc = null;
+    encoder = null;
     for (const buffer of imported) { try { releaseD3D12Buffer(buffer); } catch { /* keep releasing the rest */ } }
     imported = [];
     if (extSem !== 0n) { try { destroyExternalSemaphore(extSem); } catch { /* */ } }
@@ -68,19 +78,19 @@ function releaseEncoder(): void {
   }
 }
 
-self.onmessage = (e: MessageEvent<AsyncEncodeIn>) => {
-  const m = e.data;
-  if (m.type === "open") {
+self.onmessage = (event: MessageEvent<AsyncEncodeIn>) => {
+  const message = event.data;
+  if (message.type === "open") {
     try {
-      cudaCreateContext(m.ordinal);
-      const inputs = m.bufHandles.map((h) => {
-        const buffer = importD3D12Buffer(h, m.size);
+      cudaCreateContext(message.enc.ordinal);
+      const inputs = message.bufferHandles.map((handle) => {
+        const buffer = importD3D12Buffer(handle, message.bufferBytes);
         imported.push(buffer);
-        return { devPtr: buffer.devPtr, pitch: m.pitch };
+        return { devPtr: buffer.devPtr, pitch: message.rowPitch };
       });
-      extSem = importD3D12Fence(m.fenceHandle);
-      enc = NvencEncoder.open({ width: m.width, height: m.height, fpsNum: m.fpsNum, fpsDen: m.fpsDen, codec: m.codec, cq: m.cq, ordinal: m.ordinal, inputs });
-      sink = Bun.spawn([m.ffmpeg, ...m.sinkArgs], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
+      extSem = importD3D12Fence(message.fenceHandle);
+      encoder = NvencEncoder.open({ ...message.enc, inputs });
+      sink = MuxSink.spawn(message.ffmpeg, message.sinkArgs);
       post({ type: "opened" });
     } catch (err) {
       fail((err as Error).message ?? String(err));
@@ -88,33 +98,30 @@ self.onmessage = (e: MessageEvent<AsyncEncodeIn>) => {
       // Importing does not take ownership of an NT handle (see cuda-interop.ts),
       // so every handle is closed here, imported or not: one left open after a
       // failed import keeps its D3D12 allocation alive.
-      for (const h of m.bufHandles) closeHandle(h);
-      closeHandle(m.fenceHandle);
+      for (const handle of message.bufferHandles) closeHandle(handle);
+      closeHandle(message.fenceHandle);
     }
-  } else if (m.type === "frame") {
+  } else if (message.type === "frame") {
     chain = chain.then(async () => {
-      if (stopped || !enc || !sink) return;
-      waitExternalSemaphore(extSem, m.value); // enqueue "wait fence >= value" on the CUDA stream
+      if (stopped || !encoder || !sink) return;
+      waitExternalSemaphore(extSem, message.value); // enqueue "wait fence >= value" on the CUDA stream
       cudaSynchronize(); // block this worker until the DLSS copy for this frame is done
-      const pkt = enc.encodeGpuResident(m.slot);
-      const w = (sink.stdin as { write(b: Uint8Array): unknown }).write(pkt);
-      if (w instanceof Promise) await w;
-      post({ type: "encoded", slot: m.slot });
-    }).catch((err) => fail((err as Error).message ?? String(err)));
-  } else if (m.type === "abort") {
+      const packet = encoder.encodeGpuResident(message.slot);
+      await sink.write(packet);
+      post({ type: "encoded", slot: message.slot });
+    }).catch(async (err) => fail(sink ? await sink.failureOf(err) : (err as Error).message ?? String(err)));
+  } else if (message.type === "abort") {
     // Immediate, not chained: queued frames are dropped; the encoder's own
     // CUDA work is finished by close(), so the shared buffers can be released.
     stopped = true;
-    void answerAbort(self, sink, releaseEncoder);
-  } else if (m.type === "finish") {
+    void answerAbort(self, sink?.child ?? null, releaseEncoder);
+  } else if (message.type === "finish") {
     chain = chain.then(async () => {
-      if (stopped || !enc || !sink) return;
-      enc.finish();
-      (sink.stdin as { end(): unknown }).end();
-      const err = (await new Response(sink.stderr as ReadableStream<Uint8Array>).text()).trim();
-      const code = await sink.exited;
+      if (stopped || !encoder || !sink) return;
+      encoder.finish();
+      const { code, stderr } = await sink.close();
       releaseEncoder();
-      if (code !== 0) { fail(ffmpegFailedMessage("mux", code, err)); return; }
+      if (code !== 0) { fail(ffmpegFailedMessage("mux", code, stderr)); return; }
       post({ type: "done" });
     }).catch((err) => fail((err as Error).message ?? String(err)));
   }
