@@ -167,6 +167,19 @@ export type FrameGenEngine = (typeof FRAME_GEN_ENGINES)[number];
  */
 export const FRAME_GEN_NATIVE_MAXIMUM = "the runtime's MultiFrameCountMax + 1, 6x with the bundled nvngx_dlssg.dll 310.7.129 on an RTX 5090";
 
+/**
+ * The most 2x stages a cascade chains, so its finest grid is 2^3 = 8x: each further stage doubles the evaluations
+ * per source frame while only halving the residual timing error, and interpolates from frames that were themselves
+ * interpolated.
+ */
+export const FRAME_GEN_CASCADE_MAX_STAGES = 3;
+
+/** What path auto takes, in the words the CLI help and the web editor both use. */
+export const FRAME_GEN_AUTO_PATH = `one native DLSSG session when output/source is an exact integer from 2 up to ${FRAME_GEN_NATIVE_MAXIMUM} (3x and above only with HAGS on), else a cascade of 2x stages chained in memory (1 for 2x, 2 for 4x, else ${FRAME_GEN_CASCADE_MAX_STAGES} on a ${1 << FRAME_GEN_CASCADE_MAX_STAGES}x grid, each output instant taking the nearest frame); when the runtime disables every interval of a native 3x+ session, auto re-runs it as a cascade`;
+
+/** Which GPU Super Resolution and Neural Rendering take when a request names none (JobRequest.adapterUuid); chooseGpu in src/pipeline/gpu.ts applies it. */
+export const AUTO_GPU_CHOICE = "the NVIDIA adapter with the most VRAM that has a CUDA device";
+
 /** Which GPU frame generation takes; a request cannot choose it (JobRequest.adapterUuid). */
 export const FRAME_GEN_GPU_CHOICE = "the DLSS Frame Generation host process takes the NVIDIA GPU with CUDA and the most VRAM, and its NVENC and NVOFA helpers use CUDA device 0";
 
@@ -251,12 +264,7 @@ export interface FrameGenStep {
   targetFps?: string;
   /** Output = source rate x multiplier (2 = double the fps), a whole number within SETTING_RANGES.multiplier. */
   multiplier?: number;
-  /**
-   * auto (default): one native DLSSG session when target/source is an exact integer from 2 up to
-   * FRAME_GEN_NATIVE_MAXIMUM and, from 3x up, HAGS is on; otherwise a cascade of 2x stages. When
-   * the runtime disables every interval of a native multi-frame session, auto re-runs the job as
-   * a cascade. native / cascade force a path.
-   */
+  /** auto (default) takes the path FRAME_GEN_AUTO_PATH says; native / cascade force a path. */
   engine?: FrameGenEngine;
   /** Absolute folder of a DLSS Frame Generation version from GET /api/catalog; omit to load the bundled DLL. */
   dllDir?: string;

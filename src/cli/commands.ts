@@ -4,7 +4,7 @@
  */
 import { DEFAULT_SR_PRESET, DLSS_RATIO, perfQualityName } from "../ngx/results.ts";
 import { cpuSiblingCodec, FFMPEG_NVENC_ENCODERS, isNvenc } from "../pipeline/encode-select.ts";
-import { AAC_KBPS, AUDIO_IN_CONTAINER, DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, DEFAULT_SR_STEP, DEFAULT_WARMUP_FRAMES, DLSS_SR_MAX_OUTPUT_SIDE, ENCODE_CODECS, ENCODE_CONTAINERS, FRAME_GEN_CONTAINER, FRAME_GEN_FPS_CHOICES, FRAME_GEN_GPU_CHOICE, FRAME_GEN_NATIVE_MAXIMUM, MOTION_KINDS, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, NVENC_MAX_SIDE, SETTING_RANGES, SR_FACTOR_MIN, type StepKind } from "../server/api-types.ts";
+import { AAC_KBPS, AUDIO_IN_CONTAINER, AUTO_GPU_CHOICE, DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, DEFAULT_SR_STEP, DEFAULT_WARMUP_FRAMES, DLSS_SR_MAX_OUTPUT_SIDE, ENCODE_CODECS, ENCODE_CONTAINERS, FRAME_GEN_AUTO_PATH, FRAME_GEN_CONTAINER, FRAME_GEN_FPS_CHOICES, FRAME_GEN_GPU_CHOICE, MOTION_KINDS, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, NVENC_MAX_SIDE, SETTING_RANGES, SR_FACTOR_MIN, type StepKind } from "../server/api-types.ts";
 
 interface OptionSpec {
   /** As typed on the command line, e.g. "--factor N" or "--json". */
@@ -52,7 +52,7 @@ const QUALITY_OPT: OptionSpec = { flag: "--quality N", desc: `encoder quality (C
 /** The frame generation rows fg and video share; fg calls the path option --engine, video --fg-path. */
 const FG_FPS_OPT: OptionSpec = { flag: "--fps RATE", desc: `output frame rate: ${FRAME_GEN_FPS_CHOICES.join(", ")}, or an exact num/den; overrides --multiplier`, def: "source fps x --multiplier" };
 const FG_MULTIPLIER_OPT: OptionSpec = { flag: "--multiplier N", desc: `output/input frame ratio when --fps is not given, a whole number from ${FG_MULTIPLIER_OPTION.min} to ${FG_MULTIPLIER_OPTION.max} (2 = double fps)`, def: String(FG_MULTIPLIER_OPTION.fallback) };
-const FG_PATH_DESC = `auto = one native session when output/source is an exact integer from 2 up to ${FRAME_GEN_NATIVE_MAXIMUM} (3x and above only with HAGS on), else a cascade of 2x stages; when the runtime disables every interval of a native 3x+ session, auto re-runs it as a cascade; native or cascade force that path`;
+const FG_PATH_DESC = `auto = ${FRAME_GEN_AUTO_PATH}; native or cascade force that path`;
 
 /** The Neural Rendering look rows nr and video share; nrSettingsOption reads them, and video refuses them without --nr. */
 export const NR_SETTING_OPTS: readonly OptionSpec[] = [
