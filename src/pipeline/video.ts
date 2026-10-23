@@ -1,10 +1,10 @@
 /**
  * Video job: ffmpeg decodes to raw RGBA frames on a pipe, every frame goes
  * through the job's engine chain (Super Resolution, then Neural Rendering), and
- * the result is encoded with the original audio copied across. Owns the choice
- * between the three encode paths (GPU-resident async, threaded NVENC,
- * single-thread rawvideo) and the GPU session's lifetime.
- * ffmpeg / ffprobe are external tools found via tools.ts.
+ * the result is encoded with the source's audio carried across (copied for mkv,
+ * AAC for mp4 and mov). Owns the choice between the three encode paths
+ * (GPU-resident async, threaded NVENC, single-thread rawvideo) and the GPU
+ * session's lifetime.
  */
 import { existsSync } from "node:fs";
 import type { EncodeSettings, JobRequest, NeuralRenderingStep, ScaleSettings, StepKind, SuperResolutionStep } from "../server/api-types.ts";
@@ -271,7 +271,6 @@ async function runRawvideo(
   { engine, outWidth, outHeight, decodeArgs, frameBytes, guide }: EnginePath,
   counts: FrameCounts,
 ): Promise<void> {
-  // Fallback: raw RGBA out to ffmpeg, which does the encode.
   const encoderArgv = encoderArgs(encode, cudaOrdinal);
   progress(0, `encode: ${encoderArgv[encoderArgv.indexOf("-c:v") + 1]} via ffmpeg (single-thread rawvideo pipeline)`);
   const decoder = Bun.spawn([ffmpeg, ...decodeArgs], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
@@ -331,8 +330,6 @@ async function runEngineJob(job: VideoJob): Promise<VideoJobResult> {
   const engine = openEngineChain(job);
   const outWidth = engine.outputWidth;
   const outHeight = engine.outputHeight;
-
-  // Decode argv without the binary; both encode paths below spawn it themselves.
   const decodeArgs = decodeArgv({ input: options.input, source: info, output: { width: renderWidth, height: renderHeight }, frameRate: info.fpsText });
 
   let frameGuide: FrameGuide;
@@ -382,6 +379,8 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   // them, which the threaded pipeline cannot avoid. Only Neural Rendering alone
   // qualifies (no SR to upscale first) with an NVENC codec at even, in-cap
   // dimensions; feature 18 consumes no motion vectors, so it needs no optical flow.
+  // It also needs an explicit runtimeDir, because DlssNrSession.open takes one and
+  // this path applies no default (the threaded path falls back to RUNTIME_DIR in ngx/nr.ts).
   const nr = options.neuralRendering;
   const nrNative = nr && !upscaling && options.runtimeDir ? nvencNativeTarget(encode.codec, target.width, target.height) : null;
   if (nr && nrNative && probeNvencCaps(cudaOrdinal).available) return runGpuResidentNr(job, nrNative, nr);

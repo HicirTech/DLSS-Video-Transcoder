@@ -19,7 +19,9 @@ export interface VideoInfo {
   fpsText: string;
   /** Nominal stream rate (r_frame_rate): the exact CFR clock frame generation plans on. */
   nominalFpsText: string;
+  /** The container's declared frame count (nb_frames), else duration x fps rounded (an estimate); counted in the measured clock, so it pairs with fps, not nominalFpsText. Null when neither is known. */
   frames: number | null;
+  /** Container duration in seconds (ffprobe format.duration); null when ffprobe reports none. */
   duration: number | null;
   codec: string;
   hasAudio: boolean;
