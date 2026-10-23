@@ -20,7 +20,8 @@ function escapeXml(text: string): string {
 /** A stand-in for /api/file: a generated landscape whose look depends on the path (outputs look "enhanced"). */
 export function mockPreviewSvg(path: string): string {
   const name = path.split(/[\\/]/).pop() ?? path;
-  // An output named after a step that changes the picture (clip.nr.png, clip.sr-nr.png) looks enhanced.
+  // Looks enhanced when the name carries an sr or nr step token (clip.nr.png, clip.sr-nr.png) or contains "enhanced" or
+  // "output"; the mock only tells sources from processed outputs.
   const enhanced = /[._-](sr|nr)[.-]|enhanced|output/i.test(name);
   let hash = 7;
   for (const ch of path) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
@@ -28,7 +29,7 @@ export function mockPreviewSvg(path: string): string {
   const saturation = enhanced ? 80 : 45;
   const lightness = enhanced ? 50 : 38;
   const blur = enhanced ? 0 : 1.6;
-  const label = enhanced ? "mock preview - neural rendering" : "mock preview - source";
+  const label = enhanced ? "mock preview - processed" : "mock preview - source";
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">` +
     `<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">` +
