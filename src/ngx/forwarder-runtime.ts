@@ -4,6 +4,7 @@
  * code.
  */
 import { FFIType, JSCallback } from "bun:ffi";
+import { join } from "node:path";
 import { callableAt } from "../native/com.ts";
 import { asPtr } from "../native/memory.ts";
 import { LOAD_WITH_ALTERED_SEARCH_PATH, NativeModule } from "../native/win32.ts";
@@ -55,7 +56,7 @@ export function loadForwarder(path: string): ForwarderModule {
 
 /** Where the generated shim sits inside `dir`: NGX accepts calls only from a module named nvngx.dll. */
 export function shimPath(dir: string): string {
-  return `${dir.replace(/[\\/]+$/, "")}\\nvngx.dll`;
+  return join(dir, "nvngx.dll");
 }
 
 /** Generate the shim under `dir` (as `nvngx.dll`) and load it. */
