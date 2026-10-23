@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Alert, Box, Button, FormHelperText, Link, Stack, Typography } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
-import { FRAME_GEN_CONTAINER, type JobStatus, type StepKind, type ToolsReport } from "../../../src/server/api-types";
+import type { JobStatus, StepKind, ToolsReport } from "../../../src/server/api-types";
 import { nvencLimitExceeded } from "../../../src/server/output-size";
 import { unusedSettings } from "../../../src/server/settings-in-use";
 import { api } from "../api";
@@ -9,7 +9,7 @@ import { formatFps, rateValue } from "../format";
 import { useJobRunner } from "../hooks/useJobRunner";
 import { useMediaInfo } from "../hooks/useMediaInfo";
 import { useSettings } from "../hooks/useSettings";
-import { formatSize, frameGenOutputFps, planJob, planStages, STEP_TITLES } from "../job-plan";
+import { formatSize, frameGenOutputFps, planJob, planStages, videoContainer } from "../job-plan";
 import { videoRequest } from "../job-requests";
 import { CODEC_LABELS, CONTAINER_LABELS, EncodeSettingsEditor } from "./EncodeSettingsEditor";
 import { FrameGenEditor } from "./FrameGenEditor";
@@ -54,7 +54,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
   const sourceFps = source ? rateValue(source.nominalFps) : null;
   const outputFps = frameGenOutputFps(settings.frameGen, source?.nominalFps ?? null);
   const outputSize = plan.outputSize ? formatSize(plan.outputSize) : null;
-  const container = steps.fg ? FRAME_GEN_CONTAINER : settings.encode.container;
+  const container = videoContainer(steps, settings.encode.container);
   const canRun = input.trim() !== "" && !runner.submitting && plan.srProblem === null;
 
   const setStep = (step: StepKind, on: boolean): void => update({ videoSteps: { ...steps, [step]: on } });
@@ -141,7 +141,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
           />
           <EncodeSettingsEditor
             value={settings.encode}
-            fixedContainer={steps.fg ? { container: FRAME_GEN_CONTAINER, reason: "Frame generation always writes MP4" } : undefined}
+            fixedContainer={steps.fg ? { container, reason: `Frame generation always writes ${CONTAINER_LABELS[container]}` } : undefined}
             outputSize={plan.outputSize}
             onChange={(encode) => update({ encode })}
           />
