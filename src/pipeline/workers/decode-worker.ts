@@ -15,8 +15,8 @@ import { type AbortedReply, type AbortRequest, answerAbort } from "../worker-abo
 
 /** Spawn ffmpeg with `args` and read `frameBytes` per frame from its stdout. */
 export interface DecodeStart { type: "start"; ffmpeg: string; args: string[]; frameBytes: number }
-/** Allow `n` more frames to be read and posted. */
-export interface DecodeCredit { type: "credit"; n: number }
+/** Allow `frames` more frames to be read and posted. */
+export interface DecodeCredit { type: "credit"; frames: number }
 /** What the main thread sends the decode worker. */
 type DecodeIn = DecodeStart | DecodeCredit | AbortRequest;
 /** What it answers: each frame (its buffer transferred), then "end" or "error". */
@@ -37,7 +37,7 @@ let aborted = false;
 
 /** Release a read waiting on a credit. */
 function wakeReader(): void {
-  if (wake) { const w = wake; wake = null; w(); }
+  if (wake) { const release = wake; wake = null; release(); }
 }
 
 function awaitCredit(): Promise<void> {
@@ -50,7 +50,7 @@ self.onmessage = (event: MessageEvent<DecodeIn>) => {
   if (msg.type === "start") {
     void run(msg);
   } else if (msg.type === "credit") {
-    credits += msg.n;
+    credits += msg.frames;
     wakeReader();
   } else if (msg.type === "abort") {
     aborted = true;
