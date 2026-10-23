@@ -151,30 +151,55 @@ interface NvofBuffer {
   pitch: number;
 }
 
+/** NV_OF_INIT_PARAMS (48B) for a `width`x`height` session at one flow vector per pixel; offsets below name its fields. */
+function initParams(width: number, height: number): Uint8Array {
+  const params = new Uint8Array(48);
+  const view = new DataView(params.buffer);
+  view.setUint32(0, width, true); // width
+  view.setUint32(4, height, true); // height
+  view.setUint32(8, 1, true); // outGridSize = 1: one flow vector per input pixel
+  view.setUint32(16, MODE_OPTICALFLOW, true); // mode
+  view.setUint32(20, PERF_MEDIUM, true); // perfLevel
+  return params;
+}
+
+/** What a session is built from once open() has brought every part up. */
+interface SessionParts {
+  hOf: bigint;
+  width: number;
+  height: number;
+  buffers: { input: NvofBuffer; reference: NvofBuffer; output: NvofBuffer };
+  calls: { execute: OwnedCallable; destroyBuf: OwnedCallable };
+}
+
 /**
  * A live NVOFA session, fixed at the width/height passed to open(): the input,
  * reference and output GPU buffers are allocated for that size and owned here
  * until close(). Feed a different resolution and you need a new session.
  */
 class NvofSession {
-  private constructor(
-    private readonly hOf: bigint,
-    readonly width: number,
-    readonly height: number,
-    private readonly input: NvofBuffer,
-    private readonly reference: NvofBuffer,
-    private readonly output: NvofBuffer,
-    private readonly execute: OwnedCallable,
-    private readonly destroyBuf: OwnedCallable,
-    private readonly destroy: OwnedCallable,
-  ) {}
+  readonly width: number;
+  readonly height: number;
+  private readonly hOf: bigint;
+  private readonly input: NvofBuffer;
+  private readonly reference: NvofBuffer;
+  private readonly output: NvofBuffer;
+  private readonly execute: OwnedCallable;
+  private readonly destroyBuf: OwnedCallable;
 
-  static open(width: number, height: number, ordinal: number, perf = PERF_MEDIUM): NvofSession {
-    const ctx = cudaCreateContext(ordinal);
-    const create = fn(FN.create, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 });
-    const hOut = new OutU64();
-    ckof(create(ctx, hOut.bytes), "nvCreateOpticalFlowCuda");
-    const hOf = hOut.value;
+  private constructor({ hOf, width, height, buffers, calls }: SessionParts) {
+    this.hOf = hOf;
+    this.width = width;
+    this.height = height;
+    this.input = buffers.input;
+    this.reference = buffers.reference;
+    this.output = buffers.output;
+    this.execute = calls.execute;
+    this.destroyBuf = calls.destroyBuf;
+  }
+
+  static open(width: number, height: number, ordinal: number): NvofSession {
+    const hOf = createInstance(cudaCreateContext(ordinal));
 
     // Everything past this point can throw, and until the session object exists
     // nothing else owns hOf or the buffers. The CUDA primary context is retained
@@ -188,15 +213,7 @@ class NvofSession {
     const created: bigint[] = [];
 
     try {
-      // NV_OF_INIT_PARAMS (48B); offsets below name its fields.
-      const initParams = new Uint8Array(48);
-      const idv = new DataView(initParams.buffer);
-      idv.setUint32(0, width, true); // width
-      idv.setUint32(4, height, true); // height
-      idv.setUint32(8, 1, true); // outGridSize = 1: one flow vector per input pixel
-      idv.setUint32(16, MODE_OPTICALFLOW, true); // mode
-      idv.setUint32(20, perf, true); // perfLevel
-      ckof(fn(FN.init, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(hOf, initParams), "nvOFInit");
+      ckof(fn(FN.init, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(hOf, initParams(width, height)), "nvOFInit");
 
       const mkBuf = (w: number, h: number, usage: number, format: number): NvofBuffer => {
         // NV_OF_BUFFER_DESCRIPTOR: width@0, height@4, bufferUsage@8, bufferFormat@12.
@@ -222,12 +239,13 @@ class NvofSession {
       const reference = mkBuf(width, height, USAGE_INPUT, FMT_GRAYSCALE8);
       const output = mkBuf(width, height, USAGE_OUTPUT, FMT_SHORT2);
 
-      return new NvofSession(
-        hOf, width, height, input, reference, output,
-        fn(FN.exec, { args: [FFIType.u64, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }),
-        destroyBuf,
-        destroy,
-      );
+      return new NvofSession({
+        hOf,
+        width,
+        height,
+        buffers: { input, reference, output },
+        calls: { execute: fn(FN.exec, { args: [FFIType.u64, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }), destroyBuf },
+      });
     } catch (error) {
       for (const handle of created.reverse()) try { destroyBuf(handle); } catch { /* best effort */ }
       try { destroy(hOf); } catch { /* best effort */ }
