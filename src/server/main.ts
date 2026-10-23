@@ -3,29 +3,16 @@
  * api-types.ts. Start with `bun run src/server/main.ts` (PORT overrides 4080;
  * 3080 is inside a Windows reserved port range on some machines).
  */
-import { existsSync, mkdirSync, statSync } from "node:fs";
-import { dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { mkdirSync } from "node:fs";
+import { extname, join } from "node:path";
 import index from "../../web/index.html";
 import { buildRuntimeCatalog } from "../ngx/runtime-catalog.ts";
 import { runtimeReport } from "../ngx/runtime-inventory.ts";
 import { APP_DATA_DIR, RUNTIME_DIR } from "../paths.ts";
-import { inputAsOutputProblem } from "../pipeline/output-path.ts";
 import { toolsReport } from "../pipeline/tools.ts";
-import {
-  DEFAULT_ENCODE_SETTINGS,
-  DEFAULT_FRAME_GEN_STEP,
-  DEFAULT_NR_SETTINGS,
-  DEFAULT_SCALE_SETTINGS,
-  DEFAULT_SR_STEP,
-  DEFAULT_WARMUP_FRAMES,
-  type JobRequest,
-  type SettingsDefaults,
-  type StepKind,
-  type WsEvent,
-} from "./api-types.ts";
-import { checkDllDir } from "./dll-dir.ts";
+import { checkJobAdmission, isExistingFile } from "./admission.ts";
+import { settingsDefaults, type WsEvent } from "./api-types.ts";
 import { JobManager } from "./jobs.ts";
-import { isWithin } from "./path-scope.ts";
 import { mediaInfo } from "./media-info.ts";
 import { ProbeRunner } from "./probe-runner.ts";
 import { MAX_REQUEST_BODY_BYTES, storeUpload } from "./upload.ts";
@@ -34,26 +21,14 @@ import { asJobRequest, validateJobRequest } from "./validate.ts";
 const UPLOADS_DIR = join(APP_DATA_DIR, "uploads");
 mkdirSync(UPLOADS_DIR, { recursive: true });
 const PORT = Number(process.env.PORT ?? 4080);
-const SETTINGS_DEFAULTS: SettingsDefaults = {
-  superResolution: DEFAULT_SR_STEP,
-  neuralRendering: DEFAULT_NR_SETTINGS,
-  frameGen: DEFAULT_FRAME_GEN_STEP,
-  resize: DEFAULT_SCALE_SETTINGS,
-  encode: DEFAULT_ENCODE_SETTINGS,
-  warmupFrames: DEFAULT_WARMUP_FRAMES,
-};
-
-/** The version folder each step of `request` names, with the step, for the catalog check. */
-function stepDllDirs(request: JobRequest): Array<[StepKind, string]> {
-  const named: Array<[StepKind, string | undefined]> = [["sr", request.superResolution?.dllDir], ["nr", request.neuralRendering?.dllDir], ["fg", request.frameGen?.dllDir]];
-  return named.filter((entry): entry is [StepKind, string] => entry[1] !== undefined);
-}
 
 const probeRunner = new ProbeRunner();
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 const fail = (message: string, status = 400): Response => json({ error: message }, status);
+/** The 404 of the two routes that read a file named in ?path=. */
+const QUERY_FILE_NOT_FOUND = "File not found. The 'path' query parameter must be an absolute path to an existing file.";
 
 const MIME: Record<string, string> = {
   ".png": "image/png",
@@ -95,7 +70,7 @@ const server = Bun.serve({
       }
     },
     "/api/catalog": () => json(buildRuntimeCatalog(RUNTIME_DIR)),
-    "/api/settings/defaults": () => json(SETTINGS_DEFAULTS),
+    "/api/settings/defaults": () => json(settingsDefaults()),
     "/api/jobs": {
       GET: () => json(jobs.list()),
       POST: async (req) => {
@@ -108,26 +83,8 @@ const server = Bun.serve({
         const invalid = validateJobRequest(body);
         if (invalid) return fail(invalid);
         const request = asJobRequest(body);
-        if (!isAbsolute(request.input) || !existsSync(request.input))
-          return fail(`Input file not found: ${request.input}. Provide an absolute path to a file that exists.`);
-        // Confine the output path so a request cannot write anywhere on the host.
-        if (request.output !== undefined) {
-          const roots = [APP_DATA_DIR, RUNTIME_DIR, dirname(resolve(request.input))];
-          if (!isAbsolute(request.output) || !roots.some((r) => isWithin(request.output!, r)))
-            return fail("The output path must be absolute and inside the app-data folder or the input's own directory.");
-          const inputProblem = inputAsOutputProblem(request.input, request.output);
-          if (inputProblem) return fail(inputProblem);
-        }
-        // A DLL directory drives a native LoadLibrary, so it must be one the server itself
-        // advertises through GET /api/catalog, for the feature of the step that loads it.
-        const dllDirs = stepDllDirs(request);
-        if (dllDirs.length) {
-          const catalog = buildRuntimeCatalog(RUNTIME_DIR);
-          for (const [step, dllDir] of dllDirs) {
-            const dllDirError = checkDllDir(dllDir, step, catalog);
-            if (dllDirError) return fail(dllDirError);
-          }
-        }
+        const refusal = checkJobAdmission(request, { appDataDir: APP_DATA_DIR, loadCatalog: () => buildRuntimeCatalog(RUNTIME_DIR) });
+        if (refusal) return fail(refusal);
         return json(jobs.submit(request), 201);
       },
     },
@@ -143,8 +100,7 @@ const server = Bun.serve({
     },
     "/api/media": async (req) => {
       const path = new URL(req.url).searchParams.get("path") ?? "";
-      if (!isAbsolute(path) || !existsSync(path) || !statSync(path).isFile())
-        return fail("File not found. The 'path' query parameter must be an absolute path to an existing file.", 404);
+      if (!isExistingFile(path)) return fail(QUERY_FILE_NOT_FOUND, 404);
       try {
         return json(await mediaInfo(path));
       } catch (error) {
@@ -156,8 +112,7 @@ const server = Bun.serve({
       // live wherever the user chose. Safe only because the server binds loopback (see
       // HOST) — NR_HOST must not reach a public interface without auth in front of it.
       const path = new URL(req.url).searchParams.get("path") ?? "";
-      if (!isAbsolute(path) || !existsSync(path) || !statSync(path).isFile())
-        return fail("File not found. The 'path' query parameter must be an absolute path to an existing file.", 404);
+      if (!isExistingFile(path)) return fail(QUERY_FILE_NOT_FOUND, 404);
       const type = MIME[extname(path).toLowerCase()] ?? "application/octet-stream";
       return new Response(Bun.file(path), { headers: { "content-type": type, "cache-control": "no-store" } });
     },

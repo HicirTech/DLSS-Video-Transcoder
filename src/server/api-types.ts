@@ -262,7 +262,10 @@ export interface JobRequest {
   kind: JobKind;
   /** Absolute path on the machine running the server. */
   input: string;
-  /** Absolute output path; omitted = next to the input, named after the steps that run (stepsSuffix), e.g. clip.sr-nr-fg.mp4. */
+  /**
+   * Absolute output path inside the app-data folder or the input's folder (any subfolder counts; anything else is
+   * refused); omitted = next to the input, named after the steps that run (stepsSuffix), e.g. clip.sr-nr-fg.mp4.
+   */
   output?: string;
   superResolution?: SuperResolutionStep;
   neuralRendering?: NeuralRenderingStep;
