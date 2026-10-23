@@ -132,8 +132,8 @@ export interface EngineChainOptions {
 }
 
 /**
- * The engine a job's frames go through. One step opens just its own engine, so a job of one step runs the
- * same engine a one-engine job always ran; both open SR and then NR; neither opens BypassEngine.
+ * The engine a job's frames go through. One step opens just its own engine; both open SR, then NR on SR's output;
+ * neither opens BypassEngine.
  */
 export function createEngineChain(session: GpuSession, options: EngineChainOptions): Engine {
   const runtime = { runtimeDir: options.runtimeDir, appDataPath: options.appDataPath };
