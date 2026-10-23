@@ -140,7 +140,7 @@ export class Stage {
   async evaluate(prepared: PreparedFrame): Promise<TimedFrame[]> {
     const { frame } = prepared;
     if (!prepared.reset) this.intervals++;
-    const generated = await this.session.processFrame(frame.rgba, prepared.half ?? this.zeros, this.nextIndex++, prepared.reset, frame.timestamp.num, frame.timestamp.den);
+    const generated = await this.session.processFrame({ rgba: frame.rgba, motion: prepared.half ?? this.zeros, index: this.nextIndex++, reset: prepared.reset });
     this.generatedTotal += generated.length;
     const output: TimedFrame[] = [];
     if (!prepared.reset && prepared.previousTimestamp !== null) {

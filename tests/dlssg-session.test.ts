@@ -50,7 +50,7 @@ function openSession(host: DlssgHost, options: Partial<DlssgOptions> = {}): Prom
 function sendFrame(session: DlssgSession, frameId: number): Promise<Uint8Array[]> {
   const rgba = new Uint8Array(rgbaFrameBytes(WIDTH, HEIGHT)).fill(rgbaByte(frameId));
   const motion = new Uint8Array(motionFieldBytes(WIDTH, HEIGHT)).fill(motionByte(frameId));
-  return session.processFrame(rgba, new Uint16Array(motion.buffer), frameId, frameId === 0, BigInt(frameId), 30n);
+  return session.processFrame({ rgba, motion: new Uint16Array(motion.buffer), index: frameId, reset: frameId === 0 });
 }
 
 /** True once no process holds the shared memory called `name`. */
@@ -143,7 +143,7 @@ describe("DlssgSession against a host process", () => {
   test("a frame of the wrong size is refused before anything is sent, so the session stays in step with the host", async () => {
     const session = await openSession(servingHost([]));
     opened.push(session);
-    const message = await failure(session.processFrame(new Uint8Array(10), new Uint16Array(motionFieldBytes(WIDTH, HEIGHT) / 2), 0, true, 0n, 30n));
+    const message = await failure(session.processFrame({ rgba: new Uint8Array(10), motion: new Uint16Array(motionFieldBytes(WIDTH, HEIGHT) / 2), index: 0, reset: true }));
     expect(message).toBe(`DLSS Frame Generation was given 10 bytes of colour and ${motionFieldBytes(WIDTH, HEIGHT)} bytes of motion for a session whose frames take ${rgbaFrameBytes(WIDTH, HEIGHT)} and ${motionFieldBytes(WIDTH, HEIGHT)}`);
     expect(await sendFrame(session, 0)).toEqual([]);
   }, TEST_TIMEOUT_MS);

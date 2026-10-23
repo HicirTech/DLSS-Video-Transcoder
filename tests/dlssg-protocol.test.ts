@@ -89,11 +89,11 @@ describe("FGR1 setup reply", () => {
   });
 });
 
-describe("FGF2 frame header", () => {
-  const header = { index: 0x04030201, reset: true, timestampNumerator: 0x0102030405060708n, timestampDenominator: 30000n };
-  const golden = hex(`${FGF2}  01 02 03 04  01 00 00 00  00 00 00 00  08 07 06 05 04 03 02 01  30 75 00 00 00 00 00 00`);
+describe("FGF3 frame header", () => {
+  const header = { index: 0x04030201, reset: true };
+  const golden = hex(`${FGF3}  01 02 03 04  01 00 00 00  00 00 00 00`);
 
-  test("encodes magic, index, reset, zero padding, then the timestamp as little-endian i64", () => {
+  test("encodes magic, index, reset and a zero reserved word as little-endian u32", () => {
     expect(encodeFrameHeader(header)).toEqual(golden);
     expect(golden.byteLength).toBe(FRAME_HEADER_BYTES);
   });
@@ -102,18 +102,17 @@ describe("FGF2 frame header", () => {
     expect(encodeFrameHeader({ ...header, reset: false }).subarray(8, 12)).toEqual(hex("00 00 00 00"));
   });
 
-  test("decodes what it encodes, a negative timestamp included", () => {
+  test("decodes what it encodes", () => {
     expect(decodeFrameHeader(golden)).toEqual(header);
-    const negative = { index: 0, reset: false, timestampNumerator: -1n, timestampDenominator: 1001n };
-    expect(decodeFrameHeader(encodeFrameHeader(negative))).toEqual(negative);
   });
 
   test("rejects another message's magic", () => {
-    expect(() => decodeFrameHeader(hex(`${FGS1} ${"00 ".repeat(28)}`))).toThrow("DLSSG frame: bad request magic");
+    expect(() => decodeFrameHeader(hex(`${FGS2} ${"00 ".repeat(12)}`))).toThrow("DLSSG frame: bad request magic");
   });
 
-  test("rejects the previous protocol's magic, so a parent that still sends pixels on the pipe is not served", () => {
-    expect(() => decodeFrameHeader(hex(`${FGF1} ${"00 ".repeat(28)}`))).toThrow("DLSSG frame: bad request magic");
+  test("rejects the previous protocols' magics, so a parent that still sends pixels on the pipe or timestamps is not served", () => {
+    expect(() => decodeFrameHeader(hex(`${FGF1} ${"00 ".repeat(12)}`))).toThrow("DLSSG frame: bad request magic");
+    expect(() => decodeFrameHeader(hex(`${FGF2} ${"00 ".repeat(12)}`))).toThrow("DLSSG frame: bad request magic");
   });
 });
 
