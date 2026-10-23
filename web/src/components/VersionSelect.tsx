@@ -13,6 +13,13 @@ interface VersionSelectProps {
   onChange: (dir: string) => void;
 }
 
+/** The line under the select: why no version is listed yet, or what the choice means. */
+function versionHelp(error: string | null, catalog: RuntimeManifest | null, versionCount: number): string {
+  if (error !== null) return `Could not load versions: ${error}. The bundled DLL is used; reload the page to try again.`;
+  if (catalog === null) return "Looking for installed versions…";
+  return versionCount > 0 ? "Use a specific installed DLSS DLL, or the bundled one." : "Only the bundled DLL is installed.";
+}
+
 /** Lets the user pick a specific installed DLSS DLL version (or the bundled default) for a feature. */
 export function VersionSelect({ feature, value, onChange }: VersionSelectProps) {
   // Per instance, not per feature: the image and video panels both render the
@@ -46,13 +53,7 @@ export function VersionSelect({ feature, value, onChange }: VersionSelectProps) 
           </MenuItem>
         ))}
       </Select>
-      <FormHelperText>
-        {error
-          ? `Could not load versions: ${error}`
-          : versions.length > 0
-            ? "Use a specific installed DLSS DLL, or the bundled one."
-            : "Only the bundled DLL is installed."}
-      </FormHelperText>
+      <FormHelperText id={helpId}>{versionHelp(error, catalog, versions.length)}</FormHelperText>
     </FormControl>
   );
 }
