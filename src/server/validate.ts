@@ -9,7 +9,7 @@
 import { DEVICE_UUID_GROUP_LENGTHS, DEVICE_UUID_PATTERN } from "../native/device-uuid.ts";
 import { resolveTargetRate } from "../pipeline/framegen-plan.ts";
 import {
-  DLSS_SR_MAX_OUTPUT_SIDE,
+  DEFAULT_ENCODE_SETTINGS,
   ENCODE_CODECS,
   ENCODE_CONTAINERS,
   FRAME_GEN_CONTAINER,
@@ -25,6 +25,7 @@ import {
   type JobRequest,
   type ScaleSettings,
 } from "./api-types.ts";
+import { srSideProblem } from "./output-size.ts";
 import { takesGpuChoice } from "./settings-in-use.ts";
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -83,8 +84,8 @@ function checkNrSettings(value: unknown, path: string): string | null {
 
 /**
  * DLSS SR only enlarges and writes no side past DLSS_SR_MAX_OUTPUT_SIDE (srOutputProblem). A factor below
- * SR_FACTOR_MIN and an exact size past that side are refused before the job queues; an output smaller than the
- * source needs the source's size, so the job refuses it when it opens SR.
+ * SR_FACTOR_MIN and an exact size past that side (srSideProblem) are refused before the job queues; an output
+ * smaller than the source needs the source's size, so the job refuses it when it opens SR.
  */
 function checkSuperResolution(step: unknown, kind: unknown): string | null {
   if (!isObject(step)) return "superResolution must be an object when present.";
@@ -98,8 +99,9 @@ function checkSuperResolution(step: unknown, kind: unknown): string | null {
   if (scale.mode === "factor" && scale.factor < SR_FACTOR_MIN) {
     return `Super Resolution only enlarges: superResolution.scale.factor must be at least ${SR_FACTOR_MIN} (got ${scale.factor}; 1 runs DLAA at the source size). Use resize without superResolution to shrink.`;
   }
-  if (scale.mode === "size" && Math.max(scale.width, scale.height) > DLSS_SR_MAX_OUTPUT_SIDE) {
-    return `Super Resolution writes at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side (got ${scale.width}x${scale.height}).`;
+  if (scale.mode === "size") {
+    const sideProblem = srSideProblem(scale);
+    if (sideProblem) return sideProblem;
   }
   // A still has no frames to estimate motion between, and the image job never reads it.
   if (kind === "image" && step.motion === "flow") return 'superResolution.motion applies to video jobs only; omit it or set it to "none".';

@@ -36,10 +36,14 @@ export function srOutputProblem(render: { width: number; height: number }, outpu
   if (output.width < render.width || output.height < render.height) {
     return `DLSS Super Resolution only enlarges: ${output.width}x${output.height} is smaller than the ${render.width}x${render.height} source. Use a factor of at least ${SR_FACTOR_MIN} (1 runs DLAA at the source size).`;
   }
-  if (Math.max(output.width, output.height) > DLSS_SR_MAX_OUTPUT_SIDE) {
-    return `DLSS Super Resolution writes at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side; ${output.width}x${output.height} is larger. Use a smaller factor or output size.`;
-  }
-  return null;
+  return srSideProblem(output);
+}
+
+/** Why DLSS SR cannot write a `size` output because a side is longer than DLSS_SR_MAX_OUTPUT_SIDE, or null. */
+export function srSideProblem(size: { width: number; height: number }): string | null {
+  return Math.max(size.width, size.height) > DLSS_SR_MAX_OUTPUT_SIDE
+    ? `DLSS Super Resolution writes at most ${DLSS_SR_MAX_OUTPUT_SIDE} pixels per side; ${size.width}x${size.height} is larger. Use a smaller factor or output size.`
+    : null;
 }
 
 /**
