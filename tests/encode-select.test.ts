@@ -48,22 +48,22 @@ describe("encode-select", () => {
   });
 
   test("encoderArgs pins every NVENC encoder to the job's CUDA device and leaves CPU codecs alone", () => {
-    for (const codec of ["h264_nvenc", "hevc_nvenc", "av1_nvenc"] as const) {
-      const args = encoderArgs({ codec, quality: 20, container: "mp4", copyAudio: false }, 1);
+    for (const codec of FFMPEG_NVENC_ENCODERS) {
+      const args = encoderArgs(encodeSettings(codec), 1);
       expect(args.slice(args.indexOf("-c:v"), args.indexOf("-c:v") + 4)).toEqual(["-c:v", codec, "-gpu", "1"]);
     }
-    for (const codec of ["h264", "hevc", "av1"] as const) {
-      expect(encoderArgs({ codec, quality: 20, container: "mp4", copyAudio: false }, 1)).not.toContain("-gpu");
+    for (const codec of CPU_CODECS) {
+      expect(encoderArgs(encodeSettings(codec), 1)).not.toContain("-gpu");
     }
   });
 
   test("every NVENC encoder runs the one NVENC preset, which no CPU encoder is given", () => {
-    for (const codec of ["h264_nvenc", "hevc_nvenc", "av1_nvenc"] as const) {
-      const args = encoderArgs({ codec, quality: 20, container: "mp4", copyAudio: false }, 0);
+    for (const codec of FFMPEG_NVENC_ENCODERS) {
+      const args = encoderArgs(encodeSettings(codec), 0);
       expect(args[args.indexOf("-preset") + 1], codec).toBe(NVENC_PRESET);
     }
-    for (const codec of ["h264", "hevc", "av1"] as const) {
-      const args = encoderArgs({ codec, quality: 20, container: "mp4", copyAudio: false }, 0);
+    for (const codec of CPU_CODECS) {
+      const args = encoderArgs(encodeSettings(codec), 0);
       expect(args[args.indexOf("-preset") + 1], codec).not.toBe(NVENC_PRESET);
     }
   });
@@ -81,20 +81,20 @@ describe("encode-select", () => {
   });
 
   test("encoderArgs refuses a codec the API does not list, naming the ones it does", () => {
-    expect(() => encoderArgs({ codec: "vp9" as never, quality: 20, container: "mp4", copyAudio: false }, 0)).toThrow(
+    expect(() => encoderArgs(encodeSettings("vp9" as never), 0)).toThrow(
       'Unknown codec "vp9". Choose one of: h264, hevc, av1, h264_nvenc, hevc_nvenc, av1_nvenc.',
     );
   });
 
   test("resolveEncodeCodec passes CPU codecs through without probing", () => {
     // A CPU codec returns as-is and never spawns ffmpeg, so a bogus path is fine.
-    expect(resolveEncodeCodec("h264", "C:/nonexistent/ffmpeg.exe", 0, HD)).toEqual({ codec: "h264", note: null });
-    expect(resolveEncodeCodec("av1", "C:/nonexistent/ffmpeg.exe", 0, { width: 16384, height: 8192 })).toEqual({ codec: "av1", note: null });
+    expect(resolveEncodeCodec("h264", NO_SUCH_FFMPEG, 0, HD)).toEqual({ codec: "h264", note: null });
+    expect(resolveEncodeCodec("av1", NO_SUCH_FFMPEG, 0, { width: 16384, height: 8192 })).toEqual({ codec: "av1", note: null });
   });
 
   test("resolveEncodeCodec falls back to the CPU sibling when the NVENC probe cannot run", () => {
     // A bogus ffmpeg path makes the probe throw/fail, exercising the fallback branch.
-    const resolved = resolveEncodeCodec("hevc_nvenc", "C:/nonexistent/ffmpeg.exe", 0, HD);
+    const resolved = resolveEncodeCodec("hevc_nvenc", NO_SUCH_FFMPEG, 0, HD);
     expect(resolved.codec).toBe("hevc");
     expect(resolved.note).toContain("hevc_nvenc");
   });
@@ -102,11 +102,11 @@ describe("encode-select", () => {
   // NVENC will not open past these sizes; ffmpeg would only say "broken pipe" once the frames start.
   test("past an NVENC encoder's longest side, resolveEncodeCodec takes the CPU sibling and names the GPU encoders that fit", () => {
     // Decided before any probe: the bogus ffmpeg path is never run.
-    expect(resolveEncodeCodec("h264_nvenc", "C:/nonexistent/ffmpeg.exe", 0, { width: 7680, height: 4320 })).toEqual({
+    expect(resolveEncodeCodec("h264_nvenc", NO_SUCH_FFMPEG, 0, { width: 7680, height: 4320 })).toEqual({
       codec: "h264",
       note: `h264_nvenc encodes at most ${NVENC_MAX_SIDE.h264_nvenc} pixels per side and this output is 7680x4320: encoding with h264 (CPU) instead, which is slower; hevc_nvenc or av1_nvenc would keep it on the GPU`,
     });
-    expect(resolveEncodeCodec("hevc_nvenc", "C:/nonexistent/ffmpeg.exe", 0, { width: 2160, height: 16384 }).note).toBe(
+    expect(resolveEncodeCodec("hevc_nvenc", NO_SUCH_FFMPEG, 0, { width: 2160, height: 16384 }).note).toBe(
       `hevc_nvenc encodes at most ${NVENC_MAX_SIDE.hevc_nvenc} pixels per side and this output is 2160x16384: encoding with hevc (CPU) instead, which is slower`,
     );
   });
