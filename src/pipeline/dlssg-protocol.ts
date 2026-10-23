@@ -10,15 +10,15 @@
 // built for an older layout fails on the first magic instead of misreading the stream.
 const SETUP_MAGIC = 0x32534746;
 const SETUP_REPLY_MAGIC = 0x31524746;
-const FRAME_MAGIC = 0x32464746;
+const FRAME_MAGIC = 0x33464746;
 const FRAME_RESULT_MAGIC = 0x324f4746;
 
 /** FGS2: magic, width, height, generatedCount, each a u32. */
 export const SETUP_BYTES = 16;
 /** FGR1: magic, status, maximum, reserved, each a u32. */
 export const SETUP_REPLY_BYTES = 16;
-/** FGF2: magic, index, reset, padding (u32 each), then the timestamp numerator and denominator (i64 each). */
-export const FRAME_HEADER_BYTES = 32;
+/** FGF3: magic, index, reset, reserved, each a u32. */
+export const FRAME_HEADER_BYTES = 16;
 /** FGO2: magic, status, generated, disabled, each a u32. */
 export const FRAME_RESULT_BYTES = 16;
 
@@ -57,8 +57,6 @@ interface DlssgFrameHeader {
   index: number;
   /** Drop the interpolation history: the frame starts a new shot, so nothing is generated before it. */
   reset: boolean;
-  timestampNumerator: bigint;
-  timestampDenominator: bigint;
 }
 
 /**
@@ -167,14 +165,7 @@ export function decodeSetupReply(bytes: Uint8Array): DlssgSetupReply {
 }
 
 export function encodeFrameHeader(header: DlssgFrameHeader): Uint8Array {
-  const view = new DataView(new ArrayBuffer(FRAME_HEADER_BYTES));
-  view.setUint32(0, FRAME_MAGIC, true);
-  view.setUint32(4, header.index, true);
-  view.setUint32(8, header.reset ? 1 : 0, true);
-  view.setUint32(12, 0, true);
-  view.setBigInt64(16, header.timestampNumerator, true);
-  view.setBigInt64(24, header.timestampDenominator, true);
-  return new Uint8Array(view.buffer);
+  return encodeWords([FRAME_MAGIC, header.index, header.reset ? 1 : 0, 0]);
 }
 
 export function decodeFrameHeader(bytes: Uint8Array): DlssgFrameHeader {
@@ -183,8 +174,6 @@ export function decodeFrameHeader(bytes: Uint8Array): DlssgFrameHeader {
   return {
     index: view.getUint32(4, true),
     reset: view.getUint32(8, true) !== 0,
-    timestampNumerator: view.getBigInt64(16, true),
-    timestampDenominator: view.getBigInt64(24, true),
   };
 }
 

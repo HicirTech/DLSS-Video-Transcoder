@@ -131,7 +131,7 @@ function isBrokenPipe(error: unknown): boolean {
 /** A running host process and the end of what it wrote to stderr. */
 interface HostChild {
   host: DlssgHost;
-  proc: Subprocess;
+  proc: Subprocess<"pipe", "pipe", "pipe">;
   stderr: StderrTail;
 }
 
@@ -420,13 +420,13 @@ export class DlssgSession {
    * copies, not views of the shared output slot: the encoder and the next stage
    * of a cascade go on reading them while the next interval overwrites the slot.
    */
-  async processFrame(rgba: Uint8Array, motion: Uint16Array, index: number, reset: boolean, tsNum: bigint, tsDen: bigint): Promise<Uint8Array[]> {
-    this.frames.writeFrame(rgba, motion);
-    const header = encodeFrameHeader({ index, reset, timestampNumerator: tsNum, timestampDenominator: tsDen });
-    const stdin = this.child.proc.stdin as { write(b: Uint8Array): unknown; flush(): number | Promise<number> };
+  async processFrame(frame: { rgba: Uint8Array; motion: Uint16Array; index: number; reset: boolean }): Promise<Uint8Array[]> {
+    const { index } = frame;
+    this.frames.writeFrame(frame.rgba, frame.motion);
+    const stdin = this.child.proc.stdin;
     // A dead host shows as the read below ending, not as a failed write: Bun 1.4.2 raised EPIPE for
-    // writes into a closed pipe from 70 KB up (measured), never for a header's 32 bytes.
-    stdin.write(header);
+    // writes into a closed pipe from 70 KB up (measured), never for a header's 16 bytes.
+    stdin.write(encodeFrameHeader({ index, reset: frame.reset }));
     await stdin.flush();
 
     const resultBytes = await this.reader.next(FRAME_RESULT_BYTES);

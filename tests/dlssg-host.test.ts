@@ -94,7 +94,7 @@ class HostConversation {
     const bytes = this.memory!.bytes;
     viewRange(bytes, LAYOUT.rgba).fill(rgbaByte(sent.frameId));
     viewRange(bytes, LAYOUT.motion).fill(motionByte(sent.frameId));
-    const header = encodeFrameHeader({ index: sent.frameId, reset: sent.reset ?? false, timestampNumerator: BigInt(sent.frameId), timestampDenominator: 30n });
+    const header = encodeFrameHeader({ index: sent.frameId, reset: sent.reset ?? false });
     if (sent.corruptMagic) header[0] = 0;
     await this.send(header);
     const replyBytes = await this.stdout.next(FRAME_RESULT_BYTES);
@@ -290,7 +290,7 @@ describe("dlssg-host serve loop", () => {
     const host = startHost();
     await host.setup();
     expect((await host.frame({ frameId: 0, reset: true }))?.result).toEqual({ outcome: "empty" });
-    await host.send(encodeFrameHeader({ index: 1, reset: false, timestampNumerator: 1n, timestampDenominator: 30n }).subarray(0, 10));
+    await host.send(encodeFrameHeader({ index: 1, reset: false }).subarray(0, 10));
     const end = await host.finish();
     expect(end.strayStdoutBytes).toBe(0);
     expect(end.stderr).toContain("fake generator closed");

@@ -20,7 +20,6 @@ import { createMotionEstimator } from "../src/pipeline/flow.ts";
 import { FrameReader } from "../src/pipeline/frame-reader.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "../src/pipeline/framegen-plan.ts";
 import { tryCreateNvofBackend } from "../src/pipeline/nvof.ts";
-import { parseRational, ratDiv, rational } from "../src/pipeline/rational.ts";
 import { findTool } from "../src/pipeline/tools.ts";
 import { probeVideo } from "../src/pipeline/video-probe.ts";
 
@@ -63,8 +62,6 @@ if (!ffmpeg || !ffprobe) throw new Error("ffmpeg and ffprobe are required (insta
 const info = probeVideo(ffprobe, input, ffmpeg);
 const { width, height } = info;
 const frameBytes = width * height * 4;
-// The nominal CFR clock, the one framegen.ts stamps source frames in.
-const sourceRate = parseRational(info.nominalFpsText);
 
 const scores: number[] = [];
 const counts = { kept: 0, generatedIntervals: 0, emptyIntervals: 0, mismatchedIntervals: 0, sceneCuts: 0, bestMatchInPlace: 0 };
@@ -94,8 +91,7 @@ try {
     // The first stage's guide worker: a detected cut starts a new history, as does the first frame.
     const reset = first || motion.reset;
     if (!first && motion.reset) counts.sceneCuts++;
-    const timestamp = ratDiv(rational(sourceIndex), sourceRate);
-    const generated = await session.processFrame(frame, motion.half ?? zeroMotion, counts.kept, reset, timestamp.num, timestamp.den);
+    const generated = await session.processFrame({ rgba: frame, motion: motion.half ?? zeroMotion, index: counts.kept, reset });
     counts.kept++;
     if (generated.length === 0) {
       if (!first) counts.emptyIntervals++;
