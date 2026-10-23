@@ -16,7 +16,7 @@ export function ReadyChip({ probe, probing, onProbe }: ReadyChipProps) {
   }
   if (!probe) {
     return (
-      <Tooltip title="Run the hardware / runtime probe">
+      <Tooltip title="Run the hardware / runtime probe" describeChild>
         <Chip label="Not probed" variant="outlined" onClick={onProbe} />
       </Tooltip>
     );
@@ -36,7 +36,7 @@ export function ReadyChip({ probe, probing, onProbe }: ReadyChipProps) {
       "Neural rendering is not ready"
     );
   return (
-    <Tooltip title={title}>
+    <Tooltip title={title} describeChild>
       <Chip
         icon={ready ? <CheckCircleIcon /> : <CancelIcon />}
         label={ready ? "Neural rendering ready" : "Neural rendering not ready"}
