@@ -1,7 +1,7 @@
 /**
- * DLSS Frame Generation (NGX feature 11) parameter names that our in-process host reads and sets.
- * Re-declared from the public nvsdk_ngx_defs_dlssg.h (NVIDIA/DLSS v310.9.1). The generic names
- * (Width, Height, the node masks and the FrameGeneration.* capabilities) belong to NgxParam.
+ * The DLSS Frame Generation (NGX feature 11) parameter names DlssgFeature reads and sets, re-declared from the public
+ * nvsdk_ngx_defs_dlssg.h (NVIDIA/DLSS v310.9.1); the generic names (Width, Height, the node masks and the
+ * FrameGeneration.* capabilities) belong to NgxParam.
  */
 
 /** Read from GetCapabilityParameters; nvsdk_ngx_defs_dlssg.h:350-353. */
