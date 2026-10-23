@@ -41,9 +41,8 @@ export async function fgCommand(args: string[]): Promise<void> {
     codec: choiceOption(args, "--codec", ENCODE_CODECS),
     runtimeDir,
     dllDir: dlssVersionOption(args, runtimeDir, "fg"),
-    onProgress: (f, m, frames) => {
-      if (frames === undefined) console.log(`  ${(f * 100).toFixed(0)}%  ${m}`);
-    },
+    onProgress: printProgress,
+    signal: interruptSignal(),
   });
   console.log(frameGenSummary(result));
   console.log(`wrote ${result.output}`);
