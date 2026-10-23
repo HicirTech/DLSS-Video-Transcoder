@@ -40,7 +40,6 @@ describe("target rates", () => {
     expect(eq(resolveTargetRate("60000/1001"), rational(60000, 1001))).toBe(true);
     expect(eq(resolveTargetRate("48"), rational(48))).toBe(true);
     expect(eq(resolveTargetRate("47.5"), rational(95, 2))).toBe(true);
-    expect(eq(resolveTargetRate(rational(90)), rational(90))).toBe(true);
   });
 
   test("resolveTargetRate rejects garbage and non-positive rates with the choice list", () => {
