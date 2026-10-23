@@ -71,7 +71,7 @@ export class FeatureCommonInfo {
   }
 
   get ptr(): number {
-    return this.struct.ptr as unknown as number;
+    return this.struct.ptr;
   }
 }
 
@@ -243,7 +243,7 @@ export class NgxCore {
       return { result, supportedBits: null, support: SUPPORT_QUERY_FAILED, supportLevel: "blocked", minHwArchitecture: null, minOsVersion: null };
     }
     const bits = out.getU32(0);
-    const minOs = readCString(out.ptr as unknown as number + 8, 255);
+    const minOs = readCString(out.ptr + 8, 255);
     return {
       result,
       supportedBits: bits,

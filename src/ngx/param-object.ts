@@ -60,11 +60,11 @@ export class NgxParamObject {
     this.install(MSVC.reset, new JSCallback(() => this.store.clear(), { args: [FFIType.ptr], returns: FFIType.void }));
     // Object layout: first 8 bytes point at the vtable; pad so stray reads stay inside our memory.
     this.object = new NativeStruct(64);
-    this.object.pointer(0, this.vtable.ptr as unknown as number);
+    this.object.pointer(0, this.vtable.ptr);
   }
 
   get ptr(): number {
-    return this.object.ptr as unknown as number;
+    return this.object.ptr;
   }
 
   setU32(name: string, value: number): this {
