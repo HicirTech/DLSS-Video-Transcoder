@@ -1,13 +1,11 @@
 /**
- * DLSS Frame Generation (NGX feature 11 / DLSSG) driven in a child process over the protocol of
- * dlssg-protocol.ts. The child, dlssg-host.ts (started as dlssg-host-launch.ts says), owns the NGX
- * device and the DLSSG history; this side puts colour + motion into shared memory
- * (dlssg-shared-layout.ts) that the child reads in place, and copies the synthesised in-between
- * frames back out of it. The pipes carry only the small messages that say whose turn it is.
+ * DLSS Frame Generation (NGX feature 11 / DLSSG) driven in the dlssg-host.ts child (started as
+ * dlssg-host-launch.ts says) over dlssg-protocol.ts, with frames passed both ways through the shared
+ * memory of dlssg-shared-layout.ts.
  *
- * Out of process so that a native fault in the runtime ends the child, not the server, and so each
- * session gets an NGX init of its own. The `nvngx_dlssg.dll` the child loads is third-party: run it
- * only from a trusted, user-supplied runtime folder.
+ * Out of process so that a native fault in the third-party `nvngx_dlssg.dll`, which must come only
+ * from a trusted, user-supplied runtime folder, ends the child rather than the server, and so each
+ * session gets an NGX init of its own.
  */
 import type { Subprocess } from "bun";
 import { SharedMemory } from "../native/shared-memory.ts";
@@ -249,8 +247,8 @@ export interface DlssgOptions {
 const USE_LOWER_MULTIPLIER = "Use a lower multiplier.";
 
 /**
- * Why setup was refused. Status 2 means the request exceeded the runtime's MultiFrameCountMax
- * (HostStatus.tooManyGenerated); any other status is reported as it is, with what the host wrote to stderr.
+ * Why setup was refused. A request above the runtime's MultiFrameCountMax (HostStatus.tooManyGenerated)
+ * gets its own message; any other status is reported as it is, with what the host wrote to stderr.
  */
 async function setupRefusal(child: HostChild, status: number, requested: number): Promise<Error> {
   if (status === HostStatus.tooManyGenerated) {
@@ -386,9 +384,8 @@ export class DlssgSession {
 
     // Every exit from here to the constructor must end the child: by the time it
     // answers at all it has its own D3D12 device and NGX feature up, and nothing
-    // else owns the process until DlssgSession exists. A refused generatedCount
-    // is the ordinary case — that is what a plan asking for more in-between
-    // frames than the runtime supports gets.
+    // else owns the process until DlssgSession exists. That includes a refused
+    // generatedCount, which happens when the open disagrees with the probe.
     try {
       const reader = new FrameReader(proc.stdout);
       const setup = encodeSetup({ width: opts.width, height: opts.height, generatedCount: opts.generatedCount });
