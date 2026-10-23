@@ -232,8 +232,8 @@ class OverlappedRun {
   private startGuides(): void {
     for (let k = this.stages.length - 1; k >= 0; k--) {
       const name = `guide:${k}`;
-      // Retain native output headroom even if the GPU is idle; let analysis run a little ahead of packing.
-      if (!this.pending.has(name) && this.edges[k]!.length && this.analyzed[k]!.length + this.prepared[k]!.length < 3 && this.used + 1 <= this.capacity - this.maxGenerated) {
+      // Retain native output headroom even if the GPU is idle.
+      if (!this.pending.has(name) && this.edges[k]!.length && this.analyzed[k]!.length + this.prepared[k]!.length < MAX_FRAMES_AHEAD && this.used + 1 <= this.capacity - this.maxGenerated) {
         this.reserve(1);
         const frame = this.edges[k]!.shift()!;
         this.start(name, this.stages[k]!.prepare(frame, ++this.guideSeq), (analyzed) => { this.analyzed[k]!.push(analyzed); });
@@ -242,7 +242,7 @@ class OverlappedRun {
   }
 
   private startDecode(): void {
-    if (!this.ended && !this.pending.has("decode") && this.edges[0]!.length < this.edgeCapacity && this.used + 1 <= this.capacity - this.maxGenerated - 1) {
+    if (!this.ended && !this.pending.has("decode") && this.edges[0]!.length < this.edgeCapacity && this.used + 1 <= this.capacity - this.maxGenerated - DECODE_HEADROOM_CREDITS) {
       this.reserve(1);
       this.start("decode", this.decodeOne(), (frame) => this.acceptDecode(frame));
     }
