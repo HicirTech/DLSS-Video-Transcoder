@@ -258,7 +258,7 @@ describe("probeDlssgHost", () => {
   test("a host that prints no probe line is unavailable, with its exit code and stderr as the reason", async () => {
     const probe = await probeDlssgHost(fakeHost([process.execPath, "-e", "console.error('no runtime here'); process.exit(3)"]));
     expect(probe.available).toBe(false);
-    expect(probe.workerVersion).toBe("");
+    expect(probe.answered).toBe(false);
     expect(probe.detail).toBe(`${HOST_PROCESS_NAME} exited 3 without reporting: no runtime here. Check the fake.`);
   }, TEST_TIMEOUT_MS);
 
@@ -270,8 +270,23 @@ describe("probeDlssgHost", () => {
   test("a probe that does not finish in time is stopped and reported unavailable", async () => {
     const probe = await probeDlssgHost(fakeHost([process.execPath, "-e", "setInterval(() => {}, 1000)"]), 500);
     expect(probe.available).toBe(false);
-    expect(probe.workerVersion).toBe("");
+    expect(probe.answered).toBe(false);
     expect(probe.detail).toBe(`${HOST_PROCESS_NAME} did not finish --probe within 0.5 s and was stopped. Check the fake.`);
+  }, TEST_TIMEOUT_MS);
+
+  test("a last stdout line that is not a probe report is quoted with the host's stderr and the hint", async () => {
+    const probe = await probeDlssgHost(fakeHost([process.execPath, "-e", "console.log('not json'); console.error('probe noise'); process.exit(0)"]));
+    expect(probe.available).toBe(false);
+    expect(probe.answered).toBe(false);
+    expect(probe.detail).toBe(`${HOST_PROCESS_NAME} exited 0 with a last stdout line that is not a probe report: "not json"; it said: probe noise. Check the fake.`);
+  }, TEST_TIMEOUT_MS);
+
+  test("a host that cannot be started in its folder is unavailable, with the folder and the hint", async () => {
+    const missing = join(import.meta.dir, "no-such-runtime-folder");
+    const probe = await probeDlssgHost({ ...fakeHost([process.execPath, "-e", ""]), cwd: missing });
+    expect(probe.available).toBe(false);
+    expect(probe.detail).toStartWith(`${HOST_PROCESS_NAME} could not be started in ${missing}: `);
+    expect(probe.detail).toEndWith(". Check the fake.");
   }, TEST_TIMEOUT_MS);
 });
 

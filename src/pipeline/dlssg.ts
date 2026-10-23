@@ -28,6 +28,8 @@ import { sharedFrameLayout, viewRange, type SharedFrameLayout } from "./dlssg-sh
 import { FrameReader, allocateFrame } from "./frame-reader.ts";
 
 export interface DlssgProbe extends DlssgProbeLine {
+  /** Whether the host printed a probe line; probeDlssg caches only these. */
+  answered: boolean;
   /**
    * Windows hardware-accelerated GPU scheduling. The DLSS-G runtime refuses
    * multi-frame (>=3x) generation without it while still allowing 2x, so this
@@ -163,8 +165,8 @@ export function probeDlssg(runtime: DlssgRuntime): Promise<DlssgProbe> {
   // describe a machine the user is probably fixing right now, and the TTL would
   // repeat the same message for a minute without re-spawning.
   probe.then(
-    (answered) => {
-      if (!answered.workerVersion) probeCache.delete(key);
+    (result) => {
+      if (!result.answered) probeCache.delete(key);
     },
     () => probeCache.delete(key),
   );
@@ -174,7 +176,7 @@ export function probeDlssg(runtime: DlssgRuntime): Promise<DlssgProbe> {
 
 /** A probe the host did not answer; `detail` says why. Not cached (probeDlssg). */
 function unansweredProbe(detail: string): DlssgProbe {
-  return { available: false, multiFrameCountMax: 0, runtimeVersion: "", workerVersion: "", detail, hagsEnabled: probeHags() };
+  return { available: false, multiFrameCountMax: 0, runtimeVersion: "", detail, answered: false, hagsEnabled: probeHags() };
 }
 
 /**
@@ -224,7 +226,7 @@ export async function probeDlssgHost(host: DlssgHost, timeoutMs = PROBE_TIMEOUT_
   } catch {
     return unansweredProbe(`${HOST_PROCESS_NAME} exited ${exitCode} with a last stdout line that is not a probe report: ${JSON.stringify(line.slice(0, 200))}${said ? `; it said: ${said}` : ""}. ${host.hint}`);
   }
-  return { ...decodeProbeLine(line), hagsEnabled: probeHags() };
+  return { ...probeLine, answered: true, hagsEnabled: probeHags() };
 }
 
 export interface DlssgOptions {

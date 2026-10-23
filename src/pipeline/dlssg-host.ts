@@ -14,8 +14,6 @@ import { claimStdout, logToStderr, serveDlssg, type GeneratorOpening } from "./d
 import { openGpu, type GpuSession } from "./gpu.ts";
 
 const FRAME_GENERATION = featureByKey("fg");
-/** The probe's worker_version. probeDlssg keeps only a probe that names one. */
-const HOST_VERSION = "dlssg-host";
 const USAGE =
   "usage: bun src/pipeline/dlssg-host.ts --probe|--serve [--runtime <absolute folder holding dlssg/ and caller/, default runtime/>] [--dll-dir <absolute folder whose nvngx_dlssg.dll loads instead of the one in dlssg/>] [--shared <name of the shared frame memory the parent created; required by --serve, refused by --probe>]";
 
@@ -67,7 +65,7 @@ async function runtimeVersion(runtime: DlssgRuntimeOptions): Promise<string> {
 
 async function probe(runtime: DlssgRuntimeOptions): Promise<DlssgProbeLine> {
   const version = await runtimeVersion(runtime);
-  const unavailable = (detail: string): DlssgProbeLine => ({ available: false, multiFrameCountMax: 0, runtimeVersion: version, workerVersion: HOST_VERSION, detail });
+  const unavailable = (detail: string): DlssgProbeLine => ({ available: false, multiFrameCountMax: 0, runtimeVersion: version, detail });
   let session: GpuSession;
   try {
     session = openGpu();
@@ -82,7 +80,6 @@ async function probe(runtime: DlssgRuntimeOptions): Promise<DlssgProbeLine> {
       available: refused === null,
       multiFrameCountMax: most,
       runtimeVersion: version,
-      workerVersion: HOST_VERSION,
       detail: refused ? `DLSS Frame Generation is unavailable: ${refused.detail}` : `nvngx_dlssg.dll ${version} in ${runtime.runtimeDir} generates up to ${most} frame(s) per interval (${most + 1}x)`,
     };
   } catch (error) {

@@ -195,12 +195,12 @@ describe("payload sizes", () => {
 });
 
 describe("--probe line", () => {
-  const probe = { available: true, multiFrameCountMax: 5, runtimeVersion: "310.7.129.0", workerVersion: "dlssg-host", detail: "generates up to 5 frame(s) per interval (6x)" };
+  const probe = { available: true, multiFrameCountMax: 5, runtimeVersion: "310.7.129.0", detail: "generates up to 5 frame(s) per interval (6x)" };
 
   test("encodes one line with snake_case keys", () => {
     const line = encodeProbeLine(probe);
     expect(line).not.toContain("\n");
-    expect(JSON.parse(line)).toEqual({ available: true, multi_frame_count_max: 5, runtime_version: "310.7.129.0", worker_version: "dlssg-host", detail: "generates up to 5 frame(s) per interval (6x)" });
+    expect(JSON.parse(line)).toEqual({ available: true, multi_frame_count_max: 5, runtime_version: "310.7.129.0", detail: "generates up to 5 frame(s) per interval (6x)" });
   });
 
   test("decodes what it encodes", () => {
@@ -208,7 +208,7 @@ describe("--probe line", () => {
   });
 
   test("a field the process left out reads as false, 0 or an empty string", () => {
-    expect(decodeProbeLine("{}")).toEqual({ available: false, multiFrameCountMax: 0, runtimeVersion: "", workerVersion: "", detail: "" });
+    expect(decodeProbeLine("{}")).toEqual({ available: false, multiFrameCountMax: 0, runtimeVersion: "", detail: "" });
   });
 
   test("rejects a line that is not JSON", () => {
