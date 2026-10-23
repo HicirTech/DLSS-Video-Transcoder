@@ -1,6 +1,5 @@
 /* The `?mock=1` backend: answers every API call in the browser from mock data and the in-memory job engine. */
 import type { ApiClient, JobEventSource } from "../api";
-import { ApiError } from "../errors";
 import { settingsDefaults } from "../../../src/server/api-types";
 import { validateJobRequest } from "../../../src/server/validate";
 import { MOCK_PROBE, MOCK_TOOLS, mockCatalog, mockMediaInfo, mockUpload } from "./fixtures";
@@ -27,18 +26,18 @@ export function createMockBackend(): { client: ApiClient; events: JobEventSource
     listJobs: async () => engine.list(),
     getJob: async (id) => {
       const job = engine.get(id);
-      if (!job) throw new ApiError(404, `No job with id ${id}`);
+      if (!job) throw new Error(`No job with id ${id}`);
       return job;
     },
     createJob: async (request) => {
       const invalid = validateJobRequest(request);
-      if (invalid) throw new ApiError(400, invalid);
+      if (invalid) throw new Error(invalid);
       await delay(200);
       return engine.create(request);
     },
     cancelJob: async (id) => {
       const job = engine.cancel(id);
-      if (!job) throw new ApiError(404, `No job with id ${id}`);
+      if (!job) throw new Error(`No job with id ${id}`);
       return job;
     },
     uploadFile: async (file) => {

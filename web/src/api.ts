@@ -10,7 +10,7 @@ import {
   type WsEvent,
 } from "../../src/server/api-types";
 import type { RuntimeManifest } from "../../src/ngx/runtime-catalog";
-import { ApiError, errorMessage } from "./errors";
+import { errorMessage } from "./errors";
 import { isRecord } from "./json";
 import { createMockBackend } from "./mock/backend";
 
@@ -100,7 +100,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(path, init);
   } catch (err) {
-    throw new ApiError(0, `Cannot reach the server. Check that it is still running, then try again: ${errorMessage(err)}`);
+    throw new Error(`Cannot reach the server. Check that it is still running, then try again: ${errorMessage(err)}`);
   }
   const text = await response.text();
   if (!response.ok) {
