@@ -155,6 +155,21 @@ export class GpuContext {
     return this.fence.completedValue() >= this.fenceValue;
   }
 
+  /**
+   * Submits whatever is recorded, so none of it runs later on this list, and says whether the GPU is done with it:
+   * false when it did not finish, and then what the recorded work uses must stay allocated. A list that a failed
+   * submit left closed holds nothing new and is never executed twice.
+   */
+  drain(): boolean {
+    if (!this.list.isOpen) return this.idle;
+    try {
+      this.submitAndWait();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private ensureUpload(size: number): D3D12Resource {
     let staging = this.uploadRing[this.uploadCursor];
     if (!staging || staging.sizeInBytes < size) {

@@ -31,12 +31,29 @@ class FakeFence extends FakeObject {
 }
 
 class FakeQueue extends FakeObject {
+  executions = 0;
   constructor(private readonly fence: FakeFence) {
     super("queue");
   }
-  executeCommandList(): void {}
+  executeCommandList(): void {
+    this.executions++;
+  }
   signal(_fence: unknown, value: bigint): void {
     if (this.fence.completes) this.fence.completed = value;
+  }
+}
+
+/** A command list that tracks whether it is open, as D3D12GraphicsCommandList does. */
+class FakeList extends FakeObject {
+  isOpen = true;
+  constructor() {
+    super("list");
+  }
+  override close(): void {
+    this.isOpen = false;
+  }
+  override reset(): void {
+    this.isOpen = true;
   }
 }
 
@@ -52,7 +69,7 @@ function fakeDevice(fence: FakeFence, failAt = Number.POSITIVE_INFINITY) {
   const device = {
     createCommandQueue: () => make(new FakeQueue(fence)),
     createCommandAllocator: () => make(new FakeObject("allocator")),
-    createCommandList: () => make(new FakeObject("list")),
+    createCommandList: () => make(new FakeList()),
     createFence: () => make(fence),
     removedError: () => null,
   };
@@ -77,6 +94,19 @@ describe("GpuContext", () => {
     context.close();
 
     expect(created.every((object) => object.releases === 0)).toBe(true);
+  });
+
+  test("draining after a submit that timed out runs nothing again and reports the GPU busy", () => {
+    const fence = new FakeFence("fence");
+    fence.completes = false;
+    const { device, created } = fakeDevice(fence);
+    const context = new GpuContext(device);
+    expect(() => context.submitAndWait(0)).toThrow("the GPU did not finish within 0 ms");
+    const queue = created.find((object) => object.name === "queue") as FakeQueue;
+
+    expect(context.drain()).toBe(false);
+
+    expect(queue.executions).toBe(1);
   });
 
   test("an idle context releases its objects when closed", () => {
