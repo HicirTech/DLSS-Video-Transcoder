@@ -128,11 +128,16 @@ class TextBuilder {
     this.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
   }
 
+  /** The disp32 of a RIP-relative operand naming `slot`, the last four bytes of its instruction. */
+  private ripRelativeSlot(slot: number): void {
+    const ripAfter = this.textRva + this.bytes.length + 4;
+    this.disp32(this.slotRva[slot]! - ripAfter);
+  }
+
   /** mov [rip+disp], <reg>; `slot` indexes into slotRva. */
   private ripStore(prefix: number[], slot: number): void {
     this.push(...prefix);
-    const ripAfter = this.textRva + this.bytes.length + 4;
-    this.disp32(this.slotRva[slot]! - ripAfter);
+    this.ripRelativeSlot(slot);
   }
 
   /** DllMain: return TRUE. */
@@ -176,10 +181,7 @@ class TextBuilder {
       this.disp32(0x20 + i * 8);
     }
     this.push(0xff, 0x15); // call [rip+disp]
-    {
-      const ripAfter = this.textRva + this.bytes.length + 4;
-      this.disp32(this.slotRva[slot]! - ripAfter);
-    }
+    this.ripRelativeSlot(slot);
     // The epilog is `add rsp, frame; ret`, one of the forms the unwinder recognises ("x64 prolog and epilog").
     this.adjustRsp(0xc4, frame); // add rsp, frame
     this.push(0xc3); // ret
@@ -317,13 +319,15 @@ export function buildForwarderDll(options: { imageBase?: bigint } = {}): Forward
   const u32 = (o: number, v: number) => view.setUint32(o, v >>> 0, true);
   const u64 = (o: number, v: bigint) => view.setBigUint64(o, BigInt.asUintN(64, v), true);
 
-  // DOS header
+  // IMAGE_DOS_HEADER: e_magic, and e_lfanew naming the NT headers right after the 64-byte DOS header
   u16(0, IMAGE_DOS_SIGNATURE);
   u32(0x3c, 0x40); // e_lfanew -> PE signature right after the 64-byte DOS header
 
   // PE signature + COFF header
   const pe = 0x40;
   u32(pe, IMAGE_NT_SIGNATURE);
+
+  // IMAGE_FILE_HEADER
   const coff = pe + 4;
   u16(coff + 0, 0x8664); // Machine = AMD64
   u16(coff + 2, sectionCount); // NumberOfSections
