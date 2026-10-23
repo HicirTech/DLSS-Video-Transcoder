@@ -142,6 +142,27 @@ describe("validateJobRequest", () => {
     expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS, container: "mkv" }, output: join(ROOT, "out.mkv") }))).toBeNull();
   });
 
+  test("an explicit output ends in the extension of what the job writes, whatever its case", () => {
+    expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS, container: "mkv" }, output: join(ROOT, "out.mp4") }))).toBe(
+      "output must end in .mkv, the encode.container this job writes; rename it or set encode.container to match.",
+    );
+    expect(validateJobRequest(request({ output: join(ROOT, "out.mkv") }))).toBe(
+      "output must end in .mp4, the encode.container this job writes; rename it or set encode.container to match.",
+    );
+    expect(validateJobRequest({ kind: "image", input: join(ROOT, "in.png"), output: join(ROOT, "out.jpg") })).toBe(
+      "output must end in .png: an image job writes PNG; rename it or omit it.",
+    );
+    expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS, container: "mkv" }, output: join(ROOT, "out.MKV") }))).toBeNull();
+    expect(validateJobRequest(request({ output: join(ROOT, "out.mp4") }))).toBeNull();
+    expect(validateJobRequest({ kind: "image", input: join(ROOT, "in.png"), output: join(ROOT, "out.PNG") })).toBeNull();
+  });
+
+  test("an unknown container is reported as one, not as a wrong extension", () => {
+    expect(validateJobRequest(request({ encode: { ...DEFAULT_ENCODE_SETTINGS, container: "avi" }, output: join(ROOT, "out.avi") }))).toBe(
+      'encode.container must be one of mp4, mkv, mov (got "avi").',
+    );
+  });
+
   test("Super Resolution takes a factor of at least 1 and an exact size of at most 8192 per side, since DLSS SR only enlarges", () => {
     const shrink = { ...DEFAULT_SCALE_SETTINGS, mode: "factor", factor: 0.5 };
     expect(validateJobRequest(request({ superResolution: sr({ scale: shrink }) }))).toBe(
