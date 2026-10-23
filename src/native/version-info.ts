@@ -90,30 +90,26 @@ function matchesAt(bytes: Uint8Array, offset: number, needle: Uint8Array): boole
  * `key` and return its UTF-16LE value. Display-only; returns null on any miss.
  */
 function readStringValue(bytes: Uint8Array, blobStart: number, blobEnd: number, key: string): string | null {
-  try {
-    // UTF-16LE bytes of the key (ASCII keys only).
-    const needle = new Uint8Array(key.length * 2);
-    for (let i = 0; i < key.length; i++) needle[i * 2] = key.charCodeAt(i) & 0xff;
-    const limit = Math.min(blobEnd, bytes.length);
-    for (let p = blobStart; p + needle.length <= limit; p += 2) {
-      if (!matchesAt(bytes, p, needle)) continue;
-      // Advance past the key and its terminating null wchar, then pad to a
-      // 32-bit boundary relative to the blob start, then read the value wchars.
-      let q = p + needle.length;
-      if (q + 1 < limit && bytes[q] === 0 && bytes[q + 1] === 0) q += 2;
-      while ((q - blobStart) % 4 !== 0) q += 2;
-      let value = "";
-      while (q + 1 < limit) {
-        const ch = bytes[q]! | (bytes[q + 1]! << 8);
-        if (ch === 0) break;
-        value += String.fromCharCode(ch);
-        q += 2;
-      }
-      value = value.trim();
-      return value.length > 0 ? value : null;
+  // UTF-16LE bytes of the key (ASCII keys only).
+  const needle = new Uint8Array(key.length * 2);
+  for (let i = 0; i < key.length; i++) needle[i * 2] = key.charCodeAt(i) & 0xff;
+  const limit = Math.min(blobEnd, bytes.length);
+  for (let p = blobStart; p + needle.length <= limit; p += 2) {
+    if (!matchesAt(bytes, p, needle)) continue;
+    // Advance past the key and its terminating null wchar, then pad to a
+    // 32-bit boundary relative to the blob start, then read the value wchars.
+    let q = p + needle.length;
+    if (q + 1 < limit && bytes[q] === 0 && bytes[q + 1] === 0) q += 2;
+    while ((q - blobStart) % 4 !== 0) q += 2;
+    let value = "";
+    while (q + 1 < limit) {
+      const ch = bytes[q]! | (bytes[q + 1]! << 8);
+      if (ch === 0) break;
+      value += String.fromCharCode(ch);
+      q += 2;
     }
-  } catch {
-    // fall through
+    value = value.trim();
+    return value.length > 0 ? value : null;
   }
   return null;
 }
@@ -124,7 +120,6 @@ function readStringValue(bytes: Uint8Array, blobStart: number, blobEnd: number, 
  */
 export function parseVersionInfo(bytes: Uint8Array): VersionInfo {
   try {
-    if (bytes.length < 0x40) return NULL_VERSION;
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const blob = findVersionBlob(view, parsePe(bytes));
     if (!blob) return NULL_VERSION;
@@ -142,7 +137,7 @@ export function parseVersionInfo(bytes: Uint8Array): VersionInfo {
       }
     }
   } catch {
-    // fall through to nulls
+    // parsePe, rvaToOffset and out-of-range DataView reads throw on a malformed image: nulls, as for no resource.
   }
   return NULL_VERSION;
 }
