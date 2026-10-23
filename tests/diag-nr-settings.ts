@@ -16,7 +16,7 @@ import { join } from "node:path";
 import "../src/ngx/nr.ts";
 import { DEFAULT_RUNTIME_DIR } from "../src/paths.ts";
 import { processImage } from "../src/pipeline/image.ts";
-import { DEFAULT_NR_SETTINGS, type NrSettings } from "../src/server/api-types.ts";
+import { DEFAULT_NR_SETTINGS, NR_PRESETS, NR_STYLES, type NrSettings, SETTING_RANGES } from "../src/server/api-types.ts";
 
 const input = Bun.argv[2] ?? "W:/GPUVideoProcessor/1.png";
 const runtimeDir = DEFAULT_RUNTIME_DIR;
@@ -28,13 +28,19 @@ async function hashFor(label: string, overrides: Partial<NrSettings>): Promise<s
   return createHash("sha256").update(new Uint8Array(await Bun.file(output).arrayBuffer())).digest("hex").slice(0, 16);
 }
 
+/** A numeric setting's SETTING_RANGES end points with the sample points between them. */
+function across(field: "intensity" | "localTone" | "localStructure" | "skinStructure", interior: number[]): number[] {
+  const { min, max } = SETTING_RANGES[field];
+  return [min, ...interior, max];
+}
+
 const SWEEPS: [keyof NrSettings, (number | boolean)[]][] = [
-  ["intensity", [0, 0.5, 1, 1.5, 2]],
-  ["style", [0, 1, 2]],
-  ["preset", [0, 1, 2, 3]],
-  ["localTone", [0, 1, 2]],
-  ["localStructure", [0, 1, 2]],
-  ["skinStructure", [-1, 0, 1, 2]],
+  ["intensity", across("intensity", [0.5, 1, 1.5])],
+  ["style", [...NR_STYLES]],
+  ["preset", [...NR_PRESETS]],
+  ["localTone", across("localTone", [1])],
+  ["localStructure", across("localStructure", [1])],
+  ["skinStructure", across("skinStructure", [0, 1])],
   ["autoMask", [false, true]],
   ["uiCorrection", [false, true]],
 ];
