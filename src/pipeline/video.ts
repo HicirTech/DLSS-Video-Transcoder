@@ -305,7 +305,7 @@ async function runRawvideo(
       ffmpeg, "-v", "error", "-y",
       "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${outWidth}x${outHeight}`, "-r", info.fpsText, "-i", "pipe:0",
       ...(wantAudio ? ["-i", options.input] : []),
-      "-map", "0:v:0", ...audioArgs(wantAudio, encode.container), ...encoderArgv, ...aspectArgs(info.displayAspect, outWidth, outHeight, null), ...faststartArgs(encode.container),
+      "-map", "0:v:0", ...audioArgs(wantAudio, encode.container), ...encoderArgv, ...aspectArgs(info.displayAspect, { width: outWidth, height: outHeight }), ...faststartArgs(encode.container),
       output,
     ],
     { stdin: "pipe", stdout: "ignore", stderr: "pipe" },

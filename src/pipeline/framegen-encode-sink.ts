@@ -70,7 +70,7 @@ export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): FramegenEncod
       "-framerate", outputRate, "-i", "pipe:0", ...inputsAndMap, ...audioArgs(hasAudio, FRAME_GEN_CONTAINER),
       // The device is fixed for frame generation; FRAMEGEN_CUDA_DEVICE says which and why.
       ...encoderArgs({ codec, quality, container: FRAME_GEN_CONTAINER, copyAudio: true }, FRAMEGEN_CUDA_DEVICE),
-      ...aspectArgs(displayAspect, width, height, null),
+      ...aspectArgs(displayAspect, { width, height }),
       ...timescale, ...faststartArgs(FRAME_GEN_CONTAINER), output,
     ],
     nvenc: nativeTarget

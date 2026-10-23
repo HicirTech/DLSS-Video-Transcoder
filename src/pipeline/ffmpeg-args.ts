@@ -37,29 +37,29 @@ function codecArgs(encode: EncodeSettings, cudaOrdinal: number): string[] {
   }
 }
 
+interface FrameSize {
+  width: number;
+  height: number;
+}
+
 /**
- * Output argv that re-states the source's display aspect on a `width`x`height`
- * encode; empty for a square-pixel source, so the usual file is untouched.
+ * Output argv that re-states the source's display aspect on an encode of
+ * `size`; empty for a square-pixel source, so the usual file is untouched.
  *
- * `demux` non-null means the video is stream-copied from an elementary stream,
+ * `demux` given means the video is stream-copied from an elementary stream,
  * which needs BOTH flags. -aspect writes the container tag, but with -c:v copy
  * ffmpeg tags the container from stream parameters it read before any filter
  * ran, so the aspect inside the bitstream would still claim 1:1. Measured with
  * the bundled ffmpeg: -aspect alone leaves the VUI at 1:1, the bitstream filter
  * alone leaves the container at 1:1, the pair agrees everywhere.
  */
-export function aspectArgs(displayAspect: Rational | null, width: number, height: number, demux: string | null): string[] {
+export function aspectArgs(displayAspect: Rational | null, size: FrameSize, demux?: string): string[] {
   if (!displayAspect) return [];
   const args = ["-aspect", `${displayAspect.num}:${displayAspect.den}`];
   if (!demux) return args;
   // The bitstream stores SAR: the sample shape that makes this pixel grid display at DAR.
-  const sar = ratMul(displayAspect, rational(height, width));
+  const sar = ratMul(displayAspect, rational(size.height, size.width));
   return [...args, "-bsf:v", `${demux}_metadata=sample_aspect_ratio=${sar.num}/${sar.den}`];
-}
-
-interface FrameSize {
-  width: number;
-  height: number;
 }
 
 /**
@@ -150,7 +150,7 @@ function withBitstreamFilter(args: readonly string[], filter: string): string[] 
  */
 export function muxCopyArgs(spec: MuxCopySpec): string[] {
   const { demux, frameRate, audioSource, container, displayAspect, size, retime, extra = [], output } = spec;
-  const aspect = aspectArgs(displayAspect, size.width, size.height, demux);
+  const aspect = aspectArgs(displayAspect, size, demux);
   return [
     "-v", "error", "-y", "-f", demux, "-framerate", frameRate, "-i", "pipe:0",
     ...(audioSource === null ? [] : ["-i", audioSource]),
