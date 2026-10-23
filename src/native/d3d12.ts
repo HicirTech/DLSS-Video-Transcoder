@@ -33,17 +33,21 @@ export const D3D12_HEAP_TYPE_UPLOAD = 2;
 export const D3D12_HEAP_TYPE_READBACK = 3;
 
 // Sharing flags for CUDA (or cross-process) interop.
-export const D3D12_HEAP_FLAG_SHARED = 0x1;
-export const D3D12_FENCE_FLAG_SHARED = 0x1; // 0x2 is SHARED_CROSS_ADAPTER — not what we want
-// Access mask for ID3D12Device::CreateSharedHandle (currently unused by the API; GENERIC_ALL recommended).
-export const GENERIC_ALL = 0x10000000;
+const D3D12_HEAP_FLAG_SHARED = 0x1;
+const D3D12_FENCE_FLAG_SHARED = 0x1; // Same-adapter sharing with CUDA; SHARED_CROSS_ADAPTER (0x2) is for fences shared across adapters.
+// Access mask for ID3D12Device::CreateSharedHandle: the only value it currently accepts is GENERIC_ALL (Microsoft Learn, ID3D12Device::CreateSharedHandle).
+const GENERIC_ALL = 0x10000000;
 
-export const D3D12_RESOURCE_DIMENSION_BUFFER = 1;
-export const D3D12_RESOURCE_DIMENSION_TEXTURE2D = 3;
-export const D3D12_TEXTURE_LAYOUT_UNKNOWN = 0;
-export const D3D12_TEXTURE_LAYOUT_ROW_MAJOR = 1;
-export const D3D12_RESOURCE_FLAG_NONE = 0;
-export const D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS = 0x4;
+const D3D12_RESOURCE_DIMENSION_BUFFER = 1;
+const D3D12_RESOURCE_DIMENSION_TEXTURE2D = 3;
+const D3D12_TEXTURE_LAYOUT_UNKNOWN = 0;
+const D3D12_TEXTURE_LAYOUT_ROW_MAJOR = 1;
+const D3D12_RESOURCE_FLAG_NONE = 0;
+const D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS = 0x4;
+const D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX = 0;
+const D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT = 1;
+const D3D12_RESOURCE_BARRIER_TYPE_TRANSITION = 0;
+const D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES = 0xffffffff;
 
 export const D3D12_RESOURCE_STATE_COMMON = 0;
 export const D3D12_RESOURCE_STATE_UNORDERED_ACCESS = 0x8;
@@ -220,21 +224,21 @@ function copyLocation(location: CopyLocation): NativeStruct {
   // D3D12_TEXTURE_COPY_LOCATION (d3d12.h, x64, 48 bytes): pResource @0; Type u32 @8;
   // then a union at @16 — either PlacedFootprint{Offset u64 @16, Format @24, Width @28,
   // Height @32, Depth @36, RowPitch @40} or SubresourceIndex u32 @16.
-  const s = new NativeStruct(48);
-  s.pointer(0, location.resource.ptr);
+  const struct = new NativeStruct(48);
+  struct.pointer(0, location.resource.ptr);
   if (location.footprint) {
-    s.u32(8, 1); // D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT
-    s.u64(16, location.footprint.offset);
-    s.u32(24, location.footprint.format);
-    s.u32(28, location.footprint.width);
-    s.u32(32, location.footprint.height);
-    s.u32(36, 1);
-    s.u32(40, location.footprint.rowPitch);
+    struct.u32(8, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT);
+    struct.u64(16, location.footprint.offset);
+    struct.u32(24, location.footprint.format);
+    struct.u32(28, location.footprint.width);
+    struct.u32(32, location.footprint.height);
+    struct.u32(36, 1);
+    struct.u32(40, location.footprint.rowPitch);
   } else {
-    s.u32(8, 0); // D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX
-    s.u32(16, 0);
+    struct.u32(8, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX);
+    struct.u32(16, 0);
   }
-  return s;
+  return struct;
 }
 
 export class D3D12GraphicsCommandList extends ComObject {
@@ -304,10 +308,10 @@ export class D3D12GraphicsCommandList extends ComObject {
   transition(resource: D3D12Resource, newState: number): void {
     if (resource.state === newState) return;
     const barrier = new NativeStruct(32);
-    barrier.u32(0, 0); // D3D12_RESOURCE_BARRIER_TYPE_TRANSITION
+    barrier.u32(0, D3D12_RESOURCE_BARRIER_TYPE_TRANSITION);
     barrier.u32(4, 0);
     barrier.pointer(8, resource.ptr);
-    barrier.u32(16, 0xffffffff); // D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES
+    barrier.u32(16, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
     barrier.u32(20, resource.state);
     barrier.u32(24, newState);
     this.call(26, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.void }, 1, barrier.bytes);
