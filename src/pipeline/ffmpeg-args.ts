@@ -13,21 +13,25 @@ import { ratMul, type Rational, rational } from "./rational.ts";
  * GpuSession.cudaOrdinal); the CPU codecs ignore it.
  */
 export function encoderArgs(encode: EncodeSettings, cudaOrdinal: number): string[] {
+  const hevc = encode.codec === "hevc" || encode.codec === "hevc_nvenc";
+  // 4:2:0 for every codec, and the hvc1 tag so Apple players accept HEVC in mp4 and mov.
+  return [...codecArgs(encode, cudaOrdinal), "-pix_fmt", "yuv420p", ...(hevc ? ["-tag:v", "hvc1"] : [])];
+}
+
+/** The encoder and its quality settings: what differs between the codecs. */
+function codecArgs(encode: EncodeSettings, cudaOrdinal: number): string[] {
   const q = String(clampToRange("quality", encode.quality));
-  const gpu = nvencGpuArgs(cudaOrdinal);
   switch (encode.codec) {
     case "h264":
-      return ["-c:v", "libx264", "-preset", "medium", "-crf", q, "-pix_fmt", "yuv420p"];
+      return ["-c:v", "libx264", "-preset", "medium", "-crf", q];
     case "hevc":
-      return ["-c:v", "libx265", "-preset", "medium", "-crf", q, "-pix_fmt", "yuv420p", "-tag:v", "hvc1"];
+      return ["-c:v", "libx265", "-preset", "medium", "-crf", q];
     case "av1":
-      return ["-c:v", "libsvtav1", "-preset", "6", "-crf", q, "-pix_fmt", "yuv420p"];
+      return ["-c:v", "libsvtav1", "-preset", "6", "-crf", q];
     case "h264_nvenc":
-      return ["-c:v", "h264_nvenc", ...gpu, "-preset", NVENC_PRESET, "-rc", "vbr", "-cq", q, "-b:v", "0", "-pix_fmt", "yuv420p"];
     case "hevc_nvenc":
-      return ["-c:v", "hevc_nvenc", ...gpu, "-preset", NVENC_PRESET, "-rc", "vbr", "-cq", q, "-b:v", "0", "-pix_fmt", "yuv420p", "-tag:v", "hvc1"];
     case "av1_nvenc":
-      return ["-c:v", "av1_nvenc", ...gpu, "-preset", NVENC_PRESET, "-rc", "vbr", "-cq", q, "-b:v", "0", "-pix_fmt", "yuv420p"];
+      return ["-c:v", encode.codec, ...nvencGpuArgs(cudaOrdinal), "-preset", NVENC_PRESET, "-rc", "vbr", "-cq", q, "-b:v", "0"];
     default:
       throw new Error(`Unknown codec "${String(encode.codec)}". Choose one of: ${ENCODE_CODECS.join(", ")}.`);
   }

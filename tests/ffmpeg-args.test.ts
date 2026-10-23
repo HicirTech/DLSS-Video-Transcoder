@@ -1,7 +1,19 @@
 /** The ffmpeg argv the video paths share, pinned as literal arrays so a refactor cannot change a flag unseen. */
 import { describe, expect, test } from "bun:test";
-import { aspectArgs, audioArgs, decodeArgv, faststartArgs, muxCopyArgs } from "../src/pipeline/ffmpeg-args.ts";
+import { aspectArgs, audioArgs, decodeArgv, encoderArgs, faststartArgs, muxCopyArgs } from "../src/pipeline/ffmpeg-args.ts";
 import { rational } from "../src/pipeline/rational.ts";
+
+describe("encoderArgs", () => {
+  test("every codec's whole argv: its encoder and quality, 4:2:0, and the hvc1 tag on HEVC", () => {
+    const argv = (codec: Parameters<typeof encoderArgs>[0]["codec"]) => encoderArgs({ codec, quality: 23, container: "mp4", copyAudio: false }, 1);
+    expect(argv("h264")).toEqual(["-c:v", "libx264", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p"]);
+    expect(argv("hevc")).toEqual(["-c:v", "libx265", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p", "-tag:v", "hvc1"]);
+    expect(argv("av1")).toEqual(["-c:v", "libsvtav1", "-preset", "6", "-crf", "23", "-pix_fmt", "yuv420p"]);
+    expect(argv("h264_nvenc")).toEqual(["-c:v", "h264_nvenc", "-gpu", "1", "-preset", "p5", "-rc", "vbr", "-cq", "23", "-b:v", "0", "-pix_fmt", "yuv420p"]);
+    expect(argv("hevc_nvenc")).toEqual(["-c:v", "hevc_nvenc", "-gpu", "1", "-preset", "p5", "-rc", "vbr", "-cq", "23", "-b:v", "0", "-pix_fmt", "yuv420p", "-tag:v", "hvc1"]);
+    expect(argv("av1_nvenc")).toEqual(["-c:v", "av1_nvenc", "-gpu", "1", "-preset", "p5", "-rc", "vbr", "-cq", "23", "-b:v", "0", "-pix_fmt", "yuv420p"]);
+  });
+});
 
 describe("decodeArgv", () => {
   test("decodes to raw RGBA on pipe:1, with no scale filter at the source size", () => {
