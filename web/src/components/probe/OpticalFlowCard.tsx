@@ -1,5 +1,5 @@
 import { Chip, Paper, Typography } from "@mui/material";
-import type { ProbeCuda, ProbeOpticalFlow } from "../../../../src/server/api-types";
+import { opticalFlowGridFits, type ProbeCuda, type ProbeOpticalFlow } from "../../../../src/server/api-types";
 import { KeyValueList, Mono } from "../Section";
 
 interface OpticalFlowCardProps {
@@ -19,12 +19,7 @@ export function OpticalFlowCard({ cuda, opticalFlow }: OpticalFlowCardProps) {
   const grid = opticalFlow.pipelineGrid;
   // The engine never sees a source frame, only the pipeline's downscaled grid,
   // so the useful statement is whether that grid fits, not the raw numbers alone.
-  const fits =
-    limits !== null &&
-    limits.widthMin <= grid.minSide &&
-    limits.heightMin <= grid.minSide &&
-    limits.widthMax >= grid.maxLongSide &&
-    limits.heightMax >= grid.maxLongSide;
+  const fits = limits !== null && opticalFlowGridFits(limits, grid);
   return (
     <Paper variant="outlined" sx={{ p: 1.5 }}>
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
