@@ -9,35 +9,11 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { parseVersionInfo, type VersionInfo } from "../native/version-info.ts";
+import { FEATURES, type FeatureDescriptor, type FeatureKey } from "./features.ts";
 
-export type FeatureKey = "sr" | "fg" | "rr" | "nr";
+export { FEATURES, featureByKey, type FeatureDescriptor, type FeatureKey } from "./features.ts";
 
 export type VersionSource = "runtime" | "swapper" | "installed";
-
-export interface FeatureDescriptor {
-  key: FeatureKey;
-  /** NGX feature id. */
-  id: number;
-  name: string;
-  /** Canonical filename NGX searches the feature search path for. */
-  dllName: string;
-  /** Sub-folder under the runtime/ dir that holds this feature's DLL(s). */
-  runtimeSubdir: string;
-  /** DLSS Swapper cache "kind" folder, when the cache carries this feature. */
-  swapperKind: "dlss" | "dlss_d" | "dlss_g" | null;
-}
-
-/** The four switchable DLSS features; ids and filenames are the NGX contract. */
-export const FEATURES: readonly FeatureDescriptor[] = [
-  { key: "sr", id: 1, name: "DLSS Super Resolution", dllName: "nvngx_dlss.dll", runtimeSubdir: "dlss", swapperKind: "dlss" },
-  { key: "fg", id: 11, name: "DLSS Frame Generation", dllName: "nvngx_dlssg.dll", runtimeSubdir: "dlssg", swapperKind: "dlss_g" },
-  { key: "rr", id: 13, name: "DLSS Ray Reconstruction", dllName: "nvngx_dlssd.dll", runtimeSubdir: "dlssd", swapperKind: "dlss_d" },
-  { key: "nr", id: 18, name: "DLSS Neural Rendering", dllName: "nvngx_dlssnr.dll", runtimeSubdir: "dlssnr", swapperKind: null },
-];
-
-export function featureByKey(key: FeatureKey): FeatureDescriptor {
-  return FEATURES.find((feature) => feature.key === key)!;
-}
 
 export interface VersionEntry {
   /** Numeric FixedFileInfo version "a.b.c.d". */
