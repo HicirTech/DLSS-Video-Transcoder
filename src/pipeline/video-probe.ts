@@ -118,7 +118,7 @@ export async function probeVideoAsync(ffprobe: string, input: string, ffmpeg: st
 }
 
 /** Runs `argv` to its end without blocking this thread; a run past PROBE_TIMEOUT_MS is stopped and throws. */
-async function runBounded(argv: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+export async function runBounded(argv: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const child = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore", windowsHide: true });
   // Read for the whole run so neither pipe fills and stalls the child; a stopped child's output is not needed.
   const stdout = new Response(child.stdout).text().catch(() => "");

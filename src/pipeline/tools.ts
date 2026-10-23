@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_RUNTIME_DIR } from "../paths.ts";
 import { FFMPEG_SUPPLY_HINT, type ToolsReport } from "../server/api-types.ts";
+import { runBounded } from "./video-probe.ts";
 
 /** Where a build placed under the project's runtime folder is found; it stays there when NR_RUNTIME_DIR moves the DLLs. */
 export const BUNDLED_FFMPEG_DIR = join(DEFAULT_RUNTIME_DIR, "ffmpeg", "bin");
@@ -52,11 +53,13 @@ export function requireFfmpegTools(purpose: string): { ffmpeg: string; ffprobe: 
   return { ffmpeg, ffprobe };
 }
 
-function versionOf(path: string | null): string | null {
+/** The version a tool prints first, or null when it cannot be run, fails, or does not finish in time. */
+async function versionOf(path: string | null): Promise<string | null> {
   if (!path) return null;
   try {
-    const proc = Bun.spawnSync([path, "-version"], { stdout: "pipe", stderr: "pipe" });
-    const first = new TextDecoder().decode(proc.stdout).split(/\r?\n/)[0] ?? "";
+    const run = await runBounded([path, "-version"]);
+    if (run.exitCode !== 0) return null;
+    const first = run.stdout.split(/\r?\n/)[0] ?? "";
     const match = /version\s+(\S+)/.exec(first);
     return match ? match[1]! : first.trim() || null;
   } catch {
@@ -67,24 +70,27 @@ function versionOf(path: string | null): string | null {
 /**
  * Whether this ffmpeg build was compiled with NVENC — not whether NVENC will
  * run: only encode-select.ts's one-frame probe proves that. Null means no
- * ffmpeg to ask, which is a different report than a build without NVENC.
+ * ffmpeg to ask, or one that failed or did not answer in time, which is a
+ * different report than a build without NVENC.
  */
-function hasNvenc(ffmpeg: string | null): boolean | null {
+async function hasNvenc(ffmpeg: string | null): Promise<boolean | null> {
   if (!ffmpeg) return null;
   try {
-    const proc = Bun.spawnSync([ffmpeg, "-hide_banner", "-encoders"], { stdout: "pipe", stderr: "pipe" });
-    return new TextDecoder().decode(proc.stdout).includes("h264_nvenc");
+    const run = await runBounded([ffmpeg, "-hide_banner", "-encoders"]);
+    return run.exitCode === 0 ? run.stdout.includes("h264_nvenc") : null;
   } catch {
     return null;
   }
 }
 
-export function toolsReport(): ToolsReport {
+/** GET /api/tools: where ffmpeg and ffprobe are and what they report, asked without blocking the server thread. */
+export async function toolsReport(): Promise<ToolsReport> {
   const ffmpeg = findTool("ffmpeg");
   const ffprobe = findTool("ffprobe");
+  const [ffmpegVersion, ffprobeVersion, nvenc] = await Promise.all([versionOf(ffmpeg), versionOf(ffprobe), hasNvenc(ffmpeg)]);
   return {
-    ffmpeg: { path: ffmpeg, version: versionOf(ffmpeg) },
-    ffprobe: { path: ffprobe, version: versionOf(ffprobe) },
-    nvenc: hasNvenc(ffmpeg),
+    ffmpeg: { path: ffmpeg, version: ffmpegVersion },
+    ffprobe: { path: ffprobe, version: ffprobeVersion },
+    nvenc,
   };
 }
