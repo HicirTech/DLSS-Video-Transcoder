@@ -171,7 +171,7 @@ export function runtimeDllCandidates(runtimeDir: string, feature: FeatureDescrip
 }
 
 /** Every version of one feature installed under runtime/, in candidate order. */
-export function enumerateRuntimeFeature(runtimeDir: string, feature: FeatureDescriptor): VersionEntry[] {
+function enumerateRuntimeFeature(runtimeDir: string, feature: FeatureDescriptor): VersionEntry[] {
   const out: VersionEntry[] = [];
   for (const found of runtimeDllCandidates(runtimeDir, feature)) {
     const entry = describeDll(found.path, found.dir, found.source, found.folderHint);
@@ -181,13 +181,13 @@ export function enumerateRuntimeFeature(runtimeDir: string, feature: FeatureDesc
 }
 
 /** Resolve the DLSS Swapper dll cache root (never written to). */
-export function swapperCacheDir(): string {
+function swapperCacheDir(): string {
   const localAppData = process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local");
   return join(localAppData, "DLSS Swapper", "dlls");
 }
 
 /** The Swapper cache is laid out <cache>/<kind>/<kind>_v<version>_<md5>/nvngx_<name>.dll. */
-export function enumerateSwapperFeature(feature: FeatureDescriptor, cacheDir = swapperCacheDir()): VersionEntry[] {
+function enumerateSwapperFeature(feature: FeatureDescriptor, cacheDir = swapperCacheDir()): VersionEntry[] {
   if (!feature.swapperKind) return [];
   const out: VersionEntry[] = [];
   const kindDir = join(cacheDir, feature.swapperKind);
