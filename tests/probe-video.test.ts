@@ -1,6 +1,6 @@
 /** ffprobe's JSON -> VideoInfo: the rate fields are argv for ffmpeg, so they must never be unusable. */
 import { describe, expect, test } from "bun:test";
-import { videoInfoFrom, type ProbeJson } from "../src/pipeline/video-probe.ts";
+import { videoInfoFrom, withDecodedSize, type ProbeJson } from "../src/pipeline/video-probe.ts";
 
 const stream = (rates: { r?: string; avg?: string }, rotation?: number, geometry?: { width: number; height: number; sar?: string }): ProbeJson => ({
   streams: [{
@@ -110,5 +110,24 @@ describe("videoInfoFrom", () => {
 
   test("rejects a file with no usable video stream", () => {
     expect(() => videoInfoFrom({ streams: [{ codec_type: "audio" }] }, "song.mp3")).toThrow(/no video stream/);
+  });
+});
+
+describe("withDecodedSize", () => {
+  // A matrix just under 90 degrees prints as 89, which predicts no transpose, but ffmpeg autorotates it.
+  test("a decoder that transposes where the angle did not flips the display aspect with the size", () => {
+    const predicted = videoInfoFrom(stream({ r: "30/1" }, 89, { width: 720, height: 480, sar: "8:9" }), "dvd-89.mp4");
+    expect(predicted.displayAspect).toEqual({ num: 4n, den: 3n });
+    const decoded = withDecodedSize(predicted, "[Parsed_showinfo_0 @ 0] n:0 pts:0 s:480x720 fmt:yuv420p ");
+    expect([decoded.width, decoded.height]).toEqual([480, 720]);
+    expect(decoded.displayAspect).toEqual({ num: 3n, den: 4n });
+  });
+
+  test("a decoder that does not transpose where the angle did flips it back", () => {
+    const predicted = videoInfoFrom(stream({ r: "30/1" }, 90, { width: 720, height: 480, sar: "8:9" }), "dvd-90.mp4");
+    expect(predicted.displayAspect).toEqual({ num: 3n, den: 4n });
+    const decoded = withDecodedSize(predicted, "[Parsed_showinfo_0 @ 0] n:0 pts:0 s:720x480 fmt:yuv420p ");
+    expect([decoded.width, decoded.height]).toEqual([720, 480]);
+    expect(decoded.displayAspect).toEqual({ num: 4n, den: 3n });
   });
 });
