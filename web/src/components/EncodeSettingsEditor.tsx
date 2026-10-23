@@ -10,7 +10,7 @@ interface EncodeSettingsEditorProps {
   /** A container the job is going to write whatever is stored, shown locked with the reason. */
   fixedContainer?: { container: EncodeSettings["container"]; reason: string };
   /** The size the job encodes, once the source's is known: an NVENC codec that does not take it is flagged. */
-  outputSize?: { width: number; height: number } | null;
+  outputSize?: FrameSize | null;
   onChange: (next: EncodeSettings) => void;
 }
 
@@ -29,12 +29,12 @@ export const CONTAINER_LABELS: Record<EncodeSettings["container"], string> = { m
  * What the codec field says when the job's output is larger than the chosen NVENC encoder takes (NVENC_MAX_SIDE),
  * else null: the job then encodes the same format on the CPU (resolveEncodeCodec).
  */
-function nvencLimitNote(codec: EncodeSettings["codec"], size: { width: number; height: number } | null | undefined): string | null {
+function nvencLimitNote(codec: EncodeSettings["codec"], size: FrameSize | null | undefined): string | null {
   const limit = size ? nvencLimitExceeded(codec, size) : null;
   if (!size || limit === null) return null;
   const onGpu = nvencCodecsWithin(size).map((other) => CODEC_LABELS[other]);
   const instead = onGpu.length ? ` ${onGpu.join(" or ")} would keep it on the GPU.` : "";
-  return `${CODEC_LABELS[codec]} encodes at most ${limit} pixels per side, so at ${size.width}×${size.height} this job encodes the same format on the CPU instead, which is slower.${instead}`;
+  return `${CODEC_LABELS[codec]} encodes at most ${limit} pixels per side, so at ${formatSize(size)} this job encodes the same format on the CPU instead, which is slower.${instead}`;
 }
 
 /** The audio switch's words for what the container in effect does with the track (AUDIO_IN_CONTAINER). */
