@@ -4,6 +4,7 @@ import { APP_DATA_DIR } from "../paths.ts";
 import { adapterOption, choiceOption, flag, positionalArgs, runtimeDirOption } from "./args.ts";
 import { commandSpec } from "./commands.ts";
 import { printProbe } from "./probe-report.ts";
+import { EXIT_FAILED } from "./usage-error.ts";
 
 export async function probeCommand(args: string[]): Promise<void> {
   // Rejects any positional and undeclared flag before the GPU is touched.
@@ -25,5 +26,5 @@ export async function probeCommand(args: string[]): Promise<void> {
   if (flag(args, "--log")) for (const line of report.log) console.log("  | " + line);
   // The exit code answers the question the command exists to answer, so a
   // run that prints "ready: NO" cannot look like success to a calling script.
-  process.exit(report.ok && report.verdict.neuralRenderingReady ? 0 : 1);
+  process.exit(report.ok && report.verdict.neuralRenderingReady ? 0 : EXIT_FAILED);
 }
