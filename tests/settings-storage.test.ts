@@ -77,18 +77,27 @@ describe("loadSavedSettings", () => {
 
 describe("withServerDefaults", () => {
   test("takes every default the server has and keeps the browser's step switches and GPU", () => {
-    const current = { ...defaultSettings(), videoSteps: { sr: true, nr: true, fg: true }, adapterUuid: "GPU-524e8373-5fe1-44b3-c0aa-cdbe917e7ed2", warmupFrames: 12 };
+    const current = {
+      ...defaultSettings(),
+      videoSteps: { sr: true, nr: true, fg: true },
+      imageSteps: { sr: true, nr: false },
+      resize: { ...DEFAULT_SCALE_SETTINGS, mode: "factor" as const, factor: 0.5 },
+      adapterUuid: "GPU-524e8373-5fe1-44b3-c0aa-cdbe917e7ed2",
+      warmupFrames: 12,
+    };
     const defaults: SettingsDefaults = {
       superResolution: { scale: { ...DEFAULT_SCALE_SETTINGS, mode: "factor", factor: 2 }, motion: "flow" },
       neuralRendering: { ...DEFAULT_NR_SETTINGS, style: 1 },
       frameGen: { multiplier: 3, engine: "cascade" },
-      resize: { ...DEFAULT_SCALE_SETTINGS },
+      resize: { ...DEFAULT_SCALE_SETTINGS, mode: "size", width: 1280, height: 720 },
       encode: { ...DEFAULT_ENCODE_SETTINGS, quality: 25 },
       warmupFrames: 4,
     };
     const merged = withServerDefaults(current, defaults);
     expect(merged.videoSteps).toEqual(current.videoSteps);
+    expect(merged.imageSteps).toEqual(current.imageSteps);
     expect(merged.adapterUuid).toBe(current.adapterUuid);
+    expect(merged.resize).toEqual(defaults.resize);
     expect(merged.superResolution).toEqual({ scale: defaults.superResolution.scale, motion: "flow" });
     expect(merged.neuralRendering.style).toBe(1);
     expect(merged.frameGen).toMatchObject({ rateBy: "multiplier", multiplier: 3, engine: "cascade" });
