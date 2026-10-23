@@ -7,6 +7,7 @@
  */
 import type { EncodeSettings } from "../server/api-types.ts";
 import { nvencLimitExceeded } from "../server/output-size.ts";
+import type { NvencSdkCodec } from "./nvenc.ts";
 
 export type Codec = EncodeSettings["codec"];
 
@@ -30,6 +31,24 @@ const NVENC_TO_CPU_CODEC: Record<FfmpegNvencEncoder, Codec> = {
 /** The CPU sibling for an NVENC codec; a CPU codec passes through unchanged. */
 export function cpuSiblingCodec(codec: Codec): Codec {
   return isNvenc(codec) ? NVENC_TO_CPU_CODEC[codec] : codec;
+}
+
+/**
+ * Whether frames can be encoded in-process on the GPU (nvenc.ts) so ffmpeg only
+ * muxes the compressed elementary stream, instead of an uncompressed rawvideo
+ * pipe plus swscale. Null means take the rawvideo path.
+ *
+ * The gates are NVENC's own limits: 4:2:0 needs even dimensions, and the
+ * encoder caps the frame size per codec (NVENC_MAX_SIDE, measured). av1_nvenc
+ * falls through to null: nvenc.ts's CODEC_GUID only carries the H.264 and HEVC
+ * GUIDs, so there is no in-process AV1 encoder.
+ */
+export function nvencNativeTarget(codec: Codec, width: number, height: number): { codec: NvencSdkCodec; demux: string } | null {
+  if (width % 2 !== 0 || height % 2 !== 0) return null;
+  if (nvencLimitExceeded(codec, { width, height }) !== null) return null;
+  if (codec === "h264_nvenc") return { codec: "h264", demux: "h264" };
+  if (codec === "hevc_nvenc") return { codec: "hevc", demux: "hevc" };
+  return null;
 }
 
 /**
