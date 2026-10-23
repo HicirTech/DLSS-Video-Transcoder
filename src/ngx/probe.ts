@@ -186,7 +186,7 @@ function probeAdapters({ options, report, reasons, say }: ProbeContext): ProbeGp
         say("D3D12 device created");
       } catch (error) {
         report.device = { created: false, hresult: (error as Error).message, featureLevel: null };
-        reasons.push(`D3D12 device creation failed: ${(error as Error).message}`);
+        reasons.push(`D3D12 device creation failed: ${(error as Error).message}. Update the NVIDIA display driver, or pick another adapter (--adapter, or the GPU choice in Settings).`);
       }
     }
   } catch (error) {
@@ -252,7 +252,7 @@ async function loadNgxCore({ options, report, reasons, say }: ProbeContext): Pro
       report.driver.ngxCorePath = core.location.path;
       say(`NGX entry module loaded: ${core.location.path}`);
     } catch (error) {
-      reasons.push(`NGX core failed to load: ${(error as Error).message}`);
+      reasons.push(`NGX core failed to load: ${(error as Error).message}. Update or reinstall the NVIDIA display driver.`);
     }
   }
   return core;
@@ -331,12 +331,14 @@ function initializeNgx({ options, report, reasons, say, runtimeDir, appDataPath 
     }
     report.ngxInit.result = ngxName(result);
     report.ngxInit.ok = ngxOk(result);
-    if (!ngxOk(result)) reasons.push(`NVIDIA NGX runtime initialization failed: ${ngxName(result)}`);
+    if (!ngxOk(result)) reasons.push(`NVIDIA NGX runtime initialization failed: ${ngxName(result)}. ${INIT_FAILED_NEXT_STEP}`);
   } catch (error) {
     report.ngxInit.result = (error as Error).message;
-    reasons.push(`NVIDIA NGX runtime initialization failed: ${(error as Error).message}`);
+    reasons.push(`NVIDIA NGX runtime initialization failed: ${(error as Error).message}. ${INIT_FAILED_NEXT_STEP}`);
   }
 }
+
+const INIT_FAILED_NEXT_STEP = "Update the NVIDIA display driver; run `probe --log` for the full Init trace.";
 
 function readCapabilities({ report, say }: ProbeContext, core: NgxCore): void {
   try {
