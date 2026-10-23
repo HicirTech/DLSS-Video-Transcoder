@@ -76,14 +76,18 @@ function frameSizeArgv(ffmpeg: string, input: string): string[] {
 
 /**
  * `info` with the size the decoder printed (frameSizeArgv's stderr) when it disagrees with the angle: the
- * decoder is the one feeding the pipeline, so its output size wins over one predicted from the rotation.
+ * decoder is the one feeding the pipeline, so its output size wins over one predicted from the rotation. When the
+ * decoder's size is the predicted one transposed, the display aspect flips with it: a transpose inverts the sample
+ * aspect too. Exported so a test can feed it the decoder's line.
  */
-function withDecodedSize(info: VideoInfo, decoderStderr: string): VideoInfo {
+export function withDecodedSize(info: VideoInfo, decoderStderr: string): VideoInfo {
   const shown = /\ss:(\d+)x(\d+)\s/.exec(decoderStderr);
   if (!shown) return info;
   const decoded = { width: Number(shown[1]), height: Number(shown[2]) };
   if (decoded.width === info.width && decoded.height === info.height) return info;
-  return { ...info, ...decoded };
+  const transposedByDecoder = decoded.width === info.height && decoded.height === info.width;
+  const displayAspect = transposedByDecoder && info.displayAspect ? rational(info.displayAspect.den, info.displayAspect.num) : info.displayAspect;
+  return { ...info, ...decoded, displayAspect };
 }
 
 /**
