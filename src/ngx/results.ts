@@ -80,15 +80,16 @@ export function featureName(id: number): string {
   return `Feature${id}`;
 }
 
-/** NVSDK_NGX_FeatureSupportResult bits (nvsdk_ngx_defs.h; 0 is "supported") and the words describeSupport gives each. */
-const FEATURE_SUPPORT_BITS: ReadonlyArray<readonly [bit: number, meaning: string]> = [
-  [0x01, "check not present"], // CheckNotPresent
-  [0x02, "driver too old"], // DriverVersionUnsupported
-  [0x04, "adapter unsupported"], // AdapterUnsupported
-  [0x08, "OS too old"], // OSVersionBelowMinimumSupported
-  [0x10, "not implemented"], // NotImplemented
+/** NVSDK_NGX_FeatureSupportResult bits (nvsdk_ngx_defs.h; 0 is "supported"), the words describeSupport gives each, and how usable each leaves the feature. */
+const FEATURE_SUPPORT_BITS: ReadonlyArray<readonly [bit: number, meaning: string, level: Exclude<SupportLevel, "supported">]> = [
+  [0x01, "check not present", "unknown"], // CheckNotPresent
+  [0x02, "driver too old", "outdated"], // DriverVersionUnsupported
+  [0x04, "adapter unsupported", "blocked"], // AdapterUnsupported
+  [0x08, "OS too old", "outdated"], // OSVersionBelowMinimumSupported
+  [0x10, "not implemented", "blocked"], // NotImplemented
 ];
 const KNOWN_SUPPORT_BITS = FEATURE_SUPPORT_BITS.reduce((all, [bit]) => all | bit, 0);
+const LEVEL_SEVERITY: Record<Exclude<SupportLevel, "supported">, number> = { unknown: 0, outdated: 1, blocked: 2 };
 
 export function describeSupport(bits: number): string {
   if (bits === 0) return "supported";
@@ -98,6 +99,19 @@ export function describeSupport(bits: number): string {
   return parts.join(", ");
 }
 
+/** How usable the support bits leave a feature: the most severe level among the bits set, an unknown bit counting as "unknown". */
+export function supportLevel(bits: number): SupportLevel {
+  if (bits === 0) return "supported";
+  const levels = FEATURE_SUPPORT_BITS.filter(([bit]) => bits & bit).map(([, , level]) => level);
+  return levels.reduce((worst, level) => (LEVEL_SEVERITY[level] > LEVEL_SEVERITY[worst] ? level : worst), "unknown" as Exclude<SupportLevel, "supported">);
+}
+
+/** The support words for a feature the bits do not describe: not asked, or the query itself failed or was refused. */
+export const SUPPORT_NOT_QUERIED = "not queried";
+export const SUPPORT_QUERY_FAILED = "query failed";
+export const SUPPORT_NOT_REPORTED = "not reported by this driver";
+
+/** NVSDK_NGX_Version_API (nvsdk_ngx_defs.h). */
 export const NGX_VERSION_API = 0x15;
 /** The application id every NGX init in this project passes: "NRTS" + 1, an arbitrary non-zero id. */
 export const NGX_APPLICATION_ID = 0x4e5254530001n;

@@ -8,9 +8,19 @@ import { join } from "node:path";
 import { callableAt, type OwnedCallable } from "../native/com.ts";
 import { NativeStruct, OutPointer, cstring, readCString, wstring } from "../native/memory.ts";
 import { NativeModule } from "../native/win32.ts";
-import type { ForwarderModule } from "./forwarder-runtime.ts";
+import type { SupportLevel } from "../server/api-types.ts";
+import { prepareForwarderSync, type ForwarderModule } from "./forwarder-runtime.ts";
 import { NgxParameters } from "./params.ts";
-import { NGX_ENGINE_TYPE_CUSTOM, NGX_VERSION_API, describeSupport, ngxCheck, ngxOk } from "./results.ts";
+import {
+  NGX_APPLICATION_ID,
+  NGX_ENGINE_TYPE_CUSTOM,
+  NGX_VERSION_API,
+  SUPPORT_QUERY_FAILED,
+  describeSupport,
+  ngxCheck,
+  ngxOk,
+  supportLevel,
+} from "./results.ts";
 
 export interface NgxCoreLocation {
   path: string;
@@ -69,6 +79,7 @@ export interface FeatureRequirementResult {
   result: number;
   supportedBits: number | null;
   support: string;
+  supportLevel: SupportLevel;
   minHwArchitecture: number | null;
   minOsVersion: string | null;
 }
@@ -241,7 +252,7 @@ export class NgxCore {
       this.callOwners = null;
     }
     if (!ngxOk(result)) {
-      return { result, supportedBits: null, support: "query failed", minHwArchitecture: null, minOsVersion: null };
+      return { result, supportedBits: null, support: SUPPORT_QUERY_FAILED, supportLevel: "blocked", minHwArchitecture: null, minOsVersion: null };
     }
     const bits = out.getU32(0);
     const minOs = readCString(out.ptr as unknown as number + 8, 255);
@@ -249,6 +260,7 @@ export class NgxCore {
       result,
       supportedBits: bits,
       support: describeSupport(bits),
+      supportLevel: supportLevel(bits),
       minHwArchitecture: out.getU32(4),
       minOsVersion: minOs.length ? minOs : null,
     };
