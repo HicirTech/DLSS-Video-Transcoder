@@ -47,7 +47,7 @@ import { EncodeSink, buildFrameGenEncodeArgs } from "./framegen-encode-sink.ts";
 import { noFramesGeneratedMessage } from "./framegen-host-messages.ts";
 import { estimatedFrameProgress, FRAME_GENERATION_BUSY_PROGRESS, FRAME_GENERATION_VERIFY_PROGRESS, type ProgressReporter } from "./frame-progress.ts";
 import { FrameReader, type FrameSource } from "./frame-reader.ts";
-import { type RunParams, runOverlapped, runSequential } from "./framegen-run.ts";
+import { type RunParams, fitsOverlapped, runOverlapped, runSequential } from "./framegen-run.ts";
 import { defaultOutputPath, inputAsOutputProblem } from "./output-path.ts";
 import { removePartialOutput } from "./partial-output.ts";
 import { ProcessedFrames } from "./processed-frames.ts";
@@ -175,8 +175,8 @@ const FG_PROBE_INTERVALS = 8;
 /**
  * Ceiling, in bytes, on the frame buffers the overlapped runner holds at once. One credit is one
  * frame-sized buffer (framegen-run.ts), so a run gets floor(limit / frameBytes) credits (129 at
- * 1080p, 32 at 2160p), and a frame so large that fewer than maxGenerated + 3 credits fit runs on
- * the sequential runner instead. No option changes it. 1 GiB is the reference pipeline.py's
+ * 1080p, 32 at 2160p), and a frame so large that the window fails fitsOverlapped (framegen-run.ts)
+ * runs on the sequential runner instead. No option changes it. 1 GiB is the reference pipeline.py's
  * BUFFER_LIMIT_BYTES carried over, not a value measured for this program.
  */
 const DEFAULT_BUFFER_LIMIT = 1 << 30;
@@ -527,9 +527,10 @@ async function runPipeline(
     check: () => failIfNoneGenerated(FG_PROBE_INTERVALS),
     signal: options.signal,
   };
-  const maxGenerated = Math.max(0, ...stages.map((s) => s.generatedCount));
-  // Even one input/output transaction may exceed the credit window for enormous frames.
-  const sequential = process.env.NR_FRAMEGEN_SEQUENTIAL === "1" || capacity < maxGenerated + 3;
+  // Sequential when the credit window cannot hold one transaction (fitsOverlapped), or when NR_FRAMEGEN_SEQUENTIAL=1
+  // forces it: a diagnostic switch for comparing the two runners, since the capacity fallback needs frames far larger
+  // than 2160p, which gets 32 credits.
+  const sequential = process.env.NR_FRAMEGEN_SEQUENTIAL === "1" || !fitsOverlapped(stages, capacity);
   const mode: FrameGenResult["mode"] = sequential ? "sequential" : "overlapped";
   if (sequential) progress(0, `pipeline: sequential (${capacity} frame credits)`);
   const runStarted = performance.now();
