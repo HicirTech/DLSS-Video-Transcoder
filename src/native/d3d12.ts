@@ -52,12 +52,9 @@ export const D3D12_RESOURCE_STATE_COPY_DEST = 0x400;
 export const D3D12_RESOURCE_STATE_COPY_SOURCE = 0x800;
 export const D3D12_RESOURCE_STATE_GENERIC_READ = 0xac3;
 
-export const DXGI_FORMAT_UNKNOWN = 0;
-export const DXGI_FORMAT_R16G16B16A16_FLOAT = 10;
-export const DXGI_FORMAT_R32G32_FLOAT = 16;
+const DXGI_FORMAT_UNKNOWN = 0;
 export const DXGI_FORMAT_R8G8B8A8_UNORM = 28;
 export const DXGI_FORMAT_R16G16_FLOAT = 34;
-export const DXGI_FORMAT_D32_FLOAT = 40;
 export const DXGI_FORMAT_R32_FLOAT = 41;
 
 export const D3D12_TEXTURE_DATA_PITCH_ALIGNMENT = 256;
@@ -82,37 +79,13 @@ const FORMATS: ReadonlyMap<number, { name: string; bytesPerPixel: number }> = ne
 ]);
 
 export function bytesPerPixel(format: number): number {
-  switch (format) {
-    case DXGI_FORMAT_R16G16B16A16_FLOAT:
-    case DXGI_FORMAT_R32G32_FLOAT:
-      return 8;
-    case DXGI_FORMAT_R8G8B8A8_UNORM:
-    case DXGI_FORMAT_R16G16_FLOAT:
-    case DXGI_FORMAT_R32_FLOAT:
-    case DXGI_FORMAT_D32_FLOAT:
-      return 4;
-    default:
-      throw new Error(`bytesPerPixel: unsupported DXGI_FORMAT ${format}`);
-  }
+  const entry = FORMATS.get(format);
+  if (!entry) throw new Error(`bytesPerPixel: unsupported DXGI_FORMAT ${format}`);
+  return entry.bytesPerPixel;
 }
 
 export function formatName(format: number): string {
-  switch (format) {
-    case DXGI_FORMAT_R16G16B16A16_FLOAT:
-      return "R16G16B16A16_FLOAT";
-    case DXGI_FORMAT_R32G32_FLOAT:
-      return "R32G32_FLOAT";
-    case DXGI_FORMAT_R8G8B8A8_UNORM:
-      return "R8G8B8A8_UNORM";
-    case DXGI_FORMAT_R16G16_FLOAT:
-      return "R16G16_FLOAT";
-    case DXGI_FORMAT_R32_FLOAT:
-      return "R32_FLOAT";
-    case DXGI_FORMAT_D32_FLOAT:
-      return "D32_FLOAT";
-    default:
-      return `DXGI_FORMAT(${format})`;
-  }
+  return FORMATS.get(format)?.name ?? `DXGI_FORMAT(${format})`;
 }
 
 function heapProperties(type: number): NativeStruct {
@@ -351,7 +324,6 @@ class D3D12Debug extends ComObject {
 }
 
 export interface DeviceOptions {
-  featureLevel?: number;
   debugLayer?: boolean;
 }
 
@@ -379,34 +351,33 @@ export class D3D12Device extends ComObject {
 
   static create(adapter: DxgiAdapter | null, options: DeviceOptions = {}): D3D12Device {
     if (options.debugLayer) D3D12Device.enableDebugLayer();
-    const featureLevel = options.featureLevel ?? D3D_FEATURE_LEVEL_11_0;
     const out = new OutPointer();
-    const hr = d3d12.symbols.D3D12CreateDevice(adapter ? adapter.ptr : null, featureLevel, IID_ID3D12Device, out.bytes);
+    const hr = d3d12.symbols.D3D12CreateDevice(adapter ? adapter.ptr : null, D3D_FEATURE_LEVEL_11_0, IID_ID3D12Device, out.bytes);
     checkHresult(hr, "D3D12CreateDevice");
-    return new D3D12Device(out.value, featureLevel);
+    return new D3D12Device(out.value, D3D_FEATURE_LEVEL_11_0);
   }
 
-  createCommandQueue(type = D3D12_COMMAND_LIST_TYPE_DIRECT): D3D12CommandQueue {
-    const desc = new NativeStruct(16).u32(0, type).i32(4, 0).u32(8, 0).u32(12, 0);
+  createCommandQueue(): D3D12CommandQueue {
+    const desc = new NativeStruct(16).u32(0, D3D12_COMMAND_LIST_TYPE_DIRECT).i32(4, 0).u32(8, 0).u32(12, 0);
     const out = new OutPointer();
     this.callHr(8, { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }, "CreateCommandQueue", desc.bytes, IID_ID3D12CommandQueue, out.bytes);
     return new D3D12CommandQueue(out.value, "ID3D12CommandQueue");
   }
 
-  createCommandAllocator(type = D3D12_COMMAND_LIST_TYPE_DIRECT): D3D12CommandAllocator {
+  createCommandAllocator(): D3D12CommandAllocator {
     const out = new OutPointer();
-    this.callHr(9, { args: [FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }, "CreateCommandAllocator", type, IID_ID3D12CommandAllocator, out.bytes);
+    this.callHr(9, { args: [FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }, "CreateCommandAllocator", D3D12_COMMAND_LIST_TYPE_DIRECT, IID_ID3D12CommandAllocator, out.bytes);
     return new D3D12CommandAllocator(out.value, "ID3D12CommandAllocator");
   }
 
-  createCommandList(allocator: D3D12CommandAllocator, type = D3D12_COMMAND_LIST_TYPE_DIRECT): D3D12GraphicsCommandList {
+  createCommandList(allocator: D3D12CommandAllocator): D3D12GraphicsCommandList {
     const out = new OutPointer();
     this.callHr(
       12,
       { args: [FFIType.u32, FFIType.u32, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
       "CreateCommandList",
       0,
-      type,
+      D3D12_COMMAND_LIST_TYPE_DIRECT,
       allocator.ptr,
       null,
       IID_ID3D12GraphicsCommandList,
