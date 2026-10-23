@@ -23,15 +23,12 @@ export interface AdapterInfo {
   name: string;
   vendorId: number;
   deviceId: number;
-  subSysId: number;
-  revision: number;
   dedicatedVideoMemory: bigint;
   dedicatedVideoMemoryMB: number;
   luidLow: number;
   luidHigh: number;
   /** "HHHHHHHH-LLLLLLLL" as printed by other tools. */
   luid: string;
-  flags: number;
   software: boolean;
   isNvidia: boolean;
 }
@@ -76,14 +73,11 @@ function readAdapterInfo(raw: RawAdapter, index: number): AdapterInfo {
     name: String.fromCharCode(...nameChars),
     vendorId,
     deviceId: desc.getU32(260),
-    subSysId: desc.getU32(264),
-    revision: desc.getU32(268),
     dedicatedVideoMemory: dedicated,
     dedicatedVideoMemoryMB: Number(dedicated / 1048576n),
     luidLow,
     luidHigh,
     luid: `${hex32(luidHigh).slice(2)}-${hex32(luidLow).slice(2)}`,
-    flags,
     software: (flags & DXGI_ADAPTER_FLAG_SOFTWARE) !== 0,
     isNvidia: vendorId === VENDOR_NVIDIA,
   };
@@ -132,13 +126,12 @@ export function isHardwareNvidia(info: AdapterInfo): boolean {
 }
 
 /**
- * Pick the adapter to run on: an explicit index, else the NVIDIA GPU with the
+ * Pick the adapter to run on: the NVIDIA GPU with the
  * most memory (a stable sort, so equal memory keeps the caller's order). Generic
  * over anything carrying an AdapterInfo so the CUDA-aware choice in
  * src/pipeline/gpu.ts can reuse this ordering on its own candidates.
  */
-export function selectAdapter<A extends { info: AdapterInfo }>(adapters: readonly A[], preferredIndex?: number): A | null {
-  if (preferredIndex !== undefined) return adapters.find((a) => a.info.index === preferredIndex) ?? null;
+export function selectAdapter<A extends { info: AdapterInfo }>(adapters: readonly A[]): A | null {
   const nvidia = adapters.filter((a) => isHardwareNvidia(a.info));
   nvidia.sort((a, b) => Number(b.info.dedicatedVideoMemory - a.info.dedicatedVideoMemory));
   return nvidia[0] ?? null;
