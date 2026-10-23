@@ -3,7 +3,6 @@
  * server's validateJobRequest and runs it in this process.
  */
 import { loadEngines } from "../pipeline/engine-loader.ts";
-import type { ProgressReporter } from "../pipeline/frame-progress.ts";
 import { frameGenJobOptions, processFrameGen } from "../pipeline/framegen.ts";
 import { processVideo, videoJobOptions } from "../pipeline/video.ts";
 import {
@@ -31,6 +30,7 @@ import { adapterOption, choiceOption, flag, numberOption, option, positionalArgs
 import { commandSpec, FG_MULTIPLIER_OPTION, QUALITY_OPTION, VIDEO_STEP_OPTS } from "./commands.ts";
 import { stepVersionOption } from "./dlss-version-option.ts";
 import { frameGenSummary, targetFpsOption } from "./fg-command.ts";
+import { interruptSignal } from "./interrupt.ts";
 import { nrSettingsOption } from "./nr-settings-option.ts";
 import { outputArgument } from "./output-argument.ts";
 import { printProgress } from "./progress.ts";
@@ -45,10 +45,7 @@ export async function videoCommand(args: string[]): Promise<void> {
     usageError(`--adapter picks the GPU for --sr and --nr; frame generation picks its own (${FRAME_GEN_GPU_CHOICE}), so with --fg alone leave it out`, "video");
   }
   await loadEngines(shape);
-  const onProgress: ProgressReporter = (fraction, message, frames) => {
-    if (frames === undefined) console.log(`  ${(fraction * 100).toFixed(0)}%  ${message}`);
-  };
-  const run = { runtimeDir, onProgress };
+  const run = { runtimeDir, onProgress: printProgress, signal: interruptSignal() };
   // --adapter picks a GPU by DXGI index; a request names one by CUDA UUID instead, and this one names none.
   if (request.frameGen) {
     const result = await processFrameGen({ ...frameGenJobOptions(request, request.frameGen, run), adapterIndex });
