@@ -12,8 +12,8 @@ import { DEFAULT_ENCODE_SETTINGS, DEFAULT_SCALE_SETTINGS, jobSteps, stepsSuffix 
 import { evenSize, nvencLimitExceeded, resolveTargetSize, srOutputProblem } from "../server/output-size.ts";
 import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngineChain, type Engine } from "./engine.ts";
-import { resolveEncodeCodec } from "./encode-select.ts";
-import { aspectArgs, audioArgs, decodeArgv, encoderArgs, faststartArgs, muxCopyArgs } from "./ffmpeg-args.ts";
+import { nvencNativeTarget, resolveEncodeCodec } from "./encode-select.ts";
+import { decodeArgv, encoderArgs, muxCopyArgs, rawvideoEncodeArgs } from "./ffmpeg-args.ts";
 import { ffmpegFailedMessage, NoFramesDecodedError } from "./ffmpeg-failure.ts";
 import type { FrameCounts } from "./frame-flow.ts";
 import { frameProgress, type ProgressReporter } from "./frame-progress.ts";
@@ -86,24 +86,6 @@ export interface VideoJobResult {
   /** The steps that ran, in order. */
   steps: StepKind[];
   ms: number;
-}
-
-/**
- * Whether frames can be encoded in-process on the GPU (nvenc.ts) so ffmpeg only
- * muxes the compressed elementary stream, instead of an uncompressed rawvideo
- * pipe plus swscale. Null means take the rawvideo path.
- *
- * The gates are NVENC's own limits: 4:2:0 needs even dimensions, and the
- * encoder caps the frame size per codec (NVENC_MAX_SIDE, measured). av1_nvenc
- * falls through to null: nvenc.ts's CODEC_GUID only carries the H.264 and HEVC
- * GUIDs, so there is no in-process AV1 encoder.
- */
-export function nvencNativeTarget(codec: EncodeSettings["codec"], width: number, height: number): { codec: NvencSdkCodec; demux: string } | null {
-  if (width % 2 !== 0 || height % 2 !== 0) return null;
-  if (nvencLimitExceeded(codec, { width, height }) !== null) return null;
-  if (codec === "h264_nvenc") return { codec: "h264", demux: "h264" };
-  if (codec === "hevc_nvenc") return { codec: "hevc", demux: "hevc" };
-  return null;
 }
 
 /** Integer num/den of an ffmpeg rate string ("30000/1001", "25") that videoInfoFrom has already proven usable, for NVENC's rate fields. */
@@ -298,17 +280,14 @@ async function runRawvideo(
   const encoderArgv = encoderArgs(encode, cudaOrdinal);
   progress(0, `encode: ${encoderArgv[encoderArgv.indexOf("-c:v") + 1]} via ffmpeg (single-thread rawvideo pipeline)`);
   const decoder = Bun.spawn([ffmpeg, ...decodeArgs], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
-  // No -shortest: it trims whichever stream runs longer, and when a source's audio ends before its video (a
-  // 30 s stream-copied cut of 2.mp4 ends its audio 23 ms early) that drops video frames the job counted as
-  // written. Every frame written is a source frame, so the output keeps the source's stream lengths, as the
-  // NVENC paths' muxCopyArgs does.
+  // Every frame written is a source frame, so the output keeps the source's stream lengths (no -shortest: see rawvideoEncodeArgs).
   const encoder = Bun.spawn(
     [
-      ffmpeg, "-v", "error", "-y",
-      "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${outWidth}x${outHeight}`, "-r", info.fpsText, "-i", "pipe:0",
-      ...(wantAudio ? ["-i", options.input] : []),
-      "-map", "0:v:0", ...audioArgs(wantAudio, encode.container), ...encoderArgv, ...aspectArgs(info.displayAspect, { width: outWidth, height: outHeight }), ...faststartArgs(encode.container),
-      output,
+      ffmpeg,
+      ...rawvideoEncodeArgs({
+        size: { width: outWidth, height: outHeight }, rateFlag: "-r", frameRate: info.fpsText, audioSource: wantAudio ? options.input : null,
+        container: encode.container, encoder: encoderArgv, displayAspect: info.displayAspect, output,
+      }),
     ],
     { stdin: "pipe", stdout: "ignore", stderr: "pipe" },
   );
