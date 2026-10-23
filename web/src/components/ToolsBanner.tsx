@@ -31,8 +31,9 @@ export function ToolsBanner({ tools, toolsError }: { tools: ToolsReport | null; 
     <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
       <Chip label={`ffmpeg ${tools.ffmpeg.version ?? ""}`.trim()} color="success" variant="outlined" />
       <Chip label={`ffprobe ${tools.ffprobe.version ?? ""}`.trim()} color="success" variant="outlined" />
-      <Tooltip title={NVENC_CHIP_HELP}>
+      <Tooltip title={NVENC_CHIP_HELP} describeChild>
         <Chip
+          tabIndex={0}
           label={tools.nvenc === null ? "NVENC build unknown" : tools.nvenc ? "ffmpeg built with NVENC" : "ffmpeg built without NVENC"}
           color={tools.nvenc ? "success" : "default"}
           variant="outlined"

@@ -42,23 +42,17 @@ export function RuntimeFilesTable({ folder, files }: RuntimeFilesTableProps) {
                 <TableCell align="right">{formatMB(file.sizeMB)}</TableCell>
                 <TableCell>
                   {file.exports && file.exports.length > 0 ? (
-                    <Tooltip title={<Mono pre>{file.exports.join("\n")}</Mono>} placement="left">
-                      <span style={{ cursor: "help", textDecoration: "underline dotted" }}>{file.exports.length}</span>
-                    </Tooltip>
-                  ) : (
-                    "-"
-                  )}
-                </TableCell>
-                <TableCell sx={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {file.path ? (
-                    <Tooltip title={file.path}>
-                      <span>
-                        <Mono dim>{file.path}</Mono>
+                    <Tooltip title={<Mono pre>{file.exports.join("\n")}</Mono>} placement="left" describeChild>
+                      <span tabIndex={0} style={{ cursor: "help", textDecoration: "underline dotted" }}>
+                        {file.exports.length}
                       </span>
                     </Tooltip>
                   ) : (
                     "-"
                   )}
+                </TableCell>
+                <TableCell sx={{ maxWidth: 320, wordBreak: "break-all" }}>
+                  {file.path ? <Mono dim>{file.path}</Mono> : "-"}
                 </TableCell>
               </TableRow>
             ))}
