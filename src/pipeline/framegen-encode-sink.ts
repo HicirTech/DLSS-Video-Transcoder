@@ -8,7 +8,7 @@ import { type EncodeSettings, FRAME_GEN_CONTAINER } from "../server/api-types.ts
 import { aspectArgs, audioArgs, encoderArgs, faststartArgs, muxCopyArgs } from "./ffmpeg-args.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "./framegen-device.ts";
 import { formatRational, type Rational } from "./rational.ts";
-import { nvencNativeTarget } from "./video.ts";
+import { nvencNativeTarget } from "./encode-select.ts";
 import { abortWorkers } from "./worker-abort.ts";
 import type { FramegenEncodeOpen, FramegenEncodeOut } from "./workers/framegen-encode-worker.ts";
 
