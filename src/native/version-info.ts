@@ -25,7 +25,7 @@ const RESOURCE_DIRECTORY_INDEX = 2;
 const NULL_VERSION: VersionInfo = { fileVersion: null, productVersion: null, stringFileVersion: null };
 
 /** Format one packed dword (MS or LS) as "high.low". */
-function fmtWord(word: number): string {
+function formatVersionWord(word: number): string {
   return `${word >>> 16}.${word & 0xffff}`;
 }
 
@@ -130,8 +130,8 @@ export function parseVersionInfo(bytes: Uint8Array): VersionInfo {
     // located blob.
     for (let p = blob.offset; p + 24 <= blobEnd; p += 4) {
       if (view.getUint32(p, true) === FIXED_FILE_INFO_SIGNATURE && view.getUint32(p + 4, true) === STRUC_VERSION) {
-        const fileVersion = `${fmtWord(view.getUint32(p + 8, true))}.${fmtWord(view.getUint32(p + 12, true))}`;
-        const productVersion = `${fmtWord(view.getUint32(p + 16, true))}.${fmtWord(view.getUint32(p + 20, true))}`;
+        const fileVersion = `${formatVersionWord(view.getUint32(p + 8, true))}.${formatVersionWord(view.getUint32(p + 12, true))}`;
+        const productVersion = `${formatVersionWord(view.getUint32(p + 16, true))}.${formatVersionWord(view.getUint32(p + 20, true))}`;
         const stringFileVersion = readStringValue(bytes, blob.offset, blobEnd, "FileVersion");
         return { fileVersion, productVersion, stringFileVersion };
       }
