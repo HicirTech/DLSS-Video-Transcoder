@@ -3,7 +3,8 @@
  * info and settings defaults. No DOM dependency, so the Bun mock server (web/mock-server.ts) and the browser
  * (`?mock=1`) share them.
  */
-import type { RuntimeManifest } from "../../../src/ngx/runtime-catalog";
+import { FEATURES, type FeatureKey } from "../../../src/ngx/features";
+import type { RuntimeManifest, VersionEntry } from "../../../src/ngx/runtime-catalog";
 import type { MediaInfo, ProbeReport, SettingsDefaults, ToolsReport, UploadResult } from "../../../src/server/api-types";
 import {
   DEFAULT_ENCODE_SETTINGS,
@@ -243,21 +244,26 @@ export const MOCK_TOOLS: ToolsReport = {
   nvenc: null,
 };
 
+/** The installed versions of each feature the mock lists; Ray Reconstruction has none, so the catalog leaves it out. */
+const MOCK_VERSIONS: Partial<Record<FeatureKey, VersionEntry[]>> = {
+  sr: [
+    { version: "310.7.0.0", path: "C:\\mock\\dlss\\nvngx_dlss.dll", sizeMB: 70.8, dir: "C:\\mock\\dlss", source: "runtime", sortKey: "0" },
+    { version: "310.6.0.0", path: "C:\\mock\\swapper\\nvngx_dlss.dll", sizeMB: 70.1, dir: "C:\\mock\\swapper", source: "swapper", sortKey: "0" },
+  ],
+  fg: [{ version: "310.7.0.0", path: "C:\\mock\\dlssg\\nvngx_dlssg.dll", sizeMB: 7.2, dir: "C:\\mock\\dlssg", source: "runtime", sortKey: "0" }],
+  nr: [{ version: "1.0.0.0", path: "C:\\mock\\dlssnr\\nvngx_dlssnr.dll", sizeMB: 158, dir: "C:\\mock\\dlssnr", source: "runtime", sortKey: "0" }],
+};
+
 /** Installed DLSS runtimes, as GET /api/catalog would report them. Shared by both mock modes. */
 export function mockCatalog(): RuntimeManifest {
   return {
-    features: [
-      { key: "sr", id: 1, name: "DLSS Super Resolution", dllName: "nvngx_dlss.dll", versions: [
-        { version: "310.7.0.0", path: "C:\\mock\\dlss\\nvngx_dlss.dll", sizeMB: 70.8, dir: "C:\\mock\\dlss", source: "runtime", sortKey: "0" },
-        { version: "310.6.0.0", path: "C:\\mock\\swapper\\nvngx_dlss.dll", sizeMB: 70.1, dir: "C:\\mock\\swapper", source: "swapper", sortKey: "0" },
-      ] },
-      { key: "fg", id: 11, name: "DLSS Frame Generation", dllName: "nvngx_dlssg.dll", versions: [
-        { version: "310.7.0.0", path: "C:\\mock\\dlssg\\nvngx_dlssg.dll", sizeMB: 7.2, dir: "C:\\mock\\dlssg", source: "runtime", sortKey: "0" },
-      ] },
-      { key: "nr", id: 18, name: "DLSS Neural Rendering", dllName: "nvngx_dlssnr.dll", versions: [
-        { version: "1.0.0.0", path: "C:\\mock\\dlssnr\\nvngx_dlssnr.dll", sizeMB: 158, dir: "C:\\mock\\dlssnr", source: "runtime", sortKey: "0" },
-      ] },
-    ],
+    features: FEATURES.filter((feature) => MOCK_VERSIONS[feature.key]).map((feature) => ({
+      key: feature.key,
+      id: feature.id,
+      name: feature.name,
+      dllName: feature.dllName,
+      versions: structuredClone(MOCK_VERSIONS[feature.key]!),
+    })),
   };
 }
 
