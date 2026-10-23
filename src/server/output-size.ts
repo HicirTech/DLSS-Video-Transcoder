@@ -22,6 +22,12 @@ export function resolveTargetSize(width: number, height: number, scale: ScaleSet
   }
 }
 
+/** The size a video job writes: resolveTargetSize rounded to even on both sides, since every encoder here writes 4:2:0. */
+export function videoTargetSize(source: { width: number; height: number }, scale: ScaleSettings): { width: number; height: number } {
+  const target = resolveTargetSize(source.width, source.height, scale);
+  return { width: evenSize(target.width), height: evenSize(target.height) };
+}
+
 /**
  * Why DLSS SR cannot write `output` from a `render`-sized source, or null when it can: it
  * only enlarges (SR_FACTOR_MIN), and writes no side longer than DLSS_SR_MAX_OUTPUT_SIDE.

@@ -3,8 +3,8 @@
  * output size and rate, whether Super Resolution can write that size, and the default output name. The rules
  * are the server's own (output-size.ts, stepsSuffix), so the form shows what the job will do.
  */
-import { type EncodeSettings, FRAME_GEN_CONTAINER, type ScaleSettings, STEP_KINDS, type StepKind, stepsSuffix } from "../../src/server/api-types";
-import { evenSize, resolveTargetSize, srOutputProblem } from "../../src/server/output-size";
+import { type EncodeSettings, FRAME_GEN_CONTAINER, resizesFrames, type ScaleSettings, STEP_KINDS, type StepKind, stepsSuffix } from "../../src/server/api-types";
+import { resolveTargetSize, srOutputProblem, videoTargetSize } from "../../src/server/output-size";
 import { rateValue, stemOf } from "./format";
 import type { StoredFrameGen } from "./hooks/useSettings";
 
@@ -42,7 +42,7 @@ export interface JobPlan {
 
 export function planJob(plan: PlanInput): JobPlan {
   const steps = STEP_KINDS.filter((step) => plan.steps[step]);
-  const resized = !plan.steps.sr && plan.resize.mode !== "none";
+  const resized = resizesFrames({ superResolution: plan.steps.sr ? { scale: plan.srScale } : undefined, resize: plan.resize });
   const outputSize = plan.source ? plannedSize(plan, plan.source) : null;
   const srProblem = plan.steps.sr && plan.source && outputSize ? srOutputProblem(plan.source, outputSize) : null;
   const extension = plan.kind === "image" ? "png" : plan.steps.fg ? FRAME_GEN_CONTAINER : plan.container;
@@ -53,8 +53,8 @@ export function planJob(plan: PlanInput): JobPlan {
 
 /** The size the job gives `source`, as the jobs work it out: a video's sides rounded to even for 4:2:0, a still's as they are. */
 function plannedSize(plan: PlanInput, source: FrameSize): FrameSize {
-  const target = resolveTargetSize(source.width, source.height, plan.steps.sr ? plan.srScale : plan.resize);
-  return plan.kind === "video" ? { width: evenSize(target.width), height: evenSize(target.height) } : target;
+  const scale = plan.steps.sr ? plan.srScale : plan.resize;
+  return plan.kind === "video" ? videoTargetSize(source, scale) : resolveTargetSize(source.width, source.height, scale);
 }
 
 /**
