@@ -11,7 +11,7 @@ export const PROJECT_ROOT = resolve(dirname(import.meta.dir));
 /** <repo>/runtime: where the CLI looks unless --runtime says otherwise, and the server unless NR_RUNTIME_DIR does. */
 export const DEFAULT_RUNTIME_DIR = resolve(PROJECT_ROOT, "runtime");
 export const RUNTIME_DIR = process.env.NR_RUNTIME_DIR ? resolve(process.env.NR_RUNTIME_DIR) : DEFAULT_RUNTIME_DIR;
-/** The folder NGX may write logs and uploads into: NR_APPDATA, else <repo>/logs. */
+/** The folder NGX writes its logs to, and the server its uploads/ subfolder: NR_APPDATA, else <repo>/logs. */
 export const APP_DATA_DIR = process.env.NR_APPDATA ? resolve(process.env.NR_APPDATA) : resolve(PROJECT_ROOT, "logs");
 /** Where DLSS Frame Generation's NGX logs go when no app-data folder is passed: a subfolder of APP_DATA_DIR. */
 export const NGX_DATA_DIR = join(APP_DATA_DIR, "ngx");
