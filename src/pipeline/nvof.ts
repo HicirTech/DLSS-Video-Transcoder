@@ -322,7 +322,7 @@ export type NvofAttempt = { backend: FlowBackend; reason: null } | { backend: nu
 /**
  * Try to build an NVOFA optical-flow backend on CUDA device `ordinal` for
  * frames of `width`x`height` (sized to the estimator's flow grid). Failing is
- * not fatal — the CPU block matcher does the same job more slowly — but the
+ * not fatal — the CPU block matcher stands in, slower and coarser — but the
  * reason is returned rather than swallowed, so someone who asked for hardware
  * flow learns they lost it.
  */
@@ -335,6 +335,6 @@ export function tryCreateNvofBackend(width: number, height: number, ordinal: num
     // The pointer names the probe line that answers "does the engine come up on
     // this GPU"; its size limits never explain this failure, since the grid is
     // MIN_FLOW_SIDE..MAX_FLOW_LONG_SIDE (flow-grid.ts) px a side and every RTX reports a far wider range.
-    return { backend: null, reason: `NVOFA hardware optical flow could not start on its ${flowW}x${flowH} grid, so this run uses the CPU matcher instead -- slower, same result: ${detail}. Run \`probe\`: its "Hardware optical flow (NVOFA)" line says whether the engine comes up on the selected GPU and why not.` };
+    return { backend: null, reason: `NVOFA hardware optical flow could not start on its ${flowW}x${flowH} grid, so this run uses the CPU block matcher instead -- slower and coarser (one whole-pixel motion vector per 8x8 grid block, at most 8 grid pixels each way), so the upscale can differ: ${detail}. Run \`probe\`: its "Hardware optical flow (NVOFA)" line says whether the engine comes up on the selected GPU and why not.` };
   }
 }
