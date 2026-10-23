@@ -17,7 +17,6 @@ interface JobCardProps {
   now: number;
   onCancel?: (id: string) => void;
   cancelling?: boolean;
-  defaultExpanded?: boolean;
 }
 
 type ProgressColor = "primary" | "success" | "error" | "warning" | "inherit";
@@ -31,8 +30,8 @@ const PROGRESS_COLORS: Record<JobState, ProgressColor> = {
 };
 
 /** One job: header with state and actions, progress bar, counters, error and a collapsible following log. */
-export function JobCard({ job, now, onCancel, cancelling = false, defaultExpanded = false }: JobCardProps) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
+export function JobCard({ job, now, onCancel, cancelling = false }: JobCardProps) {
+  const [expanded, setExpanded] = useState(false);
   const active = isJobActive(job);
   const elapsed = jobElapsedMs(job, now);
   const percent = Math.round(Math.min(1, Math.max(0, job.progress)) * 100);

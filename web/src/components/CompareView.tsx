@@ -5,16 +5,17 @@ import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
 interface CompareViewProps {
   beforeSrc: string;
   afterSrc: string;
-  beforeLabel?: string;
-  afterLabel?: string;
 }
+
+const BEFORE_LABEL = "Before";
+const AFTER_LABEL = "After";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
 /** Before/after image comparison with a draggable vertical split (pointer or arrow keys). */
-export function CompareView({ beforeSrc, afterSrc, beforeLabel = "Before", afterLabel = "After" }: CompareViewProps) {
+export function CompareView({ beforeSrc, afterSrc }: CompareViewProps) {
   const [position, setPosition] = useState(50);
   const [failed, setFailed] = useState<string[]>([]);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -93,16 +94,16 @@ export function CompareView({ beforeSrc, afterSrc, beforeLabel = "Before", after
       >
         <img
           src={afterSrc}
-          alt={afterLabel}
+          alt={AFTER_LABEL}
           draggable={false}
-          onError={() => markFailed(afterLabel.toLowerCase())}
+          onError={() => markFailed(AFTER_LABEL.toLowerCase())}
           style={{ width: "100%", display: "block" }}
         />
         <img
           src={beforeSrc}
-          alt={beforeLabel}
+          alt={BEFORE_LABEL}
           draggable={false}
-          onError={() => markFailed(beforeLabel.toLowerCase())}
+          onError={() => markFailed(BEFORE_LABEL.toLowerCase())}
           style={{
             // Must match the base image's sizing exactly (width 100%, natural height,
             // anchored top-left), or the two stop overlapping and the split line falls on
@@ -149,8 +150,8 @@ export function CompareView({ beforeSrc, afterSrc, beforeLabel = "Before", after
         >
           <SwapHorizIcon fontSize="small" />
         </Box>
-        <Chip label={beforeLabel} sx={{ position: "absolute", top: 8, left: 8, bgcolor: "rgba(0,0,0,0.6)" }} />
-        <Chip label={afterLabel} sx={{ position: "absolute", top: 8, right: 8, bgcolor: "rgba(0,0,0,0.6)" }} />
+        <Chip label={BEFORE_LABEL} sx={{ position: "absolute", top: 8, left: 8, bgcolor: "rgba(0,0,0,0.6)" }} />
+        <Chip label={AFTER_LABEL} sx={{ position: "absolute", top: 8, right: 8, bgcolor: "rgba(0,0,0,0.6)" }} />
       </Box>
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
         Drag the divider or use the arrow keys. {Math.round(position)}% of the width shows the original.
