@@ -8,6 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { FEATURES, type FeatureDescriptor, type FeatureKey, type RuntimeManifest, buildRuntimeCatalog, featureByKey } from "../src/ngx/runtime-catalog.ts";
+import { STEP_KINDS } from "../src/server/api-types.ts";
 import { checkDllDir } from "../src/server/dll-dir.ts";
 
 const RUNTIME = resolve(sep === "\\" ? "C:\\app\\runtime" : "/app/runtime");
@@ -51,7 +52,7 @@ describe("checkDllDir", () => {
 
   test("each step is refused every other feature's folder", () => {
     const others = (key: FeatureKey): FeatureKey[] => FEATURES.map((feature) => feature.key).filter((other) => other !== key);
-    for (const step of ["sr", "nr", "fg"] as const) {
+    for (const step of STEP_KINDS) {
       for (const other of others(step)) {
         expect(checkDllDir(listedDir(other), step, CATALOG), `${step} step, ${other} folder`).toContain(`holds ${featureByKey(other).name}`);
       }
@@ -89,7 +90,7 @@ describe("checkDllDir against the catalog of a runtime tree", () => {
     }
     // An empty DLSS Swapper cache, so the machine's own installs do not join the catalog.
     const catalog = buildRuntimeCatalog(runtime, join(root, "no-swapper-cache"));
-    for (const step of ["sr", "nr", "fg"] as const) {
+    for (const step of STEP_KINDS) {
       for (const feature of FEATURES) {
         const message = checkDllDir(join(runtime, feature.runtimeSubdir), step, catalog);
         if (feature.key === step) expect(message, `${step} step, own folder`).toBeNull();

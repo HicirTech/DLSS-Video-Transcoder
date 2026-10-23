@@ -19,7 +19,7 @@ describe("the shared SR size rule", () => {
     expect(srOutput(1000, 1000, 1.1)).toEqual({ width: 1100, height: 1100, quality: PerfQuality.MaxQuality });
   });
 
-  test("a factor on a mode's ratio and one beyond the last mode", () => {
+  test("a factor on a mode's ratio takes that mode, and one beyond the last mode keeps its size and takes the top mode", () => {
     expect(srOutput(1000, 1000, 2)).toEqual({ width: 2000, height: 2000, quality: PerfQuality.MaxPerf });
     expect(srOutput(1000, 1000, 4)).toEqual({ width: 4000, height: 4000, quality: PerfQuality.UltraPerformance });
   });

@@ -85,6 +85,7 @@ test("D3D12 command-list structs reach native code intact under allocation press
       }
     }
     expect(copies).toBeGreaterThan(0);
+    expect(barriers).toBeGreaterThan(0);
     expect(corrupted).toEqual([]);
   } finally {
     listObject.fill(0n);
