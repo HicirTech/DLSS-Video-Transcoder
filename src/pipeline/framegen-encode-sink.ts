@@ -6,7 +6,7 @@
  */
 import { type EncodeSettings, FRAME_GEN_CONTAINER } from "../server/api-types.ts";
 import { aspectArgs, audioArgs, encoderArgs, faststartArgs, muxCopyArgs } from "./ffmpeg-args.ts";
-import { FRAMEGEN_CUDA_DEVICE } from "./framegen-plan.ts";
+import { FRAMEGEN_CUDA_DEVICE } from "./framegen-device.ts";
 import { formatRational, type Rational } from "./rational.ts";
 import { nvencNativeTarget } from "./video.ts";
 import { abortWorkers } from "./worker-abort.ts";

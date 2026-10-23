@@ -19,7 +19,7 @@
 import { createMotionEstimator, type MotionEstimator } from "../flow.ts";
 import { flowGridSize } from "../flow-grid.ts";
 import { packFlowResizedR16G16 } from "../flow-resize.ts";
-import { FRAMEGEN_CUDA_DEVICE } from "../framegen-plan.ts";
+import { FRAMEGEN_CUDA_DEVICE } from "../framegen-device.ts";
 import { tryCreateNvofBackend } from "../nvof.ts";
 
 interface OpenMsg {
