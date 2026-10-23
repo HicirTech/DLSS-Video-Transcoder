@@ -1,11 +1,8 @@
 /**
  * Manual GPU diagnostic (not part of `bun test`): which PerfQuality values does
  * the installed nvngx_dlss.dll accept, and does CreateFeature care about the
- * mode or about the render/output ratio?
- *
- * `sr --factor 1.3` fails with UnsupportedParameter while every other documented
- * factor works, and the two candidate causes were never separated: PerfQuality 4
- * (UltraQuality) itself, or the 1.3 ratio that goes with it.
+ * mode or about the render/output ratio? Re-run it after updating nvngx_dlss.dll, before adding
+ * PerfQuality 4 (UltraQuality) back to DLSS_RATIO: that mode was refused at every ratio on 310.7.129.0.
  *
  *   bun run tests/diag-sr-quality-modes.ts
  */
