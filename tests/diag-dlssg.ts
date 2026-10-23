@@ -134,6 +134,11 @@ interface CentroidSpan {
   squareTop: number;
 }
 
+/** Where generated frame `index` (0-based) should sit between its two source frames. */
+function expectedPhase(index: number, generatedCount: number): number {
+  return (index + 1) / (generatedCount + 1);
+}
+
 function checkInterval(report: IntervalReport, generatedCount: number, result: DlssgIntervalResult, span: CentroidSpan): void {
   if (report.reset) {
     if (result.outcome !== "reset") report.failures.push(`reset interval came back ${result.outcome}, expected an honoured reset`);
@@ -145,7 +150,7 @@ function checkInterval(report: IntervalReport, generatedCount: number, result: D
   }
   report.phases = result.frames.map((frame) => (centroidX(frame, span.squareTop) - span.previous) / (span.current - span.previous));
   report.phases.forEach((phase, index) => {
-    const expected = (index + 1) / (generatedCount + 1);
+    const expected = expectedPhase(index, generatedCount);
     if (!(Math.abs(phase - expected) <= phaseTolerance(generatedCount))) report.failures.push(`k=${index + 1} phase ${phase.toFixed(3)}, expected ${expected.toFixed(3)} +/- ${phaseTolerance(generatedCount)}`);
     if (index > 0 && !(phase > report.phases[index - 1]!)) report.failures.push(`k=${index + 1} is not later than k=${index}`);
   });
@@ -215,7 +220,7 @@ function runOneGeneratedCount(generatedCount: number): GeneratedCountReport {
     feature?.close();
     session.close();
   }
-  const errors = report.intervals.flatMap((interval) => interval.phases.map((phase, index) => Math.abs(phase - (index + 1) / (generatedCount + 1))));
+  const errors = report.intervals.flatMap((interval) => interval.phases.map((phase, index) => Math.abs(phase - expectedPhase(index, generatedCount))));
   report.maxPhaseError = errors.length ? Math.max(...errors) : null;
   report.pass = report.refused === null && report.intervals.length === SOURCE_FRAMES && report.intervals.every((interval) => interval.failures.length === 0);
   return report;
