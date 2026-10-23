@@ -22,25 +22,21 @@ const GENERATED_COUNT = 3;
 const CLOSE_TIMEOUT_MS = 5_000;
 const TEST_TIMEOUT_MS = 20_000;
 
-/** The names of the shared memory that the hosts of this file were started with, oldest first. */
-const startedMappings: string[] = [];
-
-/** A host whose command is fixed, or built from the name of the shared memory a --serve launch hands it. */
-function fakeHost(command: string[] | ((sharedMemoryName: string) => string[])): DlssgHost {
+/** A host whose command is fixed, or built from its launch; each --serve launch adds its shared memory's name to `launched`. */
+function fakeHost(command: string[] | ((launch: DlssgLaunch) => string[]), launched: string[] = []): DlssgHost {
   return {
     cwd: import.meta.dir,
     env: undefined,
     hint: "Check the fake.",
     command: (launch) => {
-      if (launch.mode === "--serve") startedMappings.push(launch.sharedMemoryName);
-      if (typeof command !== "function") return command;
-      return command(launch.mode === "--serve" ? launch.sharedMemoryName : "");
+      if (launch.mode === "--serve") launched.push(launch.sharedMemoryName);
+      return typeof command === "function" ? command(launch) : command;
     },
   };
 }
 
-function servingHost(args: string[]): DlssgHost {
-  return fakeHost((sharedMemoryName) => [process.execPath, FAKE_HOST, ...args, "--shared", sharedMemoryName]);
+function servingHost(args: string[], launched?: string[]): DlssgHost {
+  return fakeHost((launch) => [process.execPath, FAKE_HOST, ...args, ...(launch.mode === "--serve" ? ["--shared", launch.sharedMemoryName] : [])], launched);
 }
 
 function openSession(host: DlssgHost, options: Partial<DlssgOptions> = {}): Promise<DlssgSession> {
@@ -126,8 +122,9 @@ describe("DlssgSession against a host process", () => {
 
   test("frames are SharedArrayBuffers when the session is asked for them, and plain buffers otherwise", async () => {
     const plain = await openSession(servingHost([]));
+    opened.push(plain);
     const shared = await openSession(servingHost([]), { sharedFrames: true });
-    opened.push(plain, shared);
+    opened.push(shared);
     for (const session of [plain, shared]) await sendFrame(session, 0);
     const plainFrames = await sendFrame(plain, 1);
     const sharedFrames = await sendFrame(shared, 1);
@@ -159,11 +156,13 @@ describe("DlssgSession against a host process", () => {
   }, TEST_TIMEOUT_MS);
 
   test("a setup reply that does not decode is reported with the host's stderr and the hint", async () => {
-    const message = await failure(openSession(fakeHost([process.execPath, "-e", GARBAGE_SETUP_REPLY])));
+    const launched: string[] = [];
+    const message = await failure(openSession(fakeHost([process.execPath, "-e", GARBAGE_SETUP_REPLY], launched)));
     expect(message).toStartWith(`${HOST_PROCESS_NAME} sent a setup reply that is not part of the protocol (`);
     expect(message).toContain("it said: garbage sender");
     expect(message).toEndWith(". Check the fake.");
-    expect(isReleased(startedMappings.at(-1)!)).toBe(true);
+    expect(launched).toHaveLength(1);
+    expect(isReleased(launched[0]!)).toBe(true);
   }, TEST_TIMEOUT_MS);
 
   test("a frame reply that does not decode is reported with the host's stderr and the hint", async () => {
@@ -177,10 +176,12 @@ describe("DlssgSession against a host process", () => {
 
   test("a cancel while the host has not answered the setup stops the host and releases the shared memory", async () => {
     const controller = new AbortController();
-    const opening = openSession(fakeHost([process.execPath, "-e", SILENT_HOST]), { signal: controller.signal });
+    const launched: string[] = [];
+    const opening = openSession(fakeHost([process.execPath, "-e", SILENT_HOST], launched), { signal: controller.signal });
     setTimeout(() => controller.abort(), 200);
     await expect(opening).rejects.toBeInstanceOf(JobCancelledError);
-    expect(isReleased(startedMappings.at(-1)!)).toBe(true);
+    expect(launched).toHaveLength(1);
+    expect(isReleased(launched[0]!)).toBe(true);
   }, TEST_TIMEOUT_MS);
 
   test("status 2 becomes the lower-multiplier message, quoting what the host said", async () => {
@@ -232,9 +233,12 @@ describe("DlssgSession against a host process", () => {
 
 describe("DlssgSession's shared memory", () => {
   test("is released when closing the session ends the host", async () => {
-    const session = await openSession(servingHost([]));
+    const launched: string[] = [];
+    const session = await openSession(servingHost([], launched));
+    opened.push(session);
     await sendFrame(session, 0);
-    const name = startedMappings.at(-1)!;
+    expect(launched).toHaveLength(1);
+    const name = launched[0]!;
     expect(isReleased(name)).toBe(false);
     await session.close(CLOSE_TIMEOUT_MS);
     expect(isReleased(name)).toBe(true);
@@ -242,21 +246,25 @@ describe("DlssgSession's shared memory", () => {
   }, TEST_TIMEOUT_MS);
 
   test("is released when the host refuses the setup", async () => {
-    await failure(openSession(servingHost(["--refuse", "3"])));
-    expect(isReleased(startedMappings.at(-1)!)).toBe(true);
+    const launched: string[] = [];
+    await failure(openSession(servingHost(["--refuse", String(HostStatus.setupFailed)], launched)));
+    expect(launched).toHaveLength(1);
+    expect(isReleased(launched[0]!)).toBe(true);
   }, TEST_TIMEOUT_MS);
 
   test("is released when the host dies before answering setup", async () => {
-    await failure(openSession(fakeHost(crashingCommand("opening the feature"))));
-    expect(isReleased(startedMappings.at(-1)!)).toBe(true);
+    const launched: string[] = [];
+    await failure(openSession(fakeHost(crashingCommand("opening the feature"), launched)));
+    expect(launched).toHaveLength(1);
+    expect(isReleased(launched[0]!)).toBe(true);
   }, TEST_TIMEOUT_MS);
 
   test("that cannot be created fails the open before any process starts", async () => {
     const options = { width: 1_000_000, height: 1_000_000, generatedCount: GENERATED_COUNT };
-    const startedBefore = startedMappings.length;
-    const message = await failure(openSession(servingHost([]), options));
+    const launched: string[] = [];
+    const message = await failure(openSession(servingHost([], launched), options));
     expect(message).toStartWith(`DLSS Frame Generation could not create the ${sharedFrameLayout(options).totalBytes}-byte shared memory its frames travel in: `);
-    expect(startedMappings).toHaveLength(startedBefore);
+    expect(launched).toEqual([]);
   }, TEST_TIMEOUT_MS);
 });
 
