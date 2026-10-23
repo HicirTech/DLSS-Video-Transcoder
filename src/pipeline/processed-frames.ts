@@ -47,7 +47,6 @@ export class ProcessedFrames implements FrameSource {
    */
   static open(options: ProcessedFramesOptions): ProcessedFrames {
     const sr = options.superResolution;
-    const nr = options.neuralRendering;
     const session = openGpu({ adapterIndex: options.adapterIndex, adapterUuid: options.adapterUuid });
     options.progress(0, `${describeGpu(session)}, for the steps before frame generation, whose host picks its own GPU`);
     let chain: Engine | null = null;
@@ -55,8 +54,10 @@ export class ProcessedFrames implements FrameSource {
       chain = createEngineChain(session, {
         width: options.decodeWidth,
         height: options.decodeHeight,
-        sr: sr ? { outputWidth: options.outputWidth, outputHeight: options.outputHeight, dllDir: sr.dllDir } : undefined,
-        nr: nr ? { settings: nr.settings, dllDir: nr.dllDir } : undefined,
+        outputWidth: options.outputWidth,
+        outputHeight: options.outputHeight,
+        superResolution: sr,
+        neuralRendering: options.neuralRendering,
         runtimeDir: options.runtimeDir,
         appDataPath: options.appDataPath,
       });
