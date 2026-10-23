@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { Alert, Box, Collapse, FormControlLabel, Paper, Stack, Switch, Typography } from "@mui/material";
+import { STEP_KINDS, type StepKind } from "../../../src/server/api-types";
+import { STEP_TITLES } from "../job-plan";
 
 interface StepCardProps {
-  /** Where the step runs in the job, from 1: the steps always run in this order. */
-  order: number;
-  title: string;
+  /** Which step this card switches; its number is its place in STEP_KINDS, the order steps always run in. */
+  step: StepKind;
   /** What the step does, in one line; shown whether it is on or off. */
   summary: string;
   on: boolean;
@@ -18,7 +19,7 @@ interface StepCardProps {
 }
 
 /** One processing step of a job: its own switch, and its settings below while it is on. */
-export function StepCard({ order, title, summary, on, onToggle, result, problem, children }: StepCardProps) {
+export function StepCard({ step, summary, on, onToggle, result, problem, children }: StepCardProps) {
   return (
     <Paper variant="outlined" sx={{ p: 1.5, borderColor: on ? "primary.main" : "divider" }}>
       <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
@@ -27,7 +28,7 @@ export function StepCard({ order, title, summary, on, onToggle, result, problem,
           control={<Switch checked={on} onChange={(_event, checked) => onToggle(checked)} />}
           label={
             <Typography variant="subtitle2" component="span" sx={{ fontWeight: 600 }}>
-              {order}. {title}
+              {STEP_KINDS.indexOf(step) + 1}. {STEP_TITLES[step]}
             </Typography>
           }
         />
