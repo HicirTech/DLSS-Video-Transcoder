@@ -2,7 +2,6 @@
  * GpuContext: the synchronous record, submit and wait path between the CPU and
  * D3D12 resources, with the staging buffers uploads and readbacks go through.
  */
-import { isFailure } from "./com.ts";
 import {
   D3D12CommandAllocator,
   D3D12CommandQueue,
@@ -14,9 +13,11 @@ import {
   D3D12_HEAP_TYPE_UPLOAD,
   D3D12_RESOURCE_STATE_COPY_DEST,
   D3D12_RESOURCE_STATE_COPY_SOURCE,
+  FENCE_WAIT_TIMEOUT_MS,
+  gpuTimeoutError,
   linearLayout,
 } from "./d3d12.ts";
-import { hex32, viewNative } from "./memory.ts";
+import { viewNative } from "./memory.ts";
 import { Win32Event } from "./win32.ts";
 
 interface BufferFill {
@@ -131,20 +132,14 @@ export class GpuContext {
   }
 
   /** Close the list, execute it, block until the GPU is done, and reopen the list. */
-  submitAndWait(timeoutMs = 30_000): void {
+  submitAndWait(timeoutMs = FENCE_WAIT_TIMEOUT_MS): void {
     this.list.close();
     this.queue.executeCommandList(this.list);
     this.fenceValue += 1n;
     this.queue.signal(this.fence, this.fenceValue);
-    if (this.fence.completedValue() < this.fenceValue) {
-      this.fence.setEventOnCompletion(this.fenceValue, this.event);
-      if (!this.event.wait(timeoutMs)) {
-        const reason = this.device.deviceRemovedReason();
-        throw new Error(`GPU did not finish within ${timeoutMs} ms (device removed reason ${hex32(reason)})`);
-      }
-    }
-    const removed = this.device.deviceRemovedReason();
-    if (isFailure(removed)) throw new Error(`D3D12 device removed: ${hex32(removed)}`);
+    if (!this.fence.waitFor(this.fenceValue, this.event, timeoutMs)) throw this.device.removedError("submitAndWait") ?? gpuTimeoutError("submitAndWait", timeoutMs);
+    const removed = this.device.removedError("submitAndWait");
+    if (removed) throw removed;
     this.allocator.reset();
     this.list.reset(this.allocator);
     // The recorded copies have executed; staging buffers can be reused.

@@ -23,6 +23,7 @@ export const LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR = 0x00000100;
 export const LOAD_LIBRARY_SEARCH_DEFAULT_DIRS = 0x00001000;
 export const INFINITE = 0xffffffff;
 export const WAIT_OBJECT_0 = 0;
+const WAIT_TIMEOUT = 0x00000102;
 
 export class NativeModule {
   private constructor(
@@ -71,15 +72,19 @@ export class Win32Event {
 
   constructor() {
     this.handle = asPtr(kernel32.symbols.CreateEventW(null, 0, 0, null));
-    if (this.handle === 0) throw new Error(`CreateEventW failed: ${hex32(lastError())}`);
+    if (this.handle === 0) {
+      const code = lastError();
+      throw new Error(`CreateEventW failed: Win32 error ${code} (${hex32(code)})`);
+    }
   }
 
   /** Block the calling thread until the event is signalled. Returns false on timeout. */
   wait(timeoutMs = INFINITE): boolean {
     const result = kernel32.symbols.WaitForSingleObject(this.handle as Pointer, timeoutMs);
     if (result === WAIT_OBJECT_0) return true;
-    if (result === 0x00000102) return false; // WAIT_TIMEOUT
-    throw new Error(`WaitForSingleObject failed: ${hex32(result)} (${hex32(lastError())})`);
+    if (result === WAIT_TIMEOUT) return false;
+    const code = lastError();
+    throw new Error(`WaitForSingleObject failed with ${hex32(result)}: Win32 error ${code} (${hex32(code)})`);
   }
 
   close(): void {
