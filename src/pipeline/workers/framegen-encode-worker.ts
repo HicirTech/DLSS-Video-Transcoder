@@ -59,11 +59,54 @@ function fail(message: string): void {
   post({ type: "error", message });
 }
 
-/** ffmpeg's own diagnostics, once it has exited (bounded wait so a live process cannot hang the error path). */
+/** How long the error path waits for ffmpeg's stderr after the kill, so its diagnostics reach the message without a wedged child holding up the failure report. */
+const STDERR_DRAIN_TIMEOUT_MS = 2000;
+
+/** ffmpeg's own diagnostics, once it has exited (bounded by STDERR_DRAIN_TIMEOUT_MS). */
 async function ffmpegDetail(): Promise<string> {
-  await Promise.race([stderrDrained, new Promise((resolve) => setTimeout(resolve, 2000))]);
+  await Promise.race([stderrDrained, new Promise((resolve) => setTimeout(resolve, STDERR_DRAIN_TIMEOUT_MS))]);
   const text = stderrText.trim();
   return text ? `: ${text}` : "";
+}
+
+/** Kills ffmpeg and reports the failed encode with its own diagnostics. */
+async function failEncode(error: unknown): Promise<void> {
+  try { proc?.kill(); } catch {}
+  fail(`ffmpeg encode failed${await ffmpegDetail()} (${(error as Error).message ?? String(error)})`);
+}
+
+/** Opens NVENC for `config`, or says why the rawvideo pipe is used instead. */
+function openNvenc(config: NonNullable<FramegenEncodeOpen["nvenc"]>): { encoder: NvencEncoder | null; note: string } {
+  try {
+    return { encoder: NvencEncoder.open({ ...config, ordinal: FRAMEGEN_CUDA_DEVICE }), note: `encode: NVENC ${config.codec} (GPU, mux-only pipe, encode thread)` };
+  } catch (error) {
+    return { encoder: null, note: `encode: NVENC direct path unavailable (${(error as Error).message}); using rawvideo pipe` };
+  }
+}
+
+/** Writes into ffmpeg's stdin, waiting while the pipe pushes back. */
+async function writeToSink(bytes: Uint8Array): Promise<void> {
+  const written = sink!.write(bytes);
+  if (written instanceof Promise) await written;
+}
+
+/** Flushes NVENC, closes ffmpeg's stdin and reports how ffmpeg exited. */
+async function finishEncode(): Promise<void> {
+  if (stopped || !sink || !proc) return;
+  // Flush anything NVENC still holds before closing the pipe.
+  const tail = enc?.finish();
+  if (tail?.length) await writeToSink(tail);
+  sink.end();
+  await stderrDrained;
+  const code = await proc.exited;
+  enc?.close();
+  enc = null;
+  if (code !== 0) {
+    fail(ffmpegFailedMessage("encode", code, stderrText));
+    return;
+  }
+  stopped = true;
+  post({ type: "done" });
 }
 
 self.onmessage = (event: MessageEvent<FramegenEncodeIn>) => {
@@ -71,15 +114,8 @@ self.onmessage = (event: MessageEvent<FramegenEncodeIn>) => {
   if (m.type === "open") {
     try {
       let note = "";
-      if (m.nvenc && probeNvencCaps(FRAMEGEN_CUDA_DEVICE).available) {
-        try {
-          enc = NvencEncoder.open({ ...m.nvenc, ordinal: FRAMEGEN_CUDA_DEVICE });
-          note = `encode: NVENC ${m.nvenc.codec} (GPU, mux-only pipe, encode thread)`;
-        } catch (error) {
-          enc = null;
-          note = `encode: NVENC direct path unavailable (${(error as Error).message}); using rawvideo pipe`;
-        }
-      }
+      // On this thread so the synchronous NVENC encode stays off the coordinator; its CUDA context is created here.
+      if (m.nvenc && probeNvencCaps(FRAMEGEN_CUDA_DEVICE).available) ({ encoder: enc, note } = openNvenc(m.nvenc));
       proc = Bun.spawn([m.ffmpeg, ...(enc ? m.nvencArgs : m.rawArgs)], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
       sink = proc.stdin as { write(b: Uint8Array): unknown; end(): unknown };
       // Drain stderr for the whole run so ffmpeg can never block on a full pipe.
@@ -97,43 +133,12 @@ self.onmessage = (event: MessageEvent<FramegenEncodeIn>) => {
     chain = chain
       .then(async () => {
         if (stopped || !sink) return;
-        const payload = enc ? enc.encode(m.rgba) : m.rgba;
-        const written = sink.write(payload);
-        if (written instanceof Promise) await written;
+        await writeToSink(enc ? enc.encode(m.rgba) : m.rgba);
         post({ type: "encoded" });
       })
-      .catch(async (error) => {
-        try { proc?.kill(); } catch {}
-        fail(`ffmpeg encode failed${await ffmpegDetail()} (${(error as Error).message ?? String(error)})`);
-      });
+      .catch(failEncode);
   } else if (m.type === "finish") {
-    chain = chain
-      .then(async () => {
-        if (stopped || !sink || !proc) return;
-        // Flush anything NVENC still holds before closing the pipe.
-        if (enc) {
-          const tail = enc.finish();
-          if (tail.length) {
-            const written = sink.write(tail);
-            if (written instanceof Promise) await written;
-          }
-        }
-        sink.end();
-        await stderrDrained;
-        const code = await proc.exited;
-        enc?.close();
-        enc = null;
-        if (code !== 0) {
-          fail(ffmpegFailedMessage("encode", code, stderrText));
-          return;
-        }
-        stopped = true;
-        post({ type: "done" });
-      })
-      .catch(async (error) => {
-        try { proc?.kill(); } catch {}
-        fail(`ffmpeg encode failed${await ffmpegDetail()} (${(error as Error).message ?? String(error)})`);
-      });
+    chain = chain.then(finishEncode).catch(failEncode);
   } else if (m.type === "abort") {
     // Immediate, not chained: stop feeding ffmpeg, kill it and release the
     // output file so the caller can delete it, then acknowledge.
