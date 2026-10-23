@@ -502,10 +502,9 @@ async function runPipeline(
 ): Promise<PipelineRun> {
   const capacity = Math.floor(DEFAULT_BUFFER_LIMIT / frameBytes);
   const noneGenerated = () => stages.every((stage) => stage.generatedTotal === 0);
-  const check = (): void => {
-    // Fail fast before spending the whole encode: nothing synthesised after
-    // several real intervals means the runtime has disabled generation.
-    if (expectsGeneration && stages[0]!.intervals >= FG_PROBE_INTERVALS && noneGenerated()) throw new FrameGenDisabledError(noFramesGeneratedMessage(plan, { disabledFrames: stages[0]!.session.disabledFrames, hagsEnabled: caps.hagsEnabled }), plan);
+  /** Throws once `minimumIntervals` real intervals have passed with nothing synthesised: the runtime has disabled generation. */
+  const failIfNoneGenerated = (minimumIntervals: number): void => {
+    if (expectsGeneration && stages[0]!.intervals >= minimumIntervals && noneGenerated()) throw new FrameGenDisabledError(noFramesGeneratedMessage(plan, { disabledFrames: stages[0]!.session.disabledFrames, hagsEnabled: caps.hagsEnabled }), plan);
   };
   const params: RunParams = {
     reader,
@@ -519,7 +518,9 @@ async function runPipeline(
       const { fraction, message, frames } = estimatedFrameProgress(count, expectedDecoded);
       progress(fraction, message, frames);
     },
-    check,
+    // Fail fast before spending the whole encode: nothing synthesised after
+    // several real intervals means the runtime has disabled generation.
+    check: () => failIfNoneGenerated(FG_PROBE_INTERVALS),
     signal: options.signal,
   };
   const maxGenerated = Math.max(0, ...stages.map((s) => s.generatedCount));
@@ -539,7 +540,7 @@ async function runPipeline(
     progress(0.97, `pipeline busy (s) over ${wall.toFixed(1)} s wall: ${parts.join(", ")}`);
   }
   // Clips shorter than the probe window still must not pass off a duplicate-frame resample as generation.
-  if (expectsGeneration && stages[0]!.intervals >= 1 && noneGenerated()) throw new FrameGenDisabledError(noFramesGeneratedMessage(plan, { disabledFrames: stages[0]?.session.disabledFrames ?? 0, hagsEnabled: caps.hagsEnabled }), plan);
+  failIfNoneGenerated(1);
   // Not before the checks above: a FrameGenDisabledError from them makes an
   // "auto" job re-run as a cascade, which must still be cancellable.
   options.onFinishing?.();
