@@ -1,11 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { buildNvencProbeArgs, cpuSiblingCodec, FFMPEG_NVENC_ENCODERS, isNvenc, nvencGpuArgs, resolveEncodeCodec } from "../src/pipeline/encode-select.ts";
-import { NVENC_MAX_SIDE } from "../src/server/api-types.ts";
+import { buildNvencProbeArgs, type Codec, cpuSiblingCodec, FFMPEG_NVENC_ENCODERS, isNvenc, nvencGpuArgs, resolveEncodeCodec } from "../src/pipeline/encode-select.ts";
+import { encoderArgs } from "../src/pipeline/ffmpeg-args.ts";
+import { NVENC_PRESET } from "../src/pipeline/nvenc.ts";
+import { ENCODE_CODECS, type EncodeSettings, NVENC_MAX_SIDE } from "../src/server/api-types.ts";
 import { nvencLimitExceeded } from "../src/server/output-size.ts";
 
 const HD = { width: 1920, height: 1080 };
-import { encoderArgs } from "../src/pipeline/ffmpeg-args.ts";
-import { NVENC_PRESET } from "../src/pipeline/nvenc.ts";
+const CPU_CODECS = ENCODE_CODECS.filter((codec) => !isNvenc(codec));
+/** An ffmpeg that is not there: the resolveEncodeCodec paths below never run it, or take its failed run as the fallback case. */
+const NO_SUCH_FFMPEG = "C:/nonexistent/ffmpeg.exe";
+
+/** The encode settings these tests vary: the codec and the quality, the rest held fixed. */
+function encodeSettings(codec: Codec, quality = 20): EncodeSettings {
+  return { codec, quality, container: "mp4", copyAudio: false };
+}
 
 describe("encode-select", () => {
   test("isNvenc identifies the hardware encoders", () => {
@@ -60,12 +68,16 @@ describe("encode-select", () => {
     }
   });
 
-  test("encoderArgs holds the quality inside 0..51 and rounds it", () => {
-    const crf = (quality: number): string => {
-      const args = encoderArgs({ codec: "h264", quality, container: "mp4", copyAudio: false }, 0);
-      return args[args.indexOf("-crf") + 1]!;
-    };
-    expect([crf(-4), crf(18), crf(20.6), crf(99)]).toEqual(["0", "18", "21", "51"]);
+  test("encoderArgs holds the quality inside 0..51, rounds it, and gives it to each encoder's quality flag", () => {
+    const flags = { h264: "-crf", hevc: "-crf", av1: "-crf", h264_nvenc: "-cq", hevc_nvenc: "-cq", av1_nvenc: "-cq" } as const satisfies Record<Codec, string>;
+    for (const [codec, flag] of Object.entries(flags) as [Codec, string][]) {
+      // The includes guard: a missing flag would make indexOf -1 and read args[0] as the value.
+      const value = (quality: number): string | undefined => {
+        const args = encoderArgs(encodeSettings(codec, quality), 0);
+        return args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined;
+      };
+      expect([value(-4), value(18), value(20.6), value(33), value(99)], codec).toEqual(["0", "18", "21", "33", "51"]);
+    }
   });
 
   test("encoderArgs refuses a codec the API does not list, naming the ones it does", () => {
