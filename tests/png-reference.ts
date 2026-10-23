@@ -46,16 +46,27 @@ export function chunk(type: string, data: ArrayLike<number> = []): Uint8Array<Ar
   return out;
 }
 
-export function ihdr(width: number, height: number, bitDepth: number, colorType: number, interlace = 0): Uint8Array<ArrayBuffer> {
+/** IHDR as readIhdr names its fields; each method byte defaults to 0, which a valid file has (interlace 1 is Adam7). */
+interface IhdrFields {
+  width: number;
+  height: number;
+  bitDepth: number;
+  colorType: number;
+  compressionMethod?: number;
+  filterMethod?: number;
+  interlaceMethod?: number;
+}
+
+export function ihdr({ width, height, bitDepth, colorType, compressionMethod = 0, filterMethod = 0, interlaceMethod = 0 }: IhdrFields): Uint8Array<ArrayBuffer> {
   const data = new Uint8Array(13);
   const view = new DataView(data.buffer);
   view.setUint32(0, width);
   view.setUint32(4, height);
   data[8] = bitDepth;
   data[9] = colorType;
-  data[10] = 0; // compression method
-  data[11] = 0; // filter method
-  data[12] = interlace;
+  data[10] = compressionMethod;
+  data[11] = filterMethod;
+  data[12] = interlaceMethod;
   return chunk("IHDR", data);
 }
 
