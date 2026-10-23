@@ -1,12 +1,16 @@
 /** PNG decoder: inflates under a limit derived from the header, then unfilters and converts each pass to 8-bit RGBA. */
+import { constants as bufferConstants } from "node:buffer";
 import { inflateSync as nodeInflate } from "node:zlib";
 import { channelsFor, parseChunks, type ParsedFile, type PngHeader } from "./chunks.ts";
 import { convertRow, type PixelFormat, type RowSpan } from "./convert-row.ts";
 import { PngError, type RgbaImage } from "./types.ts";
 import { isFilterType, unfilterRow } from "./unfilter.ts";
 
-/** zlib refuses a `maxOutputLength` above 2^32, so an image needing more filtered data than this cannot be decoded here. */
-const MAX_INFLATE_BYTES = 4294967296;
+/**
+ * node:zlib refuses a `maxOutputLength` above the runtime's Buffer MAX_LENGTH (2^32 on Bun 1.4.2), so an image
+ * needing more filtered data than this cannot be decoded here.
+ */
+const MAX_INFLATE_BYTES = bufferConstants.MAX_LENGTH;
 
 /** The pixels one pass carries: every xStep-th column from xStart, on every yStep-th row from yStart. */
 type PassGrid = readonly [xStart: number, yStart: number, xStep: number, yStep: number];
