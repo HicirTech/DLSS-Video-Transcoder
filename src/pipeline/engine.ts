@@ -27,8 +27,6 @@ export interface FrameInput {
 
 export interface Engine {
   readonly name: string;
-  readonly width: number;
-  readonly height: number;
   readonly outputWidth: number;
   readonly outputHeight: number;
   process(frame: FrameInput): Uint8Array;
@@ -69,8 +67,8 @@ class BypassEngine implements Engine {
 
   constructor(
     private readonly session: GpuSession,
-    readonly width: number,
-    readonly height: number,
+    private readonly width: number,
+    private readonly height: number,
   ) {
     this.outputWidth = width;
     this.outputHeight = height;
@@ -158,8 +156,6 @@ export function createEngineChain(session: GpuSession, options: EngineChainOptio
 /** Super Resolution followed by Neural Rendering: NR enhances each frame SR has upscaled. */
 class ChainEngine implements Engine {
   readonly name = "sr+nr";
-  readonly width: number;
-  readonly height: number;
   readonly outputWidth: number;
   readonly outputHeight: number;
 
@@ -167,8 +163,6 @@ class ChainEngine implements Engine {
     private readonly sr: Engine,
     private readonly nr: Engine,
   ) {
-    this.width = sr.width;
-    this.height = sr.height;
     this.outputWidth = nr.outputWidth;
     this.outputHeight = nr.outputHeight;
   }

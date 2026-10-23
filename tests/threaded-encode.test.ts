@@ -18,8 +18,6 @@ function start(signal: AbortSignal, onFinishing?: () => void) {
   const counts = { workersCreated: 0, engineCalls: 0 };
   const engine: Engine = {
     name: "pass-through",
-    width: 2,
-    height: 2,
     outputWidth: 2,
     outputHeight: 2,
     process: ({ rgba }) => {
