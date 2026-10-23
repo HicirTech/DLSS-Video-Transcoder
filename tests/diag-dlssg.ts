@@ -14,6 +14,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { flag, numberOption, option } from "../src/cli/args.ts";
 import { parseVersionInfo } from "../src/native/version-info.ts";
 import {
   DlssgFeature,
@@ -27,6 +28,7 @@ import {
 import { callerDir as defaultCallerDir, featureDir, RUNTIME_DIR } from "../src/paths.ts";
 import { encodeMotionR16G16 } from "../src/pipeline/half-float.ts";
 import { openGpu } from "../src/pipeline/gpu.ts";
+import { SETTING_RANGES } from "../src/server/api-types.ts";
 
 const WIDTH = 1280;
 const HEIGHT = 720;
@@ -68,14 +70,9 @@ interface GeneratedCountReport {
   pass: boolean;
 }
 
-function option(name: string, fallback: string): string {
-  const index = process.argv.indexOf(name);
-  return index >= 0 && process.argv[index + 1] !== undefined ? process.argv[index + 1]! : fallback;
-}
-
-const runtimeDir = option("--runtime-dir", featureDir(RUNTIME_DIR, "fg"));
-const callerDir = option("--caller-dir", defaultCallerDir(RUNTIME_DIR));
-const dumpDir = option("--dump", "");
+const runtimeDir = option(process.argv, "--runtime-dir") ?? featureDir(RUNTIME_DIR, "fg");
+const callerDir = option(process.argv, "--caller-dir") ?? defaultCallerDir(RUNTIME_DIR);
+const dumpDir = option(process.argv, "--dump") ?? "";
 
 /**
  * Measured with the flat plane depth on nvngx_dlssg.dll 310.9.1: N <= 3 stays within 0.034 of
@@ -258,9 +255,8 @@ function printReport(report: GeneratedCountReport): void {
   }
 }
 
-const requested = option("--generated", "");
-if (requested) {
-  const report = runOneGeneratedCount(Number(requested));
+if (flag(process.argv, "--generated")) {
+  const report = runOneGeneratedCount(numberOption(process.argv, "--generated", { integer: true, min: 1, max: SETTING_RANGES.multiplier.max - 1, fallback: 1 }));
   printReport(report);
   console.log(JSON.stringify(report));
   process.exit(report.pass ? 0 : 1);

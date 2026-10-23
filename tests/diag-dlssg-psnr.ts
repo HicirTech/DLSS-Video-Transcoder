@@ -13,6 +13,7 @@
  *
  *   bun run tests/diag-dlssg-psnr.ts [--input <video>] [--generated N (3 = 4x)] [--kept-frames K (0 = whole clip)]
  */
+import { numberOption, option } from "../src/cli/args.ts";
 import { featureDir, RUNTIME_DIR } from "../src/paths.ts";
 import { DlssgSession } from "../src/pipeline/dlssg.ts";
 import { HOST_PROCESS_NAME } from "../src/pipeline/dlssg-host-launch.ts";
@@ -20,8 +21,9 @@ import { createMotionEstimator } from "../src/pipeline/flow.ts";
 import { FrameReader } from "../src/pipeline/frame-reader.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "../src/pipeline/framegen-device.ts";
 import { tryCreateNvofBackend } from "../src/pipeline/nvof.ts";
-import { findTool } from "../src/pipeline/tools.ts";
+import { requireFfmpegTools } from "../src/pipeline/tools.ts";
 import { probeVideo } from "../src/pipeline/video-probe.ts";
+import { SETTING_RANGES } from "../src/server/api-types.ts";
 
 /** Median PSNR of 2x cascade stages on 2.mp4 decimated x4 (issue #93), the bar native 4x must reach. */
 const CASCADE_MEDIAN_DB = 38.73;
@@ -29,14 +31,10 @@ const CASCADE_MEDIAN_DB = 38.73;
 const CASCADE_BAR_GENERATED = 3;
 const CLOSE_TIMEOUT_MS = 5_000;
 
-function option(name: string, fallback: string): string {
-  const index = process.argv.indexOf(name);
-  return index >= 0 && process.argv[index + 1] !== undefined ? process.argv[index + 1]! : fallback;
-}
-
-const input = option("--input", "W:/GPUVideoProcessor/2.mp4");
-const generatedCount = Number(option("--generated", String(CASCADE_BAR_GENERATED)));
-const keptFrameLimit = Number(option("--kept-frames", "0"));
+const input = option(process.argv, "--input") ?? "W:/GPUVideoProcessor/2.mp4";
+// A multiplier of M generates M - 1 frames per interval.
+const generatedCount = numberOption(process.argv, "--generated", { integer: true, min: 1, max: SETTING_RANGES.multiplier.max - 1, fallback: CASCADE_BAR_GENERATED });
+const keptFrameLimit = numberOption(process.argv, "--kept-frames", { integer: true, min: 0, max: Number.MAX_SAFE_INTEGER, fallback: 0 });
 const sourceStep = generatedCount + 1;
 
 /** RGB PSNR in dB of two RGBA8 frames of one size; alpha is ignored. Infinity when they are identical. */
@@ -56,9 +54,19 @@ function percentile(sorted: readonly number[], fraction: number): number {
   return sorted[Math.min(sorted.length - 1, Math.floor(fraction * sorted.length))]!;
 }
 
-const ffmpeg = findTool("ffmpeg");
-const ffprobe = findTool("ffprobe");
-if (!ffmpeg || !ffprobe) throw new Error("ffmpeg and ffprobe are required (install with `winget install Gyan.FFmpeg` or set FFMPEG_PATH / FFPROBE_PATH).");
+/** Scores one interval's generated frames against the dropped real frames, position by position. */
+function scoreInterval(generated: readonly Uint8Array[], dropped: readonly Uint8Array[]): { scores: number[]; bestMatchInPlace: number } {
+  const intervalScores: number[] = [];
+  let bestMatchInPlace = 0;
+  generated.forEach((image, position) => {
+    const againstEach = dropped.map((real) => psnr(image, real));
+    intervalScores.push(againstEach[position]!);
+    if (Math.max(...againstEach) === againstEach[position]) bestMatchInPlace++;
+  });
+  return { scores: intervalScores, bestMatchInPlace };
+}
+
+const { ffmpeg, ffprobe } = requireFfmpegTools("the DLSS-G PSNR check");
 const info = probeVideo(ffprobe, input, ffmpeg);
 const { width, height } = info;
 const frameBytes = width * height * 4;
