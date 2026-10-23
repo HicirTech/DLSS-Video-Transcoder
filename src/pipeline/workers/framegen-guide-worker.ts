@@ -3,7 +3,7 @@
  * NVOFA session, previous segment and timestamp, scene-cut count) or, as a packer, upsamples a stage's grid flow and
  * packs it as R16G16_FLOAT.
  */
-import { createMotionEstimator, type MotionEstimator } from "../flow.ts";
+import { type AnalyzedMotion, createMotionEstimator, type MotionEstimator } from "../flow.ts";
 import { flowGridSize } from "../flow-grid.ts";
 import { packFlowResizedR16G16 } from "../flow-resize.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "../framegen-device.ts";
@@ -87,23 +87,19 @@ self.onmessage = (event: MessageEvent<GuideIn>) => {
       let segment = m.segment;
       // A segment change (timestamp discontinuity, or a cut found by an earlier stage) is a known reset.
       let forceReset = previous !== null && segment !== previous.segment;
-      const guide = packInline
-        ? (() => {
-            const packed = estimator.processPacked(m.rgba, forceReset);
-            return { small: null as Float32Array | null, half: packed.half, reset: packed.reset, sceneScore: packed.sceneScore, duplicate: packed.duplicate, confidence: packed.confidence };
-          })()
-        : estimator.analyzePacked(m.rgba, forceReset);
-      if (previous !== null && detectSourceCuts && guide.reset && !forceReset) {
+      const guide: AnalyzedMotion = packInline ? { kind: "packed", motion: estimator.processPacked(m.rgba, forceReset) } : estimator.analyzePacked(m.rgba, forceReset);
+      const verdict = guide.kind === "packed" ? guide.motion : guide.verdict;
+      if (previous !== null && detectSourceCuts && verdict.reset && !forceReset) {
         segment = previous.segment + 1;
         forceReset = true;
         sceneCuts++;
       }
-      const reset = previous === null || forceReset || guide.reset;
+      const reset = previous === null || forceReset || verdict.reset;
       const before = previous;
       previous = { segment, tsNum: m.tsNum, tsDen: m.tsDen };
       // Sent back transferred, not copied. Copy the grid flow first: transferring it must not detach a buffer the backend reuses.
-      const small = guide.small ? (guide.small.slice().buffer as ArrayBuffer) : null;
-      const half = guide.half ? (guide.half.buffer as ArrayBuffer) : null;
+      const small = guide.kind === "grid" ? (guide.small.slice().buffer as ArrayBuffer) : null;
+      const half = guide.kind === "packed" && guide.motion.half ? (guide.motion.half.buffer as ArrayBuffer) : null;
       const transfer: ArrayBuffer[] = [];
       if (small) transfer.push(small);
       if (half) transfer.push(half);
@@ -123,7 +119,7 @@ self.onmessage = (event: MessageEvent<GuideIn>) => {
       );
     } else if (m.type === "pack") {
       if (!packer) throw new Error("frame-generation packer used before open");
-      const packed = packFlowResizedR16G16(new Float32Array(m.small), packer.flowW, packer.flowH, packer.width, packer.height);
+      const packed = packFlowResizedR16G16(new Float32Array(m.small), { width: packer.flowW, height: packer.flowH }, { width: packer.width, height: packer.height });
       post({ type: "packed", id: m.id, half: packed.buffer as ArrayBuffer }, [packed.buffer as ArrayBuffer]);
     } else if (m.type === "close") {
       estimator?.close();
