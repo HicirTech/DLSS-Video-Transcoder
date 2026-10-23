@@ -8,10 +8,12 @@
  */
 import { frameProgress, type ProgressReporter } from "./frame-progress.ts";
 import type { WorkerPairRun } from "./worker-pair-run.ts";
+import type { AsyncEncodeOut } from "./workers/async-encode-worker.ts";
 import type { DecodeCredit, DecodeOut, DecodeStart } from "./workers/decode-worker.ts";
+import type { EncodeOut } from "./workers/encode-worker.ts";
 
-/** What both encode workers answer, whatever else an "encoded" ack carries. */
-type EncodeReply = { type: "opened" } | { type: "encoded" } | { type: "done" } | { type: "error"; message: string };
+/** What either encode worker answers. */
+type EncodeReply = EncodeOut | AsyncEncodeOut;
 
 /** What a finished run reports. */
 export interface FrameCounts {
@@ -20,10 +22,7 @@ export interface FrameCounts {
 }
 
 /** One frame as the decode worker posted it. */
-interface DecodedFrame {
-  index: number;
-  buf: ArrayBuffer;
-}
+type DecodedFrame = Extract<DecodeOut, { type: "frame" }>;
 
 interface FrameFlow<Ack extends { type: "encoded" }> {
   decodeWorker: Worker;
