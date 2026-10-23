@@ -47,11 +47,7 @@ function namedRate(name: string): Rational | undefined {
  * Resolve a target rate: a named choice ("59.94"), an exact "num/den", or a
  * decimal / integer string. Throws with the list of named choices on garbage.
  */
-export function resolveTargetRate(value: string | Rational): Rational {
-  if (typeof value !== "string") {
-    if (value.num <= 0n || value.den <= 0n) throw new Error("Output FPS must be positive.");
-    return value;
-  }
+export function resolveTargetRate(value: string): Rational {
   const key = value.trim();
   let rate = namedRate(key);
   if (!rate) {
