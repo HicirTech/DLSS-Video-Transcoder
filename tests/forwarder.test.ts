@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test";
 import { dlopen, FFIType, ptr } from "bun:ffi";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildForwarderDll, FORWARDER_EXPORTS, stackAllocationUnwindCodes } from "../src/ngx/forwarder.ts";
 import { writeForwarder, writeForwarderSync } from "../src/ngx/forwarder-install.ts";
-import { loadForwarder, selfTestForwarder, shimPath, type ForwarderModule } from "../src/ngx/forwarder-runtime.ts";
-import { parsePe, type PeInfo } from "../src/native/pe.ts";
+import { loadForwarder, prepareForwarderSync, selfTestForwarder, shimPath, type ForwarderModule } from "../src/ngx/forwarder-runtime.ts";
+import { parsePe, rvaToOffset, type PeInfo } from "../src/native/pe.ts";
 
 // The three stubs that call through a slot; each reserves shadow space plus three stack arguments,
 // padded so the inner call is 16-byte aligned: 0x20 + 3 * 8 + 8 = 0x40, rounded to 8 mod 16.
@@ -15,31 +15,28 @@ const CALL_STUB_FRAME = 0x48;
 const SUB_RSP_IMM8 = [0x48, 0x83, 0xec, CALL_STUB_FRAME];
 const ADD_RSP_IMM8_RET = [0x48, 0x83, 0xc4, CALL_STUB_FRAME, 0xc3];
 
+/** IMAGE_DIRECTORY_ENTRY_EXCEPTION (winnt.h): the data directory of the .pdata table. */
+const EXCEPTION_DIRECTORY = 3;
+/** IMAGE_RUNTIME_FUNCTION_ENTRY (winnt.h): BeginAddress, EndAddress, UnwindInfoAddress. */
+const RUNTIME_FUNCTION_BYTES = 12;
+// CONTEXT (winnt.h, AMD64): 1232 bytes, 16-byte aligned, Rsp at 0x98 and Rip at 0xF8.
+const CONTEXT_BYTES = 1232;
+const CONTEXT_ALIGNMENT = 16;
+const CONTEXT_RSP_OFFSET = 0x98;
+const CONTEXT_RIP_OFFSET = 0xf8;
+
 interface RuntimeFunction {
   begin: number;
   end: number;
   unwindInfo: number;
 }
 
-function fileOffset(info: PeInfo, rva: number): number {
-  const section = info.sections.find((s) => rva >= s.virtualAddress && rva < s.virtualAddress + s.virtualSize);
-  if (!section) throw new Error(`RVA 0x${rva.toString(16)} is outside every section`);
-  return section.rawPointer + rva - section.virtualAddress;
-}
-
-/** Data directory 3 (exception table) of a PE32+ image: PE format, optional header offset 136. */
-function exceptionDirectory(bytes: Uint8Array): { rva: number; size: number } {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const optionalHeader = view.getUint32(0x3c, true) + 4 + 20;
-  return { rva: view.getUint32(optionalHeader + 136, true), size: view.getUint32(optionalHeader + 140, true) };
-}
-
 function runtimeFunctions(bytes: Uint8Array, info: PeInfo): RuntimeFunction[] {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const directory = exceptionDirectory(bytes);
+  const directory = info.dataDirectories[EXCEPTION_DIRECTORY]!;
   const entries: RuntimeFunction[] = [];
-  for (let offset = 0; offset < directory.size; offset += 12) {
-    const at = fileOffset(info, directory.rva + offset);
+  for (let offset = 0; offset < directory.size; offset += RUNTIME_FUNCTION_BYTES) {
+    const at = rvaToOffset(info.sections, directory.rva + offset);
     entries.push({ begin: view.getUint32(at, true), end: view.getUint32(at + 4, true), unwindInfo: view.getUint32(at + 8, true) });
   }
   return entries;
@@ -61,9 +58,9 @@ test("every call stub has a sorted RUNTIME_FUNCTION in .pdata with a one-code UN
   const info = parsePe(built.bytes);
   const text = info.sections.find((s) => s.name === ".text")!;
   const pdata = info.sections.find((s) => s.name === ".pdata")!;
-  const directory = exceptionDirectory(built.bytes);
+  const directory = info.dataDirectories[EXCEPTION_DIRECTORY]!;
   expect(directory.rva).toBe(pdata.virtualAddress);
-  expect(directory.size).toBe(CALL_STUBS.length * 12);
+  expect(directory.size).toBe(CALL_STUBS.length * RUNTIME_FUNCTION_BYTES);
   expect(directory.rva + directory.size).toBeLessThanOrEqual(pdata.virtualAddress + pdata.virtualSize);
 
   const entries = runtimeFunctions(built.bytes, info);
@@ -73,12 +70,12 @@ test("every call stub has a sorted RUNTIME_FUNCTION in .pdata with a one-code UN
     if (index > 0) expect(entry.begin).toBeGreaterThanOrEqual(entries[index - 1]!.end);
     expect(entry.begin).toBeGreaterThanOrEqual(text.virtualAddress);
     expect(entry.end).toBeLessThanOrEqual(text.virtualAddress + text.virtualSize);
-    const code = built.bytes.subarray(fileOffset(info, entry.begin), fileOffset(info, entry.begin) + (entry.end - entry.begin));
+    const code = built.bytes.subarray(rvaToOffset(info.sections, entry.begin), rvaToOffset(info.sections, entry.begin) + (entry.end - entry.begin));
     expect([...code.subarray(0, 4)]).toEqual(SUB_RSP_IMM8);
     expect([...code.subarray(code.length - 5)]).toEqual(ADD_RSP_IMM8_RET);
 
     expect(entry.unwindInfo % 4).toBe(0);
-    const unwind = built.bytes.subarray(fileOffset(info, entry.unwindInfo), fileOffset(info, entry.unwindInfo) + 8);
+    const unwind = built.bytes.subarray(rvaToOffset(info.sections, entry.unwindInfo), rvaToOffset(info.sections, entry.unwindInfo) + 8);
     expect(unwind[0]).toBe(1); // Version 1, Flags 0
     expect(unwind[1]).toBe(SUB_RSP_IMM8.length); // SizeOfProlog: the sub rsp
     expect(unwind[2]).toBe(1); // CountOfCodes
@@ -113,9 +110,8 @@ test("the unwinder finds each loaded stub and unwinds it to its caller's return 
     fwd = loadForwarder(path);
     const info = parsePe(built.bytes);
     const imageBase = fwd.module.handle;
-    // CONTEXT (winnt.h, AMD64): 1232 bytes, 16-byte aligned; Rsp @0x98, Rip @0xF8.
-    const contextStorage = new Uint8Array(1232 + 16);
-    const context = contextStorage.subarray((16 - (ptr(contextStorage) % 16)) % 16).subarray(0, 1232);
+    const contextStorage = new Uint8Array(CONTEXT_BYTES + CONTEXT_ALIGNMENT);
+    const context = contextStorage.subarray((CONTEXT_ALIGNMENT - (ptr(contextStorage) % CONTEXT_ALIGNMENT)) % CONTEXT_ALIGNMENT).subarray(0, CONTEXT_BYTES);
     const contextView = new DataView(context.buffer, context.byteOffset, context.byteLength);
     // A synthetic stack: filler everywhere, the caller's return address only where the frame puts it.
     const stack = new Uint8Array(512);
@@ -131,13 +127,13 @@ test("the unwinder finds each loaded stub and unwinds it to its caller's return 
       stack.fill(0x5a);
       stackView.setBigUint64(rspOffset + returnAddressAt, returnAddress, true);
       context.fill(0);
-      contextView.setBigUint64(0x98, BigInt(rsp), true);
-      contextView.setBigUint64(0xf8, BigInt(controlPc), true);
+      contextView.setBigUint64(CONTEXT_RSP_OFFSET, BigInt(rsp), true);
+      contextView.setBigUint64(CONTEXT_RIP_OFFSET, BigInt(controlPc), true);
       const entry = kernel32.symbols.RtlLookupFunctionEntry(controlPc, foundBase, null);
       expect(Number(entry)).not.toBe(0);
       expect(Number(new DataView(foundBase.buffer).getBigUint64(0, true))).toBe(imageBase);
       kernel32.symbols.RtlVirtualUnwind(0, imageBase, controlPc, entry, context, handlerData, establisherFrame, null);
-      return { rip: contextView.getBigUint64(0xf8, true), rsp: contextView.getBigUint64(0x98, true) };
+      return { rip: contextView.getBigUint64(CONTEXT_RIP_OFFSET, true), rsp: contextView.getBigUint64(CONTEXT_RSP_OFFSET, true) };
     };
 
     for (const entry of runtimeFunctions(built.bytes, info)) {
@@ -219,14 +215,15 @@ for (const { name, write } of SHIM_WRITERS) {
 }
 
 test("shim loads and forwards calls with arguments intact", () => {
-  const dir = `${import.meta.dir}\\..\\runtime\\caller`;
-  mkdirSync(dir, { recursive: true });
-  const path = `${dir}\\nvngx.dll`;
-  const built = buildForwarderDll();
-  require("node:fs").writeFileSync(path, built.bytes);
-  const fwd = loadForwarder(path);
-  const result = selfTestForwarder(fwd);
-  expect(result.detail).toContain("pass through");
-  expect(result.ok).toBe(true);
-  fwd.module.free();
+  const dir = mkdtempSync(join(tmpdir(), "forwarder-selftest-"));
+  let fwd: ForwarderModule | undefined;
+  try {
+    fwd = prepareForwarderSync(dir).forwarder;
+    const result = selfTestForwarder(fwd);
+    expect(result.detail).toContain("pass through");
+    expect(result.ok).toBe(true);
+  } finally {
+    fwd?.module.free();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
