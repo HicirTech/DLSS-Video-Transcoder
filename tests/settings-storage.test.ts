@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, DEFAULT_SR_STEP, type SettingsDefaults } from "../src/server/api-types.ts";
-import { defaultSettings, loadSavedSettings, withServerDefaults } from "../web/src/hooks/useSettings.tsx";
+import { defaultSettings, loadSavedSettings, withServerDefaults } from "../web/src/stored-settings.ts";
 
 /** What a build with one engine per job saved: its NR settings carried the warm-up, its one scale served every engine. */
 function oneEngineCopy(parts: { encode?: Record<string, unknown>; scale?: Record<string, unknown>; nr?: Record<string, unknown> } = {}): string {
