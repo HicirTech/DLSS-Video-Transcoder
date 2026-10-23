@@ -1,8 +1,13 @@
 /**
- * CPU bilinear resize for tightly packed 8-bit frames, plus the alpha split the
- * still path needs around the neural engines. Used by the still-image path to
- * reach the engine's working size; video pre-scales in ffmpeg instead.
+ * CPU bilinear resize for tightly packed 8-bit frames, used by the still-image path to reach the engine's working
+ * size; video pre-scales in ffmpeg instead.
  */
+
+/** A frame's size in pixels. */
+interface Size {
+  width: number;
+  height: number;
+}
 
 /**
  * Bilinear resize of an interleaved 8-bit image with `channels` samples per
@@ -11,7 +16,9 @@
  * alpha aligned with the colour it came from. Returns `src` itself when the size
  * already matches — the result is not always a fresh buffer.
  */
-function resizeInterleaved(src: Uint8Array, channels: number, srcWidth: number, srcHeight: number, dstWidth: number, dstHeight: number): Uint8Array {
+function resizeInterleaved(src: Uint8Array, channels: number, from: Size, to: Size): Uint8Array {
+  const { width: srcWidth, height: srcHeight } = from;
+  const { width: dstWidth, height: dstHeight } = to;
   if (srcWidth === dstWidth && srcHeight === dstHeight) return src;
   if (src.byteLength !== srcWidth * srcHeight * channels) {
     throw new Error(`resize: expected ${srcWidth * srcHeight * channels} bytes, got ${src.byteLength}`);
@@ -62,35 +69,11 @@ function resizeInterleaved(src: Uint8Array, channels: number, srcWidth: number, 
 }
 
 /** Bilinear resize of a tightly packed RGBA8 frame; `src` itself when the size already matches. */
-export function resizeRgba(src: Uint8Array, srcWidth: number, srcHeight: number, dstWidth: number, dstHeight: number): Uint8Array {
-  return resizeInterleaved(src, 4, srcWidth, srcHeight, dstWidth, dstHeight);
+export function resizeRgba(src: Uint8Array, from: Size, to: Size): Uint8Array {
+  return resizeInterleaved(src, 4, from, to);
 }
 
 /** Bilinear resize of a one-byte-per-pixel plane (an alpha plane); `src` itself when the size already matches. */
-export function resizePlane(src: Uint8Array, srcWidth: number, srcHeight: number, dstWidth: number, dstHeight: number): Uint8Array {
-  return resizeInterleaved(src, 1, srcWidth, srcHeight, dstWidth, dstHeight);
-}
-
-/**
- * The alpha plane of an RGBA8 frame, and a copy of the frame with alpha forced
- * to 255; the inverse is attachAlpha. `rgba` is not modified. Why a still is
- * split around the neural engines is enhanceStill's (image.ts) to say.
- */
-export function splitAlpha(rgba: Uint8Array): { colour: Uint8Array; alpha: Uint8Array } {
-  const pixels = rgba.byteLength >> 2;
-  const colour = new Uint8Array(rgba);
-  const alpha = new Uint8Array(pixels);
-  for (let i = 0, a = 3; i < pixels; i++, a += 4) {
-    alpha[i] = rgba[a]!;
-    colour[a] = 255;
-  }
-  return { colour, alpha };
-}
-
-/** Write `alpha` (one byte per pixel, the frame's own size) into the alpha channel of `rgba`, in place. */
-export function attachAlpha(rgba: Uint8Array, alpha: Uint8Array): void {
-  if (rgba.byteLength !== alpha.byteLength * 4) {
-    throw new Error(`attachAlpha: ${alpha.byteLength} alpha bytes do not match ${rgba.byteLength} RGBA bytes`);
-  }
-  for (let i = 0, a = 3; i < alpha.byteLength; i++, a += 4) rgba[a] = alpha[i]!;
+export function resizePlane(src: Uint8Array, from: Size, to: Size): Uint8Array {
+  return resizeInterleaved(src, 1, from, to);
 }
