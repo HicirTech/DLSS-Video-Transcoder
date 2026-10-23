@@ -1,18 +1,21 @@
-import { Chip, type ChipProps } from "@mui/material";
+/** The coloured chips the tabs share: job state, probe support, file presence and yes/no values. */
+import { Chip, type ChipProps, type LinearProgressProps } from "@mui/material";
 import type { JobState, SupportLevel } from "../../../src/server/api-types";
 
-export type ChipColor = NonNullable<ChipProps["color"]>;
+type ChipColor = NonNullable<ChipProps["color"]>;
+type ProgressColor = NonNullable<LinearProgressProps["color"]>;
 
-const STATE_COLORS: Record<JobState, ChipColor> = {
-  queued: "default",
-  running: "info",
-  done: "success",
-  failed: "error",
-  cancelled: "warning",
+/** Each job state's colour, on its chip and on its progress bar. */
+export const JOB_STATE_COLORS: Record<JobState, { chip: ChipColor; bar: ProgressColor }> = {
+  queued: { chip: "default", bar: "inherit" },
+  running: { chip: "info", bar: "primary" },
+  done: { chip: "success", bar: "success" },
+  failed: { chip: "error", bar: "error" },
+  cancelled: { chip: "warning", bar: "warning" },
 };
 
 export function StateChip({ state }: { state: JobState }) {
-  return <Chip label={state} color={STATE_COLORS[state]} variant={state === "queued" ? "outlined" : "filled"} />;
+  return <Chip label={state} color={JOB_STATE_COLORS[state].chip} variant={state === "queued" ? "outlined" : "filled"} />;
 }
 
 const SUPPORT_COLORS: Record<SupportLevel, ChipColor> = {

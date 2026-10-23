@@ -2,7 +2,7 @@ import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow
 import { NgxFeature } from "../../../../src/ngx/feature-ids";
 import type { ProbeFeature } from "../../../../src/server/api-types";
 import { formatHex } from "../../format";
-import { Mono } from "../Section";
+import { Mono } from "../Mono";
 import { SupportChip } from "../StatusChips";
 
 export function FeaturesTable({ features }: { features: ProbeFeature[] }) {

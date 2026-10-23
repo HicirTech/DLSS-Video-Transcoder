@@ -1,7 +1,7 @@
 import { Fragment } from "react";
 import { Paper, Stack, Typography } from "@mui/material";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
-import { Mono } from "./Section";
+import { Mono } from "./Mono";
 
 interface PlanLineProps {
   /** What the job does, stage by stage (planStages). */

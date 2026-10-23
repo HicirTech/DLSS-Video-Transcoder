@@ -9,7 +9,8 @@ import { STORAGE_KEY, useSettings } from "../hooks/useSettings";
 import { useToast } from "../hooks/useToast";
 import { LogPanel } from "./LogPanel";
 import { NumberField } from "./NumberField";
-import { Mono, Section } from "./Section";
+import { Mono } from "./Mono";
+import { Section } from "./Section";
 
 interface SettingsPanelProps {
   /** The last probe, which lists the GPUs a job can be sent to; null until one has run. */

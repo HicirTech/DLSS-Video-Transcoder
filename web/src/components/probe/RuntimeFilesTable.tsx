@@ -1,7 +1,7 @@
 import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, Typography } from "@mui/material";
 import type { RuntimeFile } from "../../../../src/server/api-types";
 import { formatMB } from "../../format";
-import { Mono } from "../Section";
+import { Mono } from "../Mono";
 import { PresenceChip } from "../StatusChips";
 
 interface RuntimeFilesTableProps {

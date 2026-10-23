@@ -1,6 +1,7 @@
 import { Paper, Stack, Typography } from "@mui/material";
 import type { ProbeReport } from "../../../../src/server/api-types";
-import { KeyValueList, Mono } from "../Section";
+import { KeyValueList } from "../KeyValueList";
+import { Mono } from "../Mono";
 import { BoolChip, SupportChip } from "../StatusChips";
 
 export function ForwarderSection({ forwarder }: { forwarder: ProbeReport["forwarder"] }) {
