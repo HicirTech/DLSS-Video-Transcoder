@@ -34,10 +34,10 @@ export function loadForwarder(path: string): ForwarderModule {
   const addresses = {} as Record<ForwarderExportName, number>;
   for (const name of FORWARDER_EXPORTS) addresses[name] = module.requireProc(name);
 
-  const setSlots = callableAt(addresses.fwd_set_slots, { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.void });
-  const create = callableAt(addresses.fwd_create, { args: [FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 });
-  const evaluate = callableAt(addresses.fwd_evaluate, { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 });
-  const release = callableAt(addresses.fwd_release, { args: [FFIType.ptr], returns: FFIType.i32 });
+  const setSlots = callableAt(addresses.fwd_set_slots, SET_SLOTS_SIGNATURE);
+  const create = callableAt(addresses.fwd_create, CREATE_SIGNATURE);
+  const evaluate = callableAt(addresses.fwd_evaluate, EVALUATE_SIGNATURE);
+  const release = callableAt(addresses.fwd_release, RELEASE_SIGNATURE);
 
   const nz = (p: number) => (p === 0 ? null : p);
   return {
@@ -78,6 +78,28 @@ export interface SelfTestResult {
 }
 
 /**
+ * Stack-argument passthrough: a 7-argument call (as Init_ProjectID) puts arguments 5..7 on the stack, and the thunk
+ * must copy them into the inner call frame. Returns whether they arrived, and what the target saw.
+ */
+function checkStackArguments(fwd: ForwarderModule): { ok: boolean; seen: number[] } {
+  const seen: number[] = [];
+  const target = new JSCallback(
+    (arg1: number, arg2: number, arg3: number, arg4: number, arg5: number, arg6: number, arg7: number) => {
+      seen.push(asPtr(arg1), arg2, asPtr(arg3), asPtr(arg4), asPtr(arg5), arg6, asPtr(arg7));
+      return 0x2a;
+    },
+    STACK_CALL_SIGNATURE,
+  );
+  try {
+    fwd.setSlots(asPtr(target.ptr), 0, 0);
+    const result = callableAt(fwd.addresses.fwd_create, STACK_CALL_SIGNATURE)(0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77) as number;
+    return { ok: result === 0x2a && JSON.stringify(seen) === JSON.stringify([0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77]), seen };
+  } finally {
+    target.close();
+  }
+}
+
+/**
  * Point every slot at a JavaScript callback and drive the stubs with sentinel
  * values, checking export resolution, slot storage, argument passing and the
  * returned value. A loaded-but-broken shim would otherwise only show up as a
@@ -90,60 +112,42 @@ export function selfTestForwarder(fwd: ForwarderModule): SelfTestResult {
       seen.push({ name: "create", args: [asPtr(a), b, asPtr(c), asPtr(d)] });
       return 0x1;
     },
-    { args: [FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
+    CREATE_SIGNATURE,
   );
   const evaluateTarget = new JSCallback(
     (a: number, b: number, c: number, d: number) => {
       seen.push({ name: "evaluate", args: [asPtr(a), asPtr(b), asPtr(c), asPtr(d)] });
       return 0x2;
     },
-    { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
+    EVALUATE_SIGNATURE,
   );
   const releaseTarget = new JSCallback(
     (a: number) => {
       seen.push({ name: "release", args: [asPtr(a)] });
       return 0x3;
     },
-    { args: [FFIType.ptr], returns: FFIType.i32 },
+    RELEASE_SIGNATURE,
   );
   try {
     fwd.setSlots(asPtr(createTarget.ptr), asPtr(evaluateTarget.ptr), asPtr(releaseTarget.ptr));
-    const r1 = fwd.create(0x1111, 18, 0x2222, 0x3333);
-    const r2 = fwd.evaluate(0x4444, 0x5555, 0x6666, 0x7777);
-    const r3 = fwd.release(0x8888);
+    const createResult = fwd.create(0x1111, 18, 0x2222, 0x3333);
+    const evaluateResult = fwd.evaluate(0x4444, 0x5555, 0x6666, 0x7777);
+    const releaseResult = fwd.release(0x8888);
     const expect = [
       { name: "create", args: [0x1111, 18, 0x2222, 0x3333] },
       { name: "evaluate", args: [0x4444, 0x5555, 0x6666, 0x7777] },
       { name: "release", args: [0x8888] },
     ];
     const argsOk = JSON.stringify(seen) === JSON.stringify(expect);
-    const retOk = r1 === 1 && r2 === 2 && r3 === 3;
-    // Stack-argument passthrough: a 7-argument call (as Init_ProjectID) puts args
-    // 5..7 on the stack; the thunk must copy them into the inner call frame.
-    const seen7: number[] = [];
-    const target7 = new JSCallback(
-      (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => {
-        seen7.push(asPtr(a), b, asPtr(c), asPtr(d), asPtr(e), f, asPtr(g));
-        return 0x2a;
-      },
-      { args: [FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
-    );
-    let stackOk = false;
-    try {
-      fwd.setSlots(asPtr(target7.ptr), 0, 0);
-      const call7 = callableAt(fwd.addresses.fwd_create, {
-        args: [FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.i32, FFIType.ptr],
-        returns: FFIType.i32,
-      });
-      const r7 = call7(0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77) as number;
-      stackOk = r7 === 0x2a && JSON.stringify(seen7) === JSON.stringify([0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77]);
-    } finally {
-      target7.close();
-    }
-    if (argsOk && retOk && stackOk) {
+    const retOk = createResult === 1 && evaluateResult === 2 && releaseResult === 3;
+    const stack = checkStackArguments(fwd);
+    if (argsOk && retOk && stack.ok) {
       return { ok: true, detail: "exports resolved, slots stored; four register arguments, seven mixed register and stack arguments, and return values pass through the call thunks" };
     }
-    return { ok: false, detail: `mismatch: returns=[${r1},${r2},${r3}] stackOk=${stackOk} seen=${JSON.stringify(seen)} seen7=${JSON.stringify(seen7)}` };
+    return {
+      ok: false,
+      detail: `mismatch: returns=[${createResult},${evaluateResult},${releaseResult}] stackOk=${stack.ok} seen=${JSON.stringify(seen)} seen7=${JSON.stringify(stack.seen)}`,
+    };
   } catch (error) {
     return { ok: false, detail: `self-test threw: ${(error as Error).message}` };
   } finally {
