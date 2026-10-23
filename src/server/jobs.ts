@@ -193,7 +193,7 @@ export class JobManager {
     next.worker = worker;
     worker.onmessage = (event: MessageEvent<WorkerMessage>) => this.onWorkerMessage(next, event.data);
     worker.onerror = (event: ErrorEvent) => {
-      this.finish(next, "failed", `The job stopped unexpectedly: ${event.message}`);
+      this.finish(next, "failed", `The job stopped unexpectedly${event.message ? `: ${event.message}` : " without reporting a cause"}. Submit it again; if it stops the same way, restart the server, which also frees any GPU memory the stopped job still holds.`);
     };
     const run: RunMessage = {
       type: "run",
