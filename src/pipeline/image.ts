@@ -5,10 +5,10 @@ import { isPng } from "../codec/png/chunks.ts";
 import { decodePng } from "../codec/png/decode.ts";
 import { encodePng } from "../codec/png/encode.ts";
 import type { RgbaImage } from "../codec/png/types.ts";
-import { DEFAULT_SCALE_SETTINGS, DEFAULT_WARMUP_FRAMES, jobSteps, type NeuralRenderingStep, type ScaleSettings, type StepKind, stepsSuffix, type SuperResolutionStep } from "../server/api-types.ts";
+import { DEFAULT_SCALE_SETTINGS, DEFAULT_WARMUP_FRAMES, jobSteps, type NeuralRenderingStep, resizesFrames, type ScaleSettings, type StepKind, stepsSuffix, type SuperResolutionStep } from "../server/api-types.ts";
 import { resolveTargetSize, srOutputProblem } from "../server/output-size.ts";
 import { throwIfAbortedAfterYield } from "./cancel.ts";
-import { createEngineChain } from "./engine.ts";
+import { createEngineChain, type Engine } from "./engine.ts";
 import type { ProgressReporter } from "./frame-progress.ts";
 import { describeGpu, openGpu } from "./gpu.ts";
 import { defaultOutputPath } from "./output-path.ts";
@@ -104,6 +104,43 @@ export async function runStillPasses(temporal: boolean, warmupFrames: number, pa
   return output;
 }
 
+/** The bar once the still is decoded; its passes fill the span up to PASSES_PROGRESS_END. */
+const DECODED_PROGRESS = 0.1;
+const PASSES_PROGRESS_END = 0.9;
+/** The bar while the PNG is encoded and written. */
+const ENCODING_PROGRESS = 0.92;
+
+/** What a still's passes on an engine take, besides the engine. */
+interface StillPasses {
+  decoded: RgbaImage;
+  /** Whether the engine upscales (SR) and so takes the still as decoded; otherwise it is resized to `target` first. */
+  upscaling: boolean;
+  target: { width: number; height: number };
+  /** Whether the engine keeps temporal state, which the warm-up passes settle (runStillPasses). */
+  temporal: boolean;
+  warmupFrames: number;
+  signal?: AbortSignal;
+  progress: ProgressReporter;
+}
+
+/** Runs a still's passes on `engine` with its alpha kept aside (enhanceStill); returns the output and the passes run. */
+async function enhanceOnEngine(engine: Engine, still: StillPasses): Promise<{ image: RgbaImage; passes: number }> {
+  let passes = 0;
+  const image = await enhanceStill(still.decoded, async (colour) => {
+    const working = still.upscaling ? colour : resizeRgba(colour, still.decoded, still.target);
+    const rgba = await runStillPasses(still.temporal, still.warmupFrames, async (reset, total) => {
+      // Each pass is synchronous FFI and never yields on its own.
+      await throwIfAbortedAfterYield(still.signal);
+      const output = engine.process({ rgba: working, reset, motion: null });
+      passes++;
+      still.progress(DECODED_PROGRESS + ((PASSES_PROGRESS_END - DECODED_PROGRESS) * passes) / total, `pass ${passes}/${total} on ${engine.name}`, { done: passes, total });
+      return output;
+    });
+    return { rgba, width: engine.outputWidth, height: engine.outputHeight };
+  });
+  return { image, passes };
+}
+
 export async function processImage(options: ImageJobOptions): Promise<ImageJobResult> {
   const started = performance.now();
   const progress = options.onProgress ?? (() => {});
@@ -123,14 +160,13 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
   const renderWidth = upscaling ? decoded.width : target.width;
   const renderHeight = upscaling ? decoded.height : target.height;
   progress(
-    0.1,
+    DECODED_PROGRESS,
     `decoded ${decoded.width}x${decoded.height}, ${upscaling ? `upscaling to ${target.width}x${target.height}` : `working size ${target.width}x${target.height}`}`,
   );
   await throwIfAbortedAfterYield(options.signal);
-  const session = openGpu({ adapterIndex: options.adapterIndex, adapterUuid: options.adapterUuid, debugLayer: options.debugLayer });
-  progress(0.1, describeGpu(session));
-  let passes = 0;
-  let result: RgbaImage;
+  const session = openGpu({ adapterUuid: options.adapterUuid });
+  progress(DECODED_PROGRESS, describeGpu(session));
+  let enhanced: { image: RgbaImage; passes: number };
   try {
     const engine = createEngineChain(session, {
       width: renderWidth,
@@ -143,17 +179,14 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
       appDataPath: options.appDataPath,
     });
     try {
-      result = await enhanceStill(decoded, async (colour) => {
-        const working = upscaling ? colour : resizeRgba(colour, decoded, target);
-        const rgba = await runStillPasses(steps.length > 0, options.warmupFrames ?? DEFAULT_WARMUP_FRAMES, async (reset, total) => {
-          // Each pass is synchronous FFI and never yields on its own.
-          await throwIfAbortedAfterYield(options.signal);
-          const output = engine.process({ rgba: working, reset, motion: null });
-          passes++;
-          progress(0.1 + (0.8 * passes) / total, `pass ${passes}/${total} on ${engine.name}`, { done: passes, total });
-          return output;
-        });
-        return { rgba, width: engine.outputWidth, height: engine.outputHeight };
+      enhanced = await enhanceOnEngine(engine, {
+        decoded,
+        upscaling,
+        target,
+        temporal: steps.length > 0,
+        warmupFrames: options.warmupFrames ?? DEFAULT_WARMUP_FRAMES,
+        signal: options.signal,
+        progress,
       });
     } finally {
       engine.close();
@@ -163,19 +196,18 @@ export async function processImage(options: ImageJobOptions): Promise<ImageJobRe
   }
 
   options.onFinishing?.();
-  progress(0.92, "encoding PNG");
-  const resized = !sr && options.resize !== undefined && options.resize.mode !== "none";
-  const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resized), ".png");
-  await Bun.write(output, encodePng(result, { level: 6 }));
+  progress(ENCODING_PROGRESS, "encoding PNG");
+  const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resizesFrames(options)), ".png");
+  await Bun.write(output, encodePng(enhanced.image, { level: 6 }));
   progress(1, "done");
   return {
     output,
     inputWidth: decoded.width,
     inputHeight: decoded.height,
-    width: result.width,
-    height: result.height,
+    width: enhanced.image.width,
+    height: enhanced.image.height,
     steps,
-    passes,
+    passes: enhanced.passes,
     ms: Math.round(performance.now() - started),
   };
 }
