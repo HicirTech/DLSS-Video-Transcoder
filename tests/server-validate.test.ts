@@ -73,6 +73,8 @@ describe("validateJobRequest", () => {
     const cases: Array<[keyof typeof SETTING_RANGES, string, (value: number) => Record<string, unknown>, "min" | "max"]> = [
       ["intensity", "neuralRendering.settings.intensity", (value) => ({ neuralRendering: nr({ intensity: value }) }), "max"],
       ["skinStructure", "neuralRendering.settings.skinStructure", (value) => ({ neuralRendering: nr({ skinStructure: value }) }), "min"],
+      ["stack", "neuralRendering.stack", (value) => ({ neuralRendering: { ...nr(), stack: value } }), "max"],
+      ["stack", "neuralRendering.stack", (value) => ({ neuralRendering: { ...nr(), stack: value } }), "min"],
       ["factor", "superResolution.scale.factor", (value) => ({ superResolution: sr({ scale: { ...DEFAULT_SR_STEP.scale, factor: value } }) }), "max"],
       // On a resize, not Super Resolution, which holds a side to DLSS_SR_MAX_OUTPUT_SIDE.
       ["width", "resize.width", (value) => ({ superResolution: undefined, resize: { ...DEFAULT_SCALE_SETTINGS, width: value } }), "max"],
@@ -89,6 +91,13 @@ describe("validateJobRequest", () => {
     expect(validateJobRequest(request({ neuralRendering: nr({ intensity: Number.NaN }) }))).toBe(
       `neuralRendering.settings.intensity must be a finite number between ${intensity.min} and ${intensity.max}.`,
     );
+  });
+
+  test("a Neural Rendering stack is a whole number, and a step without one is accepted", () => {
+    const stack = SETTING_RANGES.stack;
+    expect(validateJobRequest(request({ neuralRendering: { ...nr(), stack: 2.5 } }))).toBe(`neuralRendering.stack must be a whole number between ${stack.min} and ${stack.max}.`);
+    expect(validateJobRequest(request({ neuralRendering: { ...nr(), stack: "2" } }))).toBe(`neuralRendering.stack must be a finite number between ${stack.min} and ${stack.max}.`);
+    expect(validateJobRequest(request({ neuralRendering: nr() }))).toBeNull();
   });
 
   test("rejects values outside the enums", () => {

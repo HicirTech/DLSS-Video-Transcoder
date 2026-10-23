@@ -113,7 +113,11 @@ function checkSuperResolution(step: unknown, kind: unknown): string | null {
 
 function checkNeuralRendering(step: unknown): string | null {
   if (!isObject(step)) return "neuralRendering must be an object when present.";
-  return first(checkNrSettings(step.settings, "neuralRendering.settings"), checkDllDirType(step, "neuralRendering"));
+  return first(
+    checkNrSettings(step.settings, "neuralRendering.settings"),
+    step.stack === undefined ? null : checkNumber(step.stack, "stack", "neuralRendering.stack"),
+    checkDllDirType(step, "neuralRendering"),
+  );
 }
 
 function checkFrameGen(step: unknown, kind: unknown): string | null {
