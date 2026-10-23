@@ -52,7 +52,7 @@ export function connectFrameFlow<Ack extends { type: "encoded" }>(run: WorkerPai
     if (run.running && decodeEnded && run.framesWritten === handedOver) run.finish();
   };
   const grantCredit = (frames: number): void => {
-    const credit: DecodeCredit = { type: "credit", n: frames };
+    const credit: DecodeCredit = { type: "credit", frames };
     flow.decodeWorker.postMessage(credit);
   };
 

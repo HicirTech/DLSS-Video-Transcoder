@@ -47,7 +47,7 @@ function start(processFrame: (frame: { index: number; buf: ArrayBuffer }, frameN
 type Flow = ReturnType<typeof start>;
 
 const frame = (index: number) => ({ type: "frame", index, buf: new ArrayBuffer(16) });
-const credits = (flow: Flow): number[] => flow.decode.sentOfType("credit").map((message) => (message as { n: number }).n);
+const credits = (flow: Flow): number[] => flow.decode.sentOfType("credit").map((message) => (message as { frames: number }).frames);
 
 function acknowledgeAbort(flow: Flow): void {
   flow.decode.reply({ type: "aborted" });
