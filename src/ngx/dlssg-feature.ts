@@ -6,7 +6,6 @@
  * probe() or one open(), and a feature that has to be recreated means a new process.
  */
 import { ptr } from "bun:ffi";
-import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
@@ -22,12 +21,11 @@ import { asPtr } from "../native/memory.ts";
 import { NGX_DATA_DIR } from "../paths.ts";
 import { dlssgIntervalConstants, type DlssgIntervalConstants } from "../pipeline/dlssg-constants.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
-import { FeatureCommonInfo, NgxCore } from "./core.ts";
+import { NgxCore, startNgxCore } from "./core.ts";
 import { DlssgCapabilityParam, DlssgCreateParam, DlssgEvaluateParam } from "./dlssg-params.ts";
 import { DISABLE_FLAG_BUFFER_BYTES, DISABLE_FLAG_UNWRITTEN, classifyInterval, intervalEvaluateCalls, type EvaluateCall } from "./dlssg-interval.ts";
-import { prepareForwarderSync } from "./forwarder-runtime.ts";
 import { NgxParam, NgxParameters } from "./params.ts";
-import { NGX_APPLICATION_ID, NgxFeature, ngxCheck, ngxName } from "./results.ts";
+import { NgxFeature, ngxCheck, ngxName } from "./results.ts";
 
 const INPUT_STATE = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 const UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
@@ -135,19 +133,18 @@ function checkShimPlacement(options: DlssgRuntimeOptions): void {
   );
 }
 
-function initCore(session: GpuSession, options: DlssgRuntimeOptions): { core: NgxCore; forwarder: unknown } {
+function initCore(session: GpuSession, options: DlssgRuntimeOptions): NgxCore {
   checkShimPlacement(options);
-  const appData = options.appDataPath ?? NGX_DATA_DIR;
-  mkdirSync(appData, { recursive: true });
   const core = NgxCore.load();
-  // Mandatory for feature 11 too: without the shim Init_Ext faults inside the driver core (measured on 310.9.1).
-  const { forwarder } = prepareForwarderSync(options.callerDir);
-  core.useForwarder(forwarder);
-  // A relative search path makes the core's signed load of the snippet fail, and the feature then
-  // reports itself unavailable (measured with nvngx_dlssg 310.7.129, driver 616.92).
-  const searchPath = resolve(options.runtimeDir);
-  ngxCheck(core.initExt(session.device.ptr, NGX_APPLICATION_ID, appData, new FeatureCommonInfo([searchPath])), "DLSS Frame Generation Init_Ext");
-  return { core, forwarder };
+  startNgxCore(core, session.device.ptr, {
+    callerDir: options.callerDir,
+    appDataPath: options.appDataPath ?? NGX_DATA_DIR,
+    // A relative search path makes the core's signed load of the snippet fail, and the feature then
+    // reports itself unavailable (measured with nvngx_dlssg 310.7.129, driver 616.92).
+    searchPaths: [resolve(options.runtimeDir)],
+    what: "DLSS Frame Generation",
+  });
+  return core;
 }
 
 function readCapabilities(core: NgxCore): DlssgCapabilities {
@@ -245,12 +242,13 @@ export class DlssgFeature {
     private readonly resources: IntervalResources,
     // The matrices are bound by pointer, so they must outlive every evaluate.
     private readonly constants: DlssgIntervalConstants,
-    private readonly forwarderKeep: unknown,
   ) {}
 
   /** What the runtime reports, without creating the feature: the answer to dlssg-host's --probe. Throws the NgxError of a failed Init_Ext. */
   static probe(session: GpuSession, options: DlssgRuntimeOptions): DlssgCapabilities {
-    return readCapabilities(initCore(session, options).core);
+    const core = initCore(session, options);
+    NgxParameters.requireLayout(core.capabilityParameters(), "DLSS Frame Generation");
+    return readCapabilities(core);
   }
 
   /** Throws DlssgUnavailableError, carrying the runtime's capabilities, when the runtime cannot generate maxGenerated frames per interval. */
@@ -258,7 +256,7 @@ export class DlssgFeature {
     if (!Number.isInteger(options.maxGenerated) || options.maxGenerated < 1) {
       throw new Error(`DLSS Frame Generation: maxGenerated must be a whole number of frames, 1 or more; got ${options.maxGenerated}`);
     }
-    const { core, forwarder } = initCore(session, options);
+    const core = initCore(session, options);
     const params = core.allocateParameters();
     let handle = 0;
     let resources: IntervalResources | null = null;
@@ -278,7 +276,7 @@ export class DlssgFeature {
       resources = createIntervalResources(session.device, options);
       session.gpu.uploadTexture(resources.depth, planeDepthPixels(options, constants), INPUT_STATE);
       session.gpu.submitAndWait();
-      return new DlssgFeature(session, core, params, handle, capabilities, options.maxGenerated, resources, constants, forwarder);
+      return new DlssgFeature(session, core, params, handle, capabilities, options.maxGenerated, resources, constants);
     } catch (error) {
       // After a GPU timeout the feature and the resources may still be in use, so they are left allocated.
       if (session.gpu.drain()) {
@@ -400,7 +398,6 @@ export class DlssgFeature {
     this.core.releaseFeature(this.handle);
     this.core.destroyParameters(this.params);
     releaseIntervalResources(this.resources);
-    void this.forwarderKeep;
-    // Deliberately no Shutdown1: this driver core faults on it after a create (core.ts).
+    // NGX itself is left to process exit (see NgxCore).
   }
 }

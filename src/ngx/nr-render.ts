@@ -1,15 +1,5 @@
-/**
- * DLSS Neural Rendering (NGX feature 18, internal "CG2R") driven in-process.
- *
- * Unlike Super Resolution, feature 18 ships as a self-contained provider,
- * nvngx_dlssnr.dll, which exports the whole NVSDK_NGX_D3D12 API but NOT the
- * parameter allocator — so this session loads that DLL directly (not the driver
- * core), routes calls through the nvngx.dll forwarder shim, and hands the runtime
- * our own NgxParamObject. The DLL reads its size from DLSSNR.Width /
- * DLSSNR.Height; the generic Width/Height names do not exist in it. Neural
- * rendering is a 1:1 enhancement, so render and output size are equal.
- */
-import { mkdirSync, statSync } from "node:fs";
+/** DLSS Neural Rendering (NGX feature 18, internal "CG2R") driven in-process, at the same size in and out. */
+import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
@@ -25,11 +15,10 @@ import { viewNative } from "../native/memory.ts";
 import type { GpuSession } from "../pipeline/gpu.ts";
 import { APP_DATA_DIR, callerDir, featureDir } from "../paths.ts";
 import type { NrSettings } from "../server/api-types.ts";
-import { FeatureCommonInfo, NgxCore } from "./core.ts";
-import { prepareForwarderSync } from "./forwarder-runtime.ts";
+import { NgxCore, startNgxCore } from "./core.ts";
 import { NgxParamObject } from "./param-object.ts";
-import { NrParam } from "./params.ts";
-import { NGX_APPLICATION_ID, PerfQuality, ngxCheck } from "./results.ts";
+import { NgxParam, NrParam } from "./params.ts";
+import { NgxFeature, PerfQuality, ngxCheck } from "./results.ts";
 import { featureByKey } from "./runtime-catalog.ts";
 
 const UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
@@ -60,18 +49,17 @@ export class DlssNrSession {
   ) {}
 
   static open(session: GpuSession, opts: NrRenderOptions): DlssNrSession {
-    const appData = opts.appDataPath ?? APP_DATA_DIR;
-    mkdirSync(appData, { recursive: true });
+    const nr = featureByKey("nr");
     const dllDir = opts.dllDir ?? featureDir(opts.runtimeDir, "nr");
     const dll = join(dllDir, featureByKey("nr").dllName);
 
     const core = NgxCore.load({ path: dll, folder: dllDir, source: "driverstore", modifiedAt: statSync(dll).mtime });
-    const { forwarder } = prepareForwarderSync(callerDir(opts.runtimeDir));
-    core.useForwarder(forwarder);
-    ngxCheck(
-      core.initExt(session.device.ptr, NGX_APPLICATION_ID, appData, new FeatureCommonInfo([dllDir, NGX_MODELS])),
-      "DLSS NR Init_Ext",
-    );
+    startNgxCore(core, session.device.ptr, {
+      callerDir: callerDir(opts.runtimeDir),
+      appDataPath: opts.appDataPath ?? APP_DATA_DIR,
+      searchPaths: [dllDir, NGX_MODELS],
+      what: "DLSS NR",
+    });
 
     const params = new NgxParamObject();
     params.setU32(NrParam.Width, opts.width); // output width (DLSSNR.Width, not the absent generic "Width")
