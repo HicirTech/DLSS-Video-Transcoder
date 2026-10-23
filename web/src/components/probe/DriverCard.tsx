@@ -1,6 +1,8 @@
 import { Box, Chip, Paper, Stack, Typography } from "@mui/material";
 import type { ProbeReport } from "../../../../src/server/api-types";
-import { KeyValueList, Mono } from "../Section";
+import { monoFontFamily } from "../../theme";
+import { KeyValueList } from "../KeyValueList";
+import { Mono } from "../Mono";
 import { BoolChip } from "../StatusChips";
 
 interface DriverCardProps {
@@ -58,7 +60,7 @@ export function DriverCard({ driver, device, ngxInit, capabilities }: DriverCard
             </Typography>
             <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: "wrap" }}>
               {driver.ngxCoreExports.map((name) => (
-                <Chip key={name} label={name} variant="outlined" sx={{ fontFamily: "Consolas, monospace", fontSize: 11 }} />
+                <Chip key={name} label={name} variant="outlined" sx={{ fontFamily: monoFontFamily, fontSize: 11 }} />
               ))}
               {driver.ngxCoreExports.length === 0 ? <Mono dim>none resolved</Mono> : null}
             </Stack>

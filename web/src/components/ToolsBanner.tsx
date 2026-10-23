@@ -1,6 +1,6 @@
 import { Alert, Chip, Stack, Tooltip, Typography } from "@mui/material";
 import { FFMPEG_SUPPLY_HINT, type ToolsReport } from "../../../src/server/api-types";
-import { Mono } from "./Section";
+import { Mono } from "./Mono";
 
 /** What the NVENC chip measures and what it leaves to each job: ToolsReport.nvenc only says that ffmpeg lists the encoder. */
 const NVENC_CHIP_HELP =
