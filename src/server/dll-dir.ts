@@ -5,10 +5,7 @@
  */
 import { isAbsolute, resolve } from "node:path";
 import { featureByKey, type FeatureManifest, type RuntimeManifest } from "../ngx/runtime-catalog.ts";
-import type { StepKind } from "./api-types.ts";
-
-/** Each step's object in a JobRequest, which a refusal names. */
-const STEP_FIELD: Record<StepKind, string> = { sr: "superResolution", nr: "neuralRendering", fg: "frameGen" };
+import { STEP_FIELDS, type StepKind } from "./api-types.ts";
 
 /**
  * Why `step` cannot load `dllDir`, or null when it can: the folder has to be one of the versions that
@@ -18,7 +15,7 @@ const STEP_FIELD: Record<StepKind, string> = { sr: "superResolution", nr: "neura
  */
 export function checkDllDir(dllDir: string, step: StepKind, catalog: RuntimeManifest): string | null {
   const wanted = featureByKey(step);
-  const field = `${STEP_FIELD[step]}.dllDir`;
+  const field = `${STEP_FIELDS[step]}.dllDir`;
   const folder = isAbsolute(dllDir) ? resolve(dllDir) : null;
   const listsFolder = (listed: FeatureManifest): boolean => listed.versions.some((version) => resolve(version.dir) === folder);
   if (folder !== null) {
