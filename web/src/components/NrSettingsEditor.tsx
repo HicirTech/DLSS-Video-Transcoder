@@ -30,13 +30,13 @@ const TONE_MARKS = marksAcross(SETTING_RANGES.localTone, DEFAULT_NR_SETTINGS.loc
 const STRUCTURE_MARKS = marksAcross(SETTING_RANGES.localStructure, DEFAULT_NR_SETTINGS.localStructure);
 const INTENSITY_MARKS = [{ value: SETTING_RANGES.intensity.min }, { value: DEFAULT_NR_SETTINGS.intensity, label: "default" }];
 
+/** The UI names of the controls the disabled-here caption can name. */
+const CONTROL_LABELS = { preset: "Model preset", skinStructure: "Skin structure" } as const;
+
 /** The controls this editor shows that the installed runtime ignores, named as the UI labels them; empty once the runtime honours them. */
-const DISABLED_HERE = (
-  [
-    ["preset", "Model preset"],
-    ["skinStructure", "Skin structure"],
-  ] as const
-).filter(([key]) => nrSettingIgnored(key)).map(([, label]) => label);
+const DISABLED_HERE = (Object.keys(CONTROL_LABELS) as Array<keyof typeof CONTROL_LABELS>)
+  .filter((key) => nrSettingIgnored(key))
+  .map((key) => CONTROL_LABELS[key]);
 const SKIN_MARKS = [{ value: SETTING_RANGES.skinStructure.min, label: "default" }, { value: 0 }, { value: 1, label: "neutral" }, { value: SETTING_RANGES.skinStructure.max }];
 
 function formatSkin(value: number): string {
@@ -77,10 +77,10 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
               </Select>
             </FormControl>
             <FormControl fullWidth disabled={nrSettingIgnored("preset")}>
-              <InputLabel id={presetLabelId}>Model preset</InputLabel>
+              <InputLabel id={presetLabelId}>{CONTROL_LABELS.preset}</InputLabel>
               <Select<NrSettings["preset"]>
                 labelId={presetLabelId}
-                label="Model preset"
+                label={CONTROL_LABELS.preset}
                 value={value.preset}
                 onChange={(event) => update({ preset: event.target.value })}
               >
@@ -138,7 +138,7 @@ export function NrSettingsEditor({ value, onChange }: NrSettingsEditorProps) {
           onChange={(localStructure) => update({ localStructure })}
         />
         <SliderRow
-          label="Skin structure"
+          label={CONTROL_LABELS.skinStructure}
           value={value.skinStructure}
           min={SETTING_RANGES.skinStructure.min}
           max={SETTING_RANGES.skinStructure.max}
