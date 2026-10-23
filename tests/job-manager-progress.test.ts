@@ -41,25 +41,37 @@ describe("a job's frame counters", () => {
   });
 
   test("a video job's progress sets the frames done and expected", () => {
-    const job = start(VIDEO_REQUEST);
-    job.worker.reply({ type: "progress", id: job.id, ...frameProgress(533, 3737) });
-    expect(job.status()).toMatchObject({ progress: 533 / 3737, message: "frame 533/3737", framesDone: 533, framesTotal: 3737 });
-    expect(job.status().fps).toBeGreaterThan(0);
+    const clock = { ms: 1000 };
+    withClock(clock, () => {
+      const job = start(VIDEO_REQUEST);
+      clock.ms = 3000;
+      job.worker.reply({ type: "progress", id: job.id, ...frameProgress(533, 3737) });
+      expect(job.status()).toMatchObject({ progress: 533 / 3737, message: "frame 533/3737", framesDone: 533, framesTotal: 3737 });
+      expect(job.status().fps).toBe(266.5);
+    });
   });
 
   test("a frame-generation job's progress counts too, though its line writes the estimate as ~3733", () => {
-    const job = start(FRAME_GENERATION_REQUEST);
-    job.worker.reply({ type: "progress", id: job.id, ...estimatedFrameProgress(466, 3733) });
-    expect(job.status()).toMatchObject({ message: "frame 466/~3733", framesDone: 466, framesTotal: 3733 });
-    expect(job.status().fps).toBeGreaterThan(0);
+    const clock = { ms: 1000 };
+    withClock(clock, () => {
+      const job = start(FRAME_GENERATION_REQUEST);
+      clock.ms = 3000;
+      job.worker.reply({ type: "progress", id: job.id, ...estimatedFrameProgress(466, 3733) });
+      expect(job.status()).toMatchObject({ message: "frame 466/~3733", framesDone: 466, framesTotal: 3733 });
+      expect(job.status().fps).toBe(233);
+    });
   });
 
   test("an image job counts the engine passes it runs", () => {
-    const job = start(IMAGE_REQUEST);
-    // image.ts builds this line inline, because running it needs the GPU; the shape is its own.
-    job.worker.reply({ type: "progress", id: job.id, fraction: 0.58, message: "pass 3/5 on nr", frames: { done: 3, total: 5 } });
-    expect(job.status()).toMatchObject({ framesDone: 3, framesTotal: 5 });
-    expect(job.status().fps).toBeGreaterThan(0);
+    const clock = { ms: 1000 };
+    withClock(clock, () => {
+      const job = start(IMAGE_REQUEST);
+      clock.ms = 3000;
+      // image.ts builds this line inline, because running it needs the GPU; the shape is its own.
+      job.worker.reply({ type: "progress", id: job.id, fraction: 0.58, message: "pass 3/5 on nr", frames: { done: 3, total: 5 } });
+      expect(job.status()).toMatchObject({ framesDone: 3, framesTotal: 5 });
+      expect(job.status().fps).toBe(1.5);
+    });
   });
 
   test("a video whose container has no frame count keeps its total unknown", () => {
