@@ -22,7 +22,7 @@ export interface ForwarderModule {
   readonly path: string;
   readonly module: NativeModule;
   /** Address of each export; `fwd_create` is also re-bound to other NGX signatures (see NgxCore.fn). */
-  readonly addresses: Record<(typeof FORWARDER_EXPORTS)[number], number>;
+  readonly addresses: Record<ForwarderExportName, number>;
   setSlots(create: number, evaluate: number, release: number): void;
   create(cmdList: number, featureId: number, params: number, outHandle: number): number;
   evaluate(cmdList: number, handle: number, params: number, callback: number): number;
@@ -31,7 +31,7 @@ export interface ForwarderModule {
 
 export function loadForwarder(path: string): ForwarderModule {
   const module = NativeModule.load(path, LOAD_WITH_ALTERED_SEARCH_PATH);
-  const addresses = {} as Record<(typeof FORWARDER_EXPORTS)[number], number>;
+  const addresses = {} as Record<ForwarderExportName, number>;
   for (const name of FORWARDER_EXPORTS) addresses[name] = module.requireProc(name);
 
   const setSlots = callableAt(addresses.fwd_set_slots, { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.void });
