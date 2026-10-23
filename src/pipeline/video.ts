@@ -8,7 +8,7 @@
  */
 import { existsSync } from "node:fs";
 import type { EncodeSettings, JobRequest, NeuralRenderingStep, ScaleSettings, StepKind, SuperResolutionStep } from "../server/api-types.ts";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_SCALE_SETTINGS, jobSteps, resizesFrames, stepsSuffix } from "../server/api-types.ts";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_SCALE_SETTINGS, jobSteps, nrStackOf, resizesFrames, stepsSuffix } from "../server/api-types.ts";
 import { srOutputProblem, videoTargetSize } from "../server/output-size.ts";
 import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngineChain, type Engine } from "./engine.ts";
@@ -374,12 +374,13 @@ export async function processVideo(options: VideoJobOptions): Promise<VideoJobRe
   // Fastest path, tried first: DLSS output stays on the GPU and NVENC reads it
   // through a shared buffer, so the two overlap with no CPU frame copy between
   // them, which the threaded pipeline cannot avoid. Only Neural Rendering alone
-  // qualifies (no SR to upscale first) with an NVENC codec at even, in-cap
+  // qualifies (no SR to upscale first), and only unstacked, since this path
+  // evaluates one feature per frame; with an NVENC codec at even, in-cap
   // dimensions; feature 18 consumes no motion vectors, so it needs no optical flow.
   // It also needs an explicit runtimeDir, because DlssNrSession.open takes one and
   // this path applies no default (the threaded path falls back to RUNTIME_DIR in ngx/nr.ts).
   const nr = options.neuralRendering;
-  const nrNative = nr && !upscaling && options.runtimeDir ? nvencNativeTarget(encode.codec, target.width, target.height) : null;
+  const nrNative = nr && nrStackOf(nr) === 1 && !upscaling && options.runtimeDir ? nvencNativeTarget(encode.codec, target.width, target.height) : null;
   if (nr && nrNative && probeNvencCaps(cudaOrdinal).available) return runGpuResidentNr(job, nrNative, nr);
   return runEngineJob(job);
 }

@@ -1,6 +1,6 @@
 /**
  * The frame engine contract (RGBA8 in, RGBA8 out), the registry the NGX engines register themselves into,
- * and the chain a job's frames go through: Super Resolution, then Neural Rendering.
+ * and the chain a job's frames go through: Super Resolution, then Neural Rendering once or stacked.
  *
  * `BypassEngine` round-trips a frame through GPU memory unchanged: a job without either step runs it, so
  * decode, upload, readback, encode and muxing are the same path, and a neural result has an untouched pass to
@@ -13,7 +13,7 @@ import {
   DXGI_FORMAT_R8G8B8A8_UNORM,
   type D3D12Resource,
 } from "../native/d3d12.ts";
-import type { NeuralRenderingStep, NrSettings, SuperResolutionStep } from "../server/api-types.ts";
+import { type NeuralRenderingStep, type NrSettings, nrStackLabel, nrStackOf, type SuperResolutionStep } from "../server/api-types.ts";
 import type { GpuSession } from "./gpu.ts";
 
 export interface FrameInput {
@@ -125,7 +125,7 @@ export interface EngineChainOptions {
   outputWidth: number;
   outputHeight: number;
   superResolution?: SuperResolutionStep;
-  /** Runs after SR when both do, at SR's output size. */
+  /** Runs after SR when both do, at SR's output size; each of its stacked passes on the output of the one before. */
   neuralRendering?: NeuralRenderingStep;
   runtimeDir?: string;
   appDataPath?: string;
@@ -133,7 +133,8 @@ export interface EngineChainOptions {
 
 /**
  * The engine a job's frames go through. One step opens just its own engine; both open SR, then NR on SR's output;
- * neither opens BypassEngine.
+ * neither opens BypassEngine. A stacked NR opens one engine per pass: each keeps the temporal history of its own
+ * input, so the passes cannot share one.
  */
 export function createEngineChain(session: GpuSession, options: EngineChainOptions): Engine {
   const runtime = { runtimeDir: options.runtimeDir, appDataPath: options.appDataPath };
@@ -143,41 +144,54 @@ export function createEngineChain(session: GpuSession, options: EngineChainOptio
     sr = srFactory(session, { ...runtime, dllDir: options.superResolution.dllDir, width: options.width, height: options.height, outputWidth: options.outputWidth, outputHeight: options.outputHeight });
   }
   if (!options.neuralRendering) return sr ?? new BypassEngine(session, options.width, options.height);
+  const stack = nrStackOf(options.neuralRendering);
+  const stages: Engine[] = sr ? [sr] : [];
   try {
     if (!neuralFactory) throw new Error("Neural engine is not registered; load it through engine-loader.ts before creating it");
-    const nr = neuralFactory(session, { ...runtime, dllDir: options.neuralRendering.dllDir, width: sr?.outputWidth ?? options.width, height: sr?.outputHeight ?? options.height, settings: options.neuralRendering.settings });
-    return sr ? new ChainEngine(sr, nr) : nr;
+    const nrOptions = { ...runtime, dllDir: options.neuralRendering.dllDir, width: sr?.outputWidth ?? options.width, height: sr?.outputHeight ?? options.height, settings: options.neuralRendering.settings };
+    for (let pass = 0; pass < stack; pass++) stages.push(neuralFactory(session, nrOptions));
   } catch (error) {
-    sr?.close(); // opened above, and nothing else holds it yet
+    closeStages(stages); // opened above, and nothing else holds them yet
     throw error;
   }
+  if (stages.length === 1) return stages[0]!;
+  return new ChainEngine(sr ? `sr+${nrStackLabel(stack)}` : nrStackLabel(stack), stages);
 }
 
-/** Super Resolution followed by Neural Rendering: NR enhances each frame SR has upscaled. */
+/** Engines in turn on each frame: Super Resolution when it runs, then each Neural Rendering pass on the output before it. */
 class ChainEngine implements Engine {
-  readonly name = "sr+nr";
   readonly outputWidth: number;
   readonly outputHeight: number;
 
   constructor(
-    private readonly sr: Engine,
-    private readonly nr: Engine,
+    readonly name: string,
+    private readonly stages: readonly Engine[],
   ) {
-    this.outputWidth = nr.outputWidth;
-    this.outputHeight = nr.outputHeight;
+    this.outputWidth = stages.at(-1)!.outputWidth;
+    this.outputHeight = stages.at(-1)!.outputHeight;
   }
 
   process(frame: FrameInput): Uint8Array {
-    const upscaled = this.sr.process(frame);
-    // NR takes no motion vectors; a scene cut clears its history as it clears SR's.
-    return this.nr.process({ rgba: upscaled, reset: frame.reset, motion: null });
+    let rgba = this.stages[0]!.process(frame);
+    // NR takes no motion vectors; a scene cut clears every stage's history as it clears the first one's.
+    for (let index = 1; index < this.stages.length; index++) rgba = this.stages[index]!.process({ rgba, reset: frame.reset, motion: null });
+    return rgba;
   }
 
   close(): void {
+    closeStages(this.stages);
+  }
+}
+
+/** Closes every engine of a chain, each even when one before it throws; the first throw is rethrown once all are closed. */
+function closeStages(stages: readonly Engine[]): void {
+  let failure: { error: unknown } | null = null;
+  for (const stage of stages) {
     try {
-      this.sr.close();
-    } finally {
-      this.nr.close();
+      stage.close();
+    } catch (error) {
+      failure ??= { error };
     }
   }
+  if (failure) throw failure.error;
 }

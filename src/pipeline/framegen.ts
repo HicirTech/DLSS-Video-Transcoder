@@ -14,6 +14,7 @@ import {
   type JobRequest,
   jobSteps,
   type NeuralRenderingStep,
+  nrStackOf,
   resizesFrames,
   type ScaleSettings,
   type StepKind,
@@ -372,7 +373,10 @@ function stepsClause(size: { width: number; height: number }, options: FrameGenO
   const parts: string[] = [];
   if (options.superResolution) parts.push(`Super Resolution to ${sizeText}`);
   else if (resized) parts.push(`resized to ${sizeText}`);
-  if (options.neuralRendering) parts.push("Neural Rendering");
+  if (options.neuralRendering) {
+    const stack = nrStackOf(options.neuralRendering);
+    parts.push(stack > 1 ? `Neural Rendering x${stack}` : "Neural Rendering");
+  }
   return parts.length ? `${parts.join(", then ")}; ` : "";
 }
 
