@@ -1,7 +1,7 @@
 /**
  * PNG container framing as the specification defines it (ISO/IEC 15948 / W3C PNG, 3rd edition): the signature,
  * the length/type/CRC chunk layout and the IHDR header.
- * The chunk walk interprets IHDR, PLTE, tRNS, IDAT and IEND and skips every other chunk.
+ * The chunk walk interprets IHDR, PLTE, tRNS, IDAT and IEND, skips unknown ancillary chunks and rejects unknown critical ones.
  */
 import { crc32 } from "./crc32.ts";
 import { PngError, type PngColorType } from "./types.ts";
@@ -174,8 +174,8 @@ function hex32(v: number): string {
   return "0x" + v.toString(16).padStart(8, "0");
 }
 
-/** Bytes from the start of a PNG through its IHDR data: the signature, IHDR's length and type, and its 13 bytes. */
-export const PNG_HEADER_BYTES = 33;
+/** Bytes from the start of a PNG through IHDR's CRC: signature 8 + IHDR length 4 + type 4 + data 13 + CRC 4. readPngHeader does not verify the CRC. */
+export const PNG_HEADER_BYTES = 8 + 4 + 4 + 13 + 4;
 
 /** The IHDR of a PNG from its first PNG_HEADER_BYTES, enough to size an image without reading the rest. */
 export function readPngHeader(head: Uint8Array): PngHeader {
