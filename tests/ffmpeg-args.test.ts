@@ -1,6 +1,6 @@
 /** The ffmpeg argv the video paths share, pinned as literal arrays so a refactor cannot change a flag unseen. */
 import { describe, expect, test } from "bun:test";
-import { aspectArgs, audioArgs, decodeArgv, encoderArgs, faststartArgs, muxCopyArgs } from "../src/pipeline/ffmpeg-args.ts";
+import { aspectArgs, audioArgs, decodeArgv, encoderArgs, faststartArgs, muxCopyArgs, rawvideoEncodeArgs } from "../src/pipeline/ffmpeg-args.ts";
 import { rational } from "../src/pipeline/rational.ts";
 
 describe("encoderArgs", () => {
@@ -59,6 +59,28 @@ describe("aspectArgs", () => {
   test("a stream copy needs the container tag and the bitstream's sample aspect, and a re-encode only the tag", () => {
     expect(aspectArgs(rational(4, 3), { width: 720, height: 480 }, "h264")).toEqual(["-aspect", "4:3", "-bsf:v", "h264_metadata=sample_aspect_ratio=8/9"]);
     expect(aspectArgs(rational(4, 3), { width: 720, height: 480 })).toEqual(["-aspect", "4:3"]);
+  });
+});
+
+describe("rawvideoEncodeArgs", () => {
+  const encoder = ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"];
+
+  test("a video job's encode: RGBA on pipe:0 at -r, the source's audio as input 1, then encoder and aspect", () => {
+    expect(
+      rawvideoEncodeArgs({ size: { width: 720, height: 480 }, rateFlag: "-r", frameRate: "30000/1001", audioSource: "in.mp4", container: "mkv", encoder, displayAspect: rational(4, 3), output: "out.mkv" }),
+    ).toEqual([
+      "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", "720x480", "-r", "30000/1001", "-i", "pipe:0", "-i", "in.mp4",
+      "-map", "0:v:0", "-map", "1:a:0", "-c:a", "copy", ...encoder, "-aspect", "4:3", "out.mkv",
+    ]);
+  });
+
+  test("without audio there is no second input, and extra flags come before the container's own", () => {
+    expect(
+      rawvideoEncodeArgs({ size: { width: 1280, height: 720 }, rateFlag: "-framerate", frameRate: "60/1", audioSource: null, container: "mp4", encoder, displayAspect: null, extra: ["-video_track_timescale", "60"], output: "out.mp4" }),
+    ).toEqual([
+      "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", "1280x720", "-framerate", "60/1", "-i", "pipe:0",
+      "-map", "0:v:0", "-an", ...encoder, "-video_track_timescale", "60", "-movflags", "+faststart", "out.mp4",
+    ]);
   });
 });
 

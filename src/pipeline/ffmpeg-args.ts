@@ -98,6 +98,39 @@ export function faststartArgs(container: EncodeSettings["container"]): string[] 
   return container === "mp4" || container === "mov" ? ["-movflags", "+faststart"] : [];
 }
 
+interface RawvideoEncodeSpec {
+  size: FrameSize;
+  /** How the rawvideo input is given its rate: -r (a video job) or -framerate (frame generation). */
+  rateFlag: "-r" | "-framerate";
+  frameRate: string;
+  /** The file whose first audio track is carried over, or null for no audio. */
+  audioSource: string | null;
+  container: EncodeSettings["container"];
+  /** The encoder and its settings (encoderArgs). */
+  encoder: readonly string[];
+  displayAspect: Rational | null;
+  /** Output flags that come after the aspect ones and before the container's own, such as -video_track_timescale. */
+  extra?: readonly string[];
+  output: string;
+}
+
+/**
+ * ffmpeg argv that encodes raw RGBA frames (pipe:0, input 0) into the output; the audio source, when there is one,
+ * is input 1. No -shortest: it trims whichever stream runs longer, and when a source's audio ends before its video
+ * (a 30 s stream-copied cut of 2.mp4 ends its audio 23 ms early) that drops video frames the job counted as
+ * written. Every path using this writes one frame per source frame or covers the decoded length, so the output
+ * keeps the source's stream lengths, as muxCopyArgs does.
+ */
+export function rawvideoEncodeArgs(spec: RawvideoEncodeSpec): string[] {
+  const { size, rateFlag, frameRate, audioSource, container, encoder, displayAspect, extra = [], output } = spec;
+  return [
+    "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${size.width}x${size.height}`, rateFlag, frameRate, "-i", "pipe:0",
+    ...(audioSource === null ? [] : ["-i", audioSource]),
+    "-map", "0:v:0", ...audioArgs(audioSource !== null, container), ...encoder,
+    ...aspectArgs(displayAspect, size), ...extra, ...faststartArgs(container), output,
+  ];
+}
+
 interface MuxCopySpec {
   /** ffmpeg demuxer for the elementary stream on stdin ("h264" or "hevc"): NVENC's output has no container. */
   demux: string;

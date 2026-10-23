@@ -5,7 +5,7 @@
  * throughput with unbounded memory.
  */
 import { type EncodeSettings, FRAME_GEN_CONTAINER } from "../server/api-types.ts";
-import { aspectArgs, audioArgs, encoderArgs, faststartArgs, muxCopyArgs } from "./ffmpeg-args.ts";
+import { encoderArgs, muxCopyArgs, rawvideoEncodeArgs } from "./ffmpeg-args.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "./framegen-device.ts";
 import { formatRational, type Rational } from "./rational.ts";
 import { nvencNativeTarget } from "./encode-select.ts";
@@ -44,8 +44,6 @@ export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): FramegenEncod
   const outputRate = formatRational(targetRate);
   // Null for CPU and AV1 codecs, and for dimensions NVENC will not take.
   const nativeTarget = nvencNativeTarget(codec, width, height);
-  /** Second input (audio only) and the video map, identical on both paths. */
-  const inputsAndMap = [...(hasAudio ? ["-i", input] : []), "-map", "0:v:0"];
   /**
    * No -shortest: the writer emits exactly ceil(decodedDuration * rate) frames,
    * so the video already spans the DECODED length and the audio is kept whole.
@@ -65,14 +63,12 @@ export function buildFrameGenEncodeArgs(spec: FrameGenEncodeArgs): FramegenEncod
           container: FRAME_GEN_CONTAINER, displayAspect, size: { width, height }, retime: targetRate, extra: timescale, output,
         })
       : [],
-    rawArgs: [
-      "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`,
-      "-framerate", outputRate, "-i", "pipe:0", ...inputsAndMap, ...audioArgs(hasAudio, FRAME_GEN_CONTAINER),
+    rawArgs: rawvideoEncodeArgs({
+      size: { width, height }, rateFlag: "-framerate", frameRate: outputRate, audioSource: hasAudio ? input : null, container: FRAME_GEN_CONTAINER,
       // The device is fixed for frame generation; FRAMEGEN_CUDA_DEVICE says which and why.
-      ...encoderArgs({ codec, quality, container: FRAME_GEN_CONTAINER, copyAudio: true }, FRAMEGEN_CUDA_DEVICE),
-      ...aspectArgs(displayAspect, { width, height }),
-      ...timescale, ...faststartArgs(FRAME_GEN_CONTAINER), output,
-    ],
+      encoder: encoderArgs({ codec, quality, container: FRAME_GEN_CONTAINER, copyAudio: true }, FRAMEGEN_CUDA_DEVICE),
+      displayAspect, extra: timescale, output,
+    }),
     nvenc: nativeTarget
       ? { width, height, fpsNum: Number(targetRate.num), fpsDen: Number(targetRate.den), codec: nativeTarget.codec, cq: quality }
       : null,
