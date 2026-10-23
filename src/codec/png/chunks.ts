@@ -152,6 +152,14 @@ export function isPng(bytes: Uint8Array): boolean {
   return true;
 }
 
+function requireSignature(bytes: Uint8Array): void {
+  if (!isPng(bytes)) throw new PngError(bytes.length < 8 ? "file is shorter than the 8-byte signature" : "bad signature, not a PNG file");
+}
+
+function requireIhdrFirst(typeCode: number): void {
+  if (typeCode !== TYPE_IHDR) throw new PngError(`first chunk must be IHDR, found "${chunkTypeName(typeCode)}"`);
+}
+
 function hex32(v: number): string {
   return "0x" + v.toString(16).padStart(8, "0");
 }
@@ -161,9 +169,9 @@ export const PNG_HEADER_BYTES = 33;
 
 /** The IHDR of a PNG from its first PNG_HEADER_BYTES, enough to size an image without reading the rest. */
 export function readPngHeader(head: Uint8Array): PngHeader {
-  if (!isPng(head)) throw new PngError("bad signature, not a PNG file");
+  requireSignature(head);
   if (head.length < PNG_HEADER_BYTES) throw new PngError("truncated file: missing IHDR chunk");
-  if (readU32(head, 12) !== TYPE_IHDR) throw new PngError(`first chunk must be IHDR, found "${chunkTypeName(readU32(head, 12))}"`);
+  requireIhdrFirst(readU32(head, 12));
   return parseIhdr(head, 16, readU32(head, 8));
 }
 
@@ -171,9 +179,7 @@ export function readPngHeader(head: Uint8Array): PngHeader {
  * Walks the chunk stream, validating framing and CRCs, collects PLTE/tRNS/IDAT and requires IEND.
  */
 export function parseChunks(bytes: Uint8Array): ParsedFile {
-  if (!isPng(bytes)) {
-    throw new PngError(bytes.length < 8 ? "file is shorter than the 8-byte signature" : "bad signature, not a PNG file");
-  }
+  requireSignature(bytes);
   let header: PngHeader | null = null;
   let palette: Uint8Array | null = null;
   let trns: Uint8Array | null = null;
@@ -206,7 +212,7 @@ export function parseChunks(bytes: Uint8Array): ParsedFile {
     if (expected !== actual) {
       throw new PngError(`CRC mismatch in chunk "${name}": stored ${hex32(expected)}, computed ${hex32(actual)}`);
     }
-    if (header === null && typeCode !== TYPE_IHDR) throw new PngError(`first chunk must be IHDR, found "${name}"`);
+    if (header === null) requireIhdrFirst(typeCode);
     pos = dataEnd + 4;
 
     switch (typeCode) {
