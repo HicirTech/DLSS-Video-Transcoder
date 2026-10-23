@@ -10,7 +10,7 @@
  * be CloseHandle'd afterwards.
  */
 import { dlopen, FFIType } from "bun:ffi";
-import { cudaFree } from "./cuda.ts";
+import { checkCuResult, cudaFree } from "./cuda.ts";
 import { OutU64 } from "./memory.ts";
 
 const cuda = dlopen("nvcuda.dll", {
@@ -22,15 +22,13 @@ const cuda = dlopen("nvcuda.dll", {
   cuDestroyExternalSemaphore: { args: [FFIType.u64], returns: FFIType.i32 },
 });
 
-function ck(r: number, what: string): void {
-  if (r !== 0) throw new Error(`CUDA interop ${what} failed: CUresult ${r}`);
-}
-
 // CUexternalMemoryHandleType / CUexternalSemaphoreHandleType
 const HANDLE_TYPE_D3D12_RESOURCE = 5;
 const SEM_HANDLE_TYPE_D3D12_FENCE = 4;
 // CUDA_EXTERNAL_MEMORY_DEDICATED — required for a D3D12 committed resource.
 const CUDA_EXTERNAL_MEMORY_DEDICATED = 0x1;
+// The wait goes on the legacy default stream, so the caller's context-wide cuCtxSynchronize covers it.
+const LEGACY_DEFAULT_STREAM = 0n;
 
 export interface ImportedBuffer {
   extMem: bigint;
@@ -54,7 +52,7 @@ export function importD3D12Buffer(sharedHandle: number, size: number): ImportedB
   dv.setBigUint64(24, BigInt(size), true);
   dv.setUint32(32, CUDA_EXTERNAL_MEMORY_DEDICATED, true);
   const extOut = new OutU64();
-  ck(cuda.symbols.cuImportExternalMemory(extOut.bytes, desc) as number, "cuImportExternalMemory");
+  checkCuResult(cuda.symbols.cuImportExternalMemory(extOut.bytes, desc) as number, "interop cuImportExternalMemory");
   const extMem = extOut.value;
 
   // CUDA_EXTERNAL_MEMORY_BUFFER_DESC (x64, 88 bytes): offset u64 @0; size u64 @8;
@@ -63,7 +61,7 @@ export function importD3D12Buffer(sharedHandle: number, size: number): ImportedB
   new DataView(bufDesc.buffer).setBigUint64(8, BigInt(size), true); // size @8, offset @0 = 0
   const devOut = new OutU64();
   try {
-    ck(cuda.symbols.cuExternalMemoryGetMappedBuffer(devOut.bytes, extMem, bufDesc) as number, "cuExternalMemoryGetMappedBuffer");
+    checkCuResult(cuda.symbols.cuExternalMemoryGetMappedBuffer(devOut.bytes, extMem, bufDesc) as number, "interop cuExternalMemoryGetMappedBuffer");
   } catch (error) {
     // The caller never receives this import, so it is undone here.
     cuda.symbols.cuDestroyExternalMemory(extMem);
@@ -82,7 +80,7 @@ export function releaseD3D12Buffer(buffer: ImportedBuffer): void {
   try {
     cudaFree(buffer.devPtr);
   } finally {
-    ck(cuda.symbols.cuDestroyExternalMemory(buffer.extMem) as number, "cuDestroyExternalMemory");
+    checkCuResult(cuda.symbols.cuDestroyExternalMemory(buffer.extMem) as number, "interop cuDestroyExternalMemory");
   }
 }
 
@@ -95,7 +93,7 @@ export function importD3D12Fence(sharedHandle: number): bigint {
   dv.setUint32(0, SEM_HANDLE_TYPE_D3D12_FENCE, true);
   dv.setBigUint64(8, BigInt(sharedHandle), true);
   const out = new OutU64();
-  ck(cuda.symbols.cuImportExternalSemaphore(out.bytes, desc) as number, "cuImportExternalSemaphore");
+  checkCuResult(cuda.symbols.cuImportExternalSemaphore(out.bytes, desc) as number, "interop cuImportExternalSemaphore");
   return out.value;
 }
 
@@ -106,9 +104,9 @@ export function waitExternalSemaphore(extSem: bigint, value: bigint, stream = 0n
   // CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS (x64, 144 bytes): params.fence.value u64 @0; ... flags u32 @72.
   const params = new Uint8Array(144);
   new DataView(params.buffer).setBigUint64(0, value, true);
-  ck(cuda.symbols.cuWaitExternalSemaphoresAsync(semArray, params, 1, stream) as number, "cuWaitExternalSemaphoresAsync");
+  checkCuResult(cuda.symbols.cuWaitExternalSemaphoresAsync(semArray, params, 1, LEGACY_DEFAULT_STREAM) as number, "interop cuWaitExternalSemaphoresAsync");
 }
 
 export function destroyExternalSemaphore(extSem: bigint): void {
-  ck(cuda.symbols.cuDestroyExternalSemaphore(extSem) as number, "cuDestroyExternalSemaphore");
+  checkCuResult(cuda.symbols.cuDestroyExternalSemaphore(extSem) as number, "interop cuDestroyExternalSemaphore");
 }
