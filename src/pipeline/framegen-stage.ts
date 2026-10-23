@@ -73,12 +73,16 @@ export class Stage {
     guide.onmessage = (event: MessageEvent) => {
       const m = event.data as GuideOut;
       if (m.type === "prepared") {
-        const w = this.waiter;
+        const pendingGuide = this.waiter;
+        if (!pendingGuide) return;
+        if (m.id !== pendingGuide.id) {
+          this.fail(new Error(`frame-generation guide worker answered request ${m.id} while ${pendingGuide.id} was pending`));
+          return;
+        }
         this.waiter = null;
-        if (!w) return;
         this.sceneCuts = m.sceneCuts;
-        w.resolve({
-          frame: m.segment === w.frame.segment ? w.frame : { ...w.frame, segment: m.segment },
+        pendingGuide.resolve({
+          frame: m.segment === pendingGuide.frame.segment ? pendingGuide.frame : { ...pendingGuide.frame, segment: m.segment },
           previousTimestamp: m.previousTsNum !== null && m.previousTsDen !== null ? { num: m.previousTsNum, den: m.previousTsDen } : null,
           reset: m.reset,
           small: m.small ? new Float32Array(m.small) : null,
@@ -93,10 +97,14 @@ export class Stage {
       packer.onmessage = (event: MessageEvent) => {
         const m = event.data as GuideOut;
         if (m.type === "packed") {
-          const w = this.packWaiter;
+          const pendingPack = this.packWaiter;
+          if (!pendingPack) return;
+          if (m.id !== pendingPack.id) {
+            this.fail(new Error(`frame-generation packer worker answered request ${m.id} while ${pendingPack.id} was pending`));
+            return;
+          }
           this.packWaiter = null;
-          if (!w) return;
-          w.resolve({ frame: w.analyzed.frame, previousTimestamp: w.analyzed.previousTimestamp, half: new Uint16Array(m.half), reset: w.analyzed.reset });
+          pendingPack.resolve({ frame: pendingPack.analyzed.frame, previousTimestamp: pendingPack.analyzed.previousTimestamp, half: new Uint16Array(m.half), reset: pendingPack.analyzed.reset });
         } else if (m.type === "error") {
           this.fail(new Error(`frame-generation packer worker: ${m.message}`));
         }
