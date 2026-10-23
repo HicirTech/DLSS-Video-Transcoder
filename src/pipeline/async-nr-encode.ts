@@ -27,7 +27,7 @@ export interface AsyncNrEncodeParams {
   height: number;
   rowPitch: number; // row pitch of the shared buffers: >= width*4, aligned to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256)
   totalBytes: number; // size of each shared buffer
-  enc: Pick<AsyncEncodeOpen, "fpsNum" | "fpsDen" | "codec" | "cq" | "ordinal">;
+  enc: Omit<AsyncEncodeOpen["enc"], "width" | "height">;
   totalFrames: number | null;
   /** Per-frame guide (main thread), NR takes no motion. */
   guide: (rgba: Uint8Array, index: number) => { reset: boolean; sceneCut: boolean };
@@ -161,9 +161,8 @@ export function runAsyncNrEncode(p: AsyncNrEncodeParams): Promise<FrameCounts> {
 
     const open: AsyncEncodeOpen = {
       type: "open", ffmpeg: p.ffmpeg, sinkArgs: p.sinkArgs,
-      bufHandles: pool.bufferHandles, fenceHandle: pool.fenceHandle, size: p.totalBytes,
-      width: p.width, height: p.height, pitch: p.rowPitch,
-      fpsNum: p.enc.fpsNum, fpsDen: p.enc.fpsDen, codec: p.enc.codec, cq: p.enc.cq, ordinal: p.enc.ordinal,
+      bufferHandles: pool.bufferHandles, fenceHandle: pool.fenceHandle, bufferBytes: p.totalBytes, rowPitch: p.rowPitch,
+      enc: { ...p.enc, width: p.width, height: p.height },
     };
     encodeWorker.postMessage(open);
   });
