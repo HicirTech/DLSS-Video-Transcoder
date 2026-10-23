@@ -15,7 +15,7 @@ const base = {
   width: 1280,
   height: 720,
   targetRate: rational(60),
-  quality: 20,
+  quality: 27,
   displayAspect: null,
 };
 
@@ -27,7 +27,7 @@ describe("buildFrameGenEncodeArgs", () => {
       "-map", "0:v:0", "-c:v", "copy", "-bsf:v", "setts=ts=N*1/(60*TB):duration=1/(60*TB)", "-an",
       "-video_track_timescale", "60", "-movflags", "+faststart", "out.mp4",
     ]);
-    expect(open.nvenc).toEqual({ width: 1280, height: 720, fpsNum: 60, fpsDen: 1, codec: "h264", cq: 20 });
+    expect(open.nvenc).toEqual({ width: 1280, height: 720, fpsNum: 60, fpsDen: 1, codec: "h264", cq: 27 });
   });
 
   test("audio re-opens the source as input 1, before -map and before any output option", () => {
@@ -47,7 +47,7 @@ describe("buildFrameGenEncodeArgs", () => {
     expect(open.rawArgs).toEqual([
       "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", "1280x720",
       "-framerate", "60/1", "-i", "pipe:0", "-map", "0:v:0", "-an",
-      "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+      "-c:v", "libx264", "-preset", "medium", "-crf", "27", "-pix_fmt", "yuv420p",
       "-video_track_timescale", "60", "-movflags", "+faststart", "out.mp4",
     ]);
   });

@@ -8,6 +8,7 @@ import { type FrameCounts, connectFrameFlow } from "../src/pipeline/frame-flow.t
 import type { FrameTally } from "../src/pipeline/frame-progress.ts";
 import { RunFailedError, framesWrittenOf } from "../src/pipeline/partial-output.ts";
 import { WorkerPairRun } from "../src/pipeline/worker-pair-run.ts";
+import type { DecodeCredit } from "../src/pipeline/workers/decode-worker.ts";
 import { FakeWorker } from "./fake-worker.ts";
 
 const CREDIT_WINDOW = 4;
@@ -47,7 +48,7 @@ function start(processFrame: (frame: { index: number; buf: ArrayBuffer }, frameN
 type Flow = ReturnType<typeof start>;
 
 const frame = (index: number) => ({ type: "frame", index, buf: new ArrayBuffer(16) });
-const credits = (flow: Flow): number[] => flow.decode.sentOfType("credit").map((message) => (message as { frames: number }).frames);
+const credits = (flow: Flow): number[] => flow.decode.sentOfType("credit").map((message) => (message as DecodeCredit).frames);
 
 function acknowledgeAbort(flow: Flow): void {
   flow.decode.reply({ type: "aborted" });
