@@ -1,3 +1,5 @@
+/** Display formatting the panels share: file names, rates, durations, times, sizes, hex ids and a job's elapsed time. */
+import { ratToNumber, tryParseRate } from "../../src/pipeline/rational";
 import { isActiveState, type JobStatus } from "../../src/server/api-types";
 
 /** Last path segment, accepting both Windows and POSIX separators. */
@@ -15,9 +17,8 @@ export function stemOf(path: string): string {
 
 /** An ffmpeg rate ("30000/1001", "25") as frames per second, or null when it is not one. */
 export function rateValue(text: string): number | null {
-  const [num, den = "1"] = text.split("/");
-  const value = Number(num) / Number(den);
-  return Number.isFinite(value) && value > 0 ? value : null;
+  const rate = tryParseRate(text);
+  return rate ? ratToNumber(rate) : null;
 }
 
 /** Frames per second with at most three decimals and no trailing zeros: 29.97, 23.976, 60. */
