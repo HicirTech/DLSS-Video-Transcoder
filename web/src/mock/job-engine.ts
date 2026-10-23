@@ -3,7 +3,16 @@
  * dependency, so the Bun mock server (web/mock-server.ts) and the browser (`?mock=1`) share it.
  */
 import type { JobRequest, JobStatus, WsEvent } from "../../../src/server/api-types";
-import { CANCELLED_MESSAGE, DEFAULT_ENCODE_SETTINGS, jobSteps, resizesFrames, stepsSuffix, trimJobLog } from "../../../src/server/api-types";
+import {
+  CANCELLED_MESSAGE,
+  CANCELLING_MESSAGE,
+  DEFAULT_ENCODE_SETTINGS,
+  DEFAULT_WARMUP_FRAMES,
+  jobSteps,
+  resizesFrames,
+  stepsSuffix,
+  trimJobLog,
+} from "../../../src/server/api-types";
 
 export function timestamp(): string {
   return new Date().toISOString();
@@ -16,6 +25,12 @@ function outputPathFor(request: JobRequest): string {
   const stem = dot > slash ? request.input.slice(0, dot) : request.input;
   const extension = request.kind === "video" ? `.${request.encode?.container ?? DEFAULT_ENCODE_SETTINGS.container}` : ".png";
   return `${stem}.${stepsSuffix(jobSteps(request), resizesFrames(request))}${extension}`;
+}
+
+/** The frames a job counts once it runs: an image job's passes as image.ts runs them, a random length for a video. */
+function framesFor(request: JobRequest): number {
+  if (request.kind === "video") return 240 + Math.floor(Math.random() * 600);
+  return jobSteps(request).length > 0 ? Math.max(1, (request.warmupFrames ?? DEFAULT_WARMUP_FRAMES) + 1) : 1;
 }
 
 function cloneJob(job: JobStatus): JobStatus {
@@ -61,14 +76,15 @@ export class MockJobEngine {
       id,
       kind: request.kind,
       input: request.input,
-      output: request.output && request.output.trim() !== "" ? request.output : outputPathFor(request),
+      // As the server does: an output the request does not name is known once the job is done.
+      output: request.output ?? null,
       steps: jobSteps(request),
       state: "queued",
       cancelRequest: "none",
       progress: 0,
-      message: "Queued",
+      message: "queued",
       framesDone: 0,
-      framesTotal: request.kind === "image" ? 1 : 240 + Math.floor(Math.random() * 600),
+      framesTotal: null,
       fps: null,
       createdAt: timestamp(),
       startedAt: null,
@@ -77,6 +93,7 @@ export class MockJobEngine {
       log: [`[queue] ${request.kind} job accepted (steps: ${jobSteps(request).join(", ") || "none"})`],
     };
     this.jobs.set(id, job);
+    this.requests.set(id, request);
     this.emitJob(job);
     this.schedule(id, 700);
     return cloneJob(job);
@@ -92,7 +109,7 @@ export class MockJobEngine {
     } else if (job.state === "running" && job.cancelRequest === "none") {
       this.clearTimer(id);
       job.cancelRequest = "pending";
-      job.message = "cancelling";
+      job.message = CANCELLING_MESSAGE;
       this.emitJob(job);
       // One tick stands in for the pipeline's teardown.
       this.timers.set(id, setTimeout(() => {
@@ -106,7 +123,7 @@ export class MockJobEngine {
   private markCancelled(job: JobStatus): void {
     job.state = "cancelled";
     job.finishedAt = timestamp();
-    job.message = "Cancelled by user";
+    job.message = CANCELLED_MESSAGE;
     this.appendLog(job, `[job] ${CANCELLED_MESSAGE}`);
     this.emitJob(job);
   }
@@ -145,9 +162,11 @@ export class MockJobEngine {
     const job = this.jobs.get(id);
     if (!job) return;
 
+    const request = this.requests.get(id);
     if (job.state === "queued") {
       job.state = "running";
       job.startedAt = timestamp();
+      if (request) job.framesTotal = framesFor(request);
       job.message = "Creating NGX feature 18";
       this.appendLog(job, "[ngx] D3D12 device ready on adapter 0, NVSDK_NGX_D3D12_CreateFeature(18) ok");
       this.emitJob(job);
@@ -158,9 +177,9 @@ export class MockJobEngine {
 
     const total = job.framesTotal ?? 1;
     if (job.kind === "image") {
-      job.progress = Math.min(1, job.progress + 0.2);
-      const warmup = Math.min(4, Math.round(job.progress * 5));
-      job.message = `Warm-up evaluation ${warmup}/4`;
+      job.framesDone = Math.min(total, job.framesDone + 1);
+      job.progress = job.framesDone / total;
+      job.message = `pass ${job.framesDone}/${total}`;
     } else {
       const step = Math.max(1, Math.round(total / 60 + Math.random() * 4));
       job.framesDone = Math.min(total, job.framesDone + step);
@@ -175,7 +194,8 @@ export class MockJobEngine {
       job.progress = 1;
       job.state = "done";
       job.finishedAt = timestamp();
-      job.message = "Done";
+      if (request) job.output ??= outputPathFor(request);
+      job.message = "complete";
       this.appendLog(job, `[io] wrote ${job.output ?? "output"}`);
       this.emitJob(job);
       return;
