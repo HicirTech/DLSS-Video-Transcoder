@@ -18,8 +18,8 @@ export function option(args: string[], name: string): string | undefined {
 }
 
 interface NumberOptionSpec {
-  min?: number;
-  max?: number;
+  min: number;
+  max: number;
   integer?: boolean;
   /** Used when the flag is absent. */
   fallback: number;
@@ -34,18 +34,9 @@ export function numberOption(args: string[], name: string, spec: NumberOptionSpe
   if (raw === undefined) return spec.fallback;
   const value = Number(raw);
   const noun = spec.integer ? "a whole number" : "a number";
-  const range =
-    spec.min !== undefined && spec.max !== undefined
-      ? `between ${spec.min} and ${spec.max}`
-      : spec.min !== undefined
-        ? `of at least ${spec.min}`
-        : "";
-  const expected = range ? `${noun} ${range}` : noun;
-  if (!Number.isFinite(value)) usageError(`${name} expects ${expected}, got "${raw}"`);
-  if (spec.integer && !Number.isInteger(value)) usageError(`${name} expects ${expected}, got "${raw}"`);
-  if ((spec.min !== undefined && value < spec.min) || (spec.max !== undefined && value > spec.max)) {
-    usageError(`${name} must be ${range}, got ${value}`);
-  }
+  const range = `between ${spec.min} and ${spec.max}`;
+  if (!Number.isFinite(value) || (spec.integer && !Number.isInteger(value))) usageError(`${name} expects ${noun} ${range}, got "${raw}"`);
+  if (value < spec.min || value > spec.max) usageError(`${name} must be ${range}, got ${value}`);
   return value;
 }
 
@@ -58,10 +49,10 @@ export function enumOption<T extends number>(args: string[], name: string, allow
   return value as T;
 }
 
-/** A named choice, rejected up front instead of failing later inside the pipeline. */
-export function choiceOption<T extends string>(args: string[], name: string, allowed: readonly T[], fallback?: T): T | undefined {
+/** A named choice, or undefined when absent; one outside `allowed` is rejected up front instead of failing later inside the pipeline. */
+export function choiceOption<T extends string>(args: string[], name: string, allowed: readonly T[]): T | undefined {
   const raw = option(args, name);
-  if (raw === undefined) return fallback;
+  if (raw === undefined) return undefined;
   if (!(allowed as readonly string[]).includes(raw)) usageError(`${name} must be one of ${allowed.join(", ")}, got "${raw}"`);
   return raw as T;
 }
