@@ -70,7 +70,7 @@ const NONE: ScaleSettings = { mode: "none", factor: 1, width: 0, height: 0 };
 const FACTOR2: ScaleSettings = { mode: "factor", factor: 2, width: 0, height: 0 };
 const SIZE: ScaleSettings = { mode: "size", factor: 1, width: 1280, height: 1872 };
 const settings = { ...DEFAULT_NR_SETTINGS };
-const safe = (s: string): string => s.replace(/[^\w.-]/g, "_");
+const safe = (name: string): string => name.replace(/[^\w.-]/g, "_");
 
 /**
  * Progress lines that say WHERE a row ran — the GPU (adapter, LUID, CUDA
@@ -85,7 +85,7 @@ function provenance(): { onProgress: (fraction: number, message: string) => void
       if (/^(GPU: |encode: |optical flow: )/.test(message)) lines.push(message);
     },
     print: () => {
-      for (const l of lines) console.log(`    ${l}`);
+      for (const message of lines) console.log(`    ${message}`);
     },
   };
 }
@@ -116,12 +116,12 @@ async function videoJob({ name, steps, motion, scale, encode }: { name: string; 
   const output = join(outDir, `vid-${safe(name)}.${encode.container}`);
   const where = provenance();
   try {
-    const r = await processVideo({ input: clip, output, ...stepsOf(steps, scale, settings, motion), encode, runtimeDir, onProgress: where.onProgress });
+    const result = await processVideo({ input: clip, output, ...stepsOf(steps, scale, settings, motion), encode, runtimeDir, onProgress: where.onProgress });
     // libx265 schedules frame-parallel threads non-deterministically, so its
     // bitstream differs run to run on identical input. Everything else here is
     // reproducible, so only this one reports structure instead of a hash.
     const digest = encode.codec === "hevc" ? "x265-nondeterministic" : streamHash(output);
-    line(`video ${name}`, 0, `stream=${digest} ${r.width}x${r.height} frames=${r.frames} cuts=${r.sceneCuts}`);
+    line(`video ${name}`, 0, `stream=${digest} ${result.width}x${result.height} frames=${result.frames} cuts=${result.sceneCuts}`);
   } catch (error) {
     failureLine(`video ${name}`, error);
   }
