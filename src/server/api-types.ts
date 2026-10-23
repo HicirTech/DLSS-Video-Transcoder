@@ -38,8 +38,16 @@ type NrStyle = (typeof NR_STYLES)[number];
 export const NR_STYLE_LABELS: Record<NrStyle, string> = { 0: "Default", 1: "Natural", 2: "Cinematic" };
 export const SCALE_MODES = ["none", "factor", "size"] as const;
 type ScaleMode = (typeof SCALE_MODES)[number];
-export const ENCODE_CODECS = ["h264", "hevc", "av1", "h264_nvenc", "hevc_nvenc", "av1_nvenc"] as const;
+/** The CPU encoders, and the NVENC ones that each fall back to the CPU sibling of the same format. */
+export const CPU_CODECS = ["h264", "hevc", "av1"] as const;
+export const NVENC_CODECS = ["h264_nvenc", "hevc_nvenc", "av1_nvenc"] as const;
+export const ENCODE_CODECS = [...CPU_CODECS, ...NVENC_CODECS] as const;
 type EncodeCodec = (typeof ENCODE_CODECS)[number];
+export type NvencCodec = (typeof NVENC_CODECS)[number];
+const NVENC_SET: ReadonlySet<string> = new Set(NVENC_CODECS);
+export function isNvencCodec(codec: string): codec is NvencCodec {
+  return NVENC_SET.has(codec);
+}
 export const ENCODE_CONTAINERS = ["mp4", "mkv", "mov"] as const;
 type EncodeContainer = (typeof ENCODE_CONTAINERS)[number];
 
@@ -117,7 +125,7 @@ export const DEFAULT_ENCODE_SETTINGS: EncodeSettings = { codec: "h264_nvenc", qu
  * HEIGHT_MAX of 4096 for H.264, and ffmpeg encodes 4096x4096 with h264_nvenc but not 4098x2160, and 8192x8192
  * with hevc_nvenc and av1_nvenc but not 8208x4320.
  */
-export const NVENC_MAX_SIDE: Readonly<Partial<Record<EncodeCodec, number>>> = { h264_nvenc: 4096, hevc_nvenc: 8192, av1_nvenc: 8192 };
+export const NVENC_MAX_SIDE: Readonly<Record<NvencCodec, number>> = { h264_nvenc: 4096, hevc_nvenc: 8192, av1_nvenc: 8192 };
 
 /**
  * What a video job does with the source's audio track in each container: mkv takes the track as it is, mp4

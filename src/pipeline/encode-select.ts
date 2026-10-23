@@ -1,28 +1,21 @@
 /**
  * Codec selection for the video and frame-generation encode paths: an NVENC
  * codec that cannot actually run on this machine degrades to its CPU sibling
- * rather than failing the job. Owns the ffmpeg-side NVENC vocabulary, which is
- * encoder NAMES ("h264_nvenc"); the in-process SDK's own codec list lives in
- * nvenc.ts and is a different set.
+ * rather than failing the job. The ffmpeg-side NVENC encoder NAMES ("h264_nvenc")
+ * come from api-types.ts (NVENC_CODECS); the in-process SDK's own codec list
+ * lives in nvenc.ts and is a different set.
  */
-import type { EncodeSettings } from "../server/api-types.ts";
+import { type EncodeSettings, isNvencCodec, NVENC_CODECS, type NvencCodec } from "../server/api-types.ts";
 import { nvencLimitExceeded } from "../server/output-size.ts";
 import type { NvencSdkCodec } from "./nvenc.ts";
 
 export type Codec = EncodeSettings["codec"];
 
-/** The NVENC encoders ffmpeg exposes. Order matches EncodeSettings["codec"] in api-types.ts. */
-export const FFMPEG_NVENC_ENCODERS = ["h264_nvenc", "hevc_nvenc", "av1_nvenc"] as const;
-export type FfmpegNvencEncoder = (typeof FFMPEG_NVENC_ENCODERS)[number];
-
-const NVENC_SET: ReadonlySet<string> = new Set(FFMPEG_NVENC_ENCODERS);
-
-export function isNvenc(codec: string): codec is FfmpegNvencEncoder {
-  return NVENC_SET.has(codec);
-}
+/** The NVENC encoders ffmpeg exposes, under the names the CLI and the tests use for them here. */
+export { NVENC_CODECS as FFMPEG_NVENC_ENCODERS, isNvencCodec as isNvenc, type NvencCodec as FfmpegNvencEncoder };
 
 /** Each NVENC encoder mapped to the CPU codec producing the same bitstream format. */
-const NVENC_TO_CPU_CODEC: Record<FfmpegNvencEncoder, Codec> = {
+const NVENC_TO_CPU_CODEC: Record<NvencCodec, Codec> = {
   h264_nvenc: "h264",
   hevc_nvenc: "hevc",
   av1_nvenc: "av1",
@@ -30,7 +23,7 @@ const NVENC_TO_CPU_CODEC: Record<FfmpegNvencEncoder, Codec> = {
 
 /** The CPU sibling for an NVENC codec; a CPU codec passes through unchanged. */
 export function cpuSiblingCodec(codec: Codec): Codec {
-  return isNvenc(codec) ? NVENC_TO_CPU_CODEC[codec] : codec;
+  return isNvencCodec(codec) ? NVENC_TO_CPU_CODEC[codec] : codec;
 }
 
 /**
@@ -70,7 +63,7 @@ export function nvencGpuArgs(gpu: number): string[] {
  * per-codec size caps are NVENC_MAX_SIDE's, which resolveEncodeCodec checks
  * first. Success == exit 0.
  */
-export function buildNvencProbeArgs(codec: FfmpegNvencEncoder, gpu: number): string[] {
+export function buildNvencProbeArgs(codec: NvencCodec, gpu: number): string[] {
   return ["-v", "error", "-f", "lavfi", "-i", "color=size=256x256:rate=1", "-frames:v", "1", "-c:v", codec, ...nvencGpuArgs(gpu), "-f", "null", "-"];
 }
 
@@ -79,7 +72,7 @@ export function buildNvencProbeArgs(codec: FfmpegNvencEncoder, gpu: number): str
  * Named for the mechanism because nvenc.ts has its own probeNvencCaps that asks
  * the SDK directly over FFI; this one spawns ffmpeg, synchronously.
  */
-export function probeNvencViaFfmpeg(ffmpeg: string, codec: FfmpegNvencEncoder, gpu: number): boolean {
+export function probeNvencViaFfmpeg(ffmpeg: string, codec: NvencCodec, gpu: number): boolean {
   try {
     const proc = Bun.spawnSync([ffmpeg, ...buildNvencProbeArgs(codec, gpu)], { stdout: "ignore", stderr: "ignore" });
     return proc.exitCode === 0;
@@ -104,11 +97,11 @@ export interface ResolvedCodec {
  * job and pass the result down.
  */
 export function resolveEncodeCodec(codec: Codec, ffmpeg: string, gpu: number, size: { width: number; height: number }): ResolvedCodec {
-  if (!isNvenc(codec)) return { codec, note: null };
+  if (!isNvencCodec(codec)) return { codec, note: null };
   const cpu = cpuSiblingCodec(codec);
   const limit = nvencLimitExceeded(codec, size);
   if (limit !== null) {
-    const onGpu = FFMPEG_NVENC_ENCODERS.filter((other) => nvencLimitExceeded(other, size) === null);
+    const onGpu = NVENC_CODECS.filter((other) => nvencLimitExceeded(other, size) === null);
     const instead = onGpu.length ? `; ${onGpu.join(" or ")} would keep it on the GPU` : "";
     return { codec: cpu, note: `${codec} encodes at most ${limit} pixels per side and this output is ${size.width}x${size.height}: encoding with ${cpu} (CPU) instead, which is slower${instead}` };
   }
