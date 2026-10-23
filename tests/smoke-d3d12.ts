@@ -1,12 +1,11 @@
 /**
- * Manual smoke test: enumerate adapters, create a device on the NVIDIA GPU,
- * round-trip synthetic textures and buffers through GPU memory and compare bytes.
+ * Manual smoke test: create a device on the GPU a job would use (openGpu), round-trip synthetic textures and
+ * buffers through GPU memory and compare bytes.
  *
  *   bun run tests/smoke-d3d12.ts
  */
-import { DxgiFactory, selectAdapter } from "../src/native/dxgi.ts";
 import {
-  D3D12Device,
+  type D3D12Device,
   D3D12Resource,
   D3D12_RESOURCE_STATE_COMMON,
   D3D12_RESOURCE_STATE_COPY_DEST,
@@ -18,7 +17,8 @@ import {
   bytesPerPixel,
   formatName,
 } from "../src/native/d3d12.ts";
-import { GpuContext } from "../src/native/gpu-context.ts";
+import type { GpuContext } from "../src/native/gpu-context.ts";
+import { describeGpu, openGpu } from "../src/pipeline/gpu.ts";
 import { DISABLE_FLAG_BUFFER_BYTES, DISABLE_FLAG_UNWRITTEN } from "../src/ngx/dlssg-interval.ts";
 
 const UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
@@ -118,12 +118,13 @@ function checkReadbackMatchesUpload(gpu: GpuContext, device: D3D12Device): void 
   });
 }
 
-function throws(action: () => void): boolean {
+/** True when `action` throws an Error whose message matches: the refusal the check names, not any failure. */
+function throwsMatching(action: () => void, message: RegExp): boolean {
   try {
     action();
     return false;
-  } catch {
-    return true;
+  } catch (error) {
+    return error instanceof Error && message.test(error.message);
   }
 }
 
@@ -136,8 +137,8 @@ function checkBufferFill(gpu: GpuContext, device: D3D12Device): void {
     check(`fill ${buffers.length} x ${DISABLE_FLAG_BUFFER_BYTES} B UAV buffers with 0x${byteValue.toString(16)}: ${wrong} wrong bytes`, wrong === 0);
   }
   check("buffers are tracked as COMMON once the submit completes", buffers.every((buffer) => buffer.state === D3D12_RESOURCE_STATE_COMMON));
-  check("fillBuffers rejects a byteValue outside 0..255", throws(() => gpu.fillBuffers({ buffers, byteValue: 0x1cd, finalState: UAV })));
-  check("readbackMany rejects an empty request", throws(() => gpu.readbackMany({ textures: [], buffers: [], textureRestoreState: UAV })));
+  check("fillBuffers rejects a byteValue outside 0..255", throwsMatching(() => gpu.fillBuffers({ buffers, byteValue: 0x1cd, finalState: UAV }), /^fillBuffers: byteValue 461 is not a byte/));
+  check("readbackMany rejects an empty request", throwsMatching(() => gpu.readbackMany({ textures: [], buffers: [], textureRestoreState: UAV }), /^readbackMany: no textures or buffers requested/));
 }
 
 function checkBatch(gpu: GpuContext, device: D3D12Device): void {
@@ -161,31 +162,16 @@ function checkBatch(gpu: GpuContext, device: D3D12Device): void {
   check(`batch of ${shapes.length} textures + ${buffers.length} buffers in one submit (${elapsed.toFixed(1)} ms): texture mismatches [${textureMismatches}], buffer mismatches [${bufferMismatches}]`, [...textureMismatches, ...bufferMismatches].every((count) => count === 0));
 }
 
-const factory = DxgiFactory.create();
-const adapters = factory.enumerate();
-let device: D3D12Device | null = null;
-let gpu: GpuContext | null = null;
+const session = openGpu({ debugLayer: process.argv.includes("--debug") });
 try {
-  for (const adapter of adapters) {
-    const i = adapter.info;
-    console.log(`adapter ${i.index}: ${i.name} vendor=0x${i.vendorId.toString(16)} vram=${i.dedicatedVideoMemoryMB}MB luid=${i.luid}${i.software ? " (software)" : ""}`);
-  }
-  const chosen = selectAdapter(adapters);
-  if (!chosen) throw new Error("no NVIDIA adapter");
-  console.log(`using adapter ${chosen.info.index}`);
-  device = D3D12Device.create(chosen, { debugLayer: process.argv.includes("--debug") });
-  console.log("device created");
-  gpu = new GpuContext(device);
-  checkRoundTrip(gpu, device);
-  checkReadbackMatchesUpload(gpu, device);
-  checkBufferFill(gpu, device);
-  checkBatch(gpu, device);
+  console.log(describeGpu(session));
+  checkRoundTrip(session.gpu, session.device);
+  checkReadbackMatchesUpload(session.gpu, session.device);
+  checkBufferFill(session.gpu, session.device);
+  checkBatch(session.gpu, session.device);
 } finally {
   for (const resource of resources) resource.release();
-  gpu?.close();
-  device?.release();
-  for (const adapter of adapters) adapter.release();
-  factory.release();
+  session.close();
 }
 console.log(failures.length === 0 ? "OK" : `FAILED: ${failures.length} check(s)`);
 process.exit(failures.length === 0 ? 0 : 1);
