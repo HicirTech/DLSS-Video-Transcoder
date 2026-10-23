@@ -1,5 +1,6 @@
 /** The `probe` command: reports whether neural rendering is ready on this machine and exits 0 only then. */
-import { PROBE_ENTRIES, PROBE_INITS, runProbe } from "../ngx/probe.ts";
+import { runProbe } from "../ngx/probe.ts";
+import { PROBE_ENTRIES, PROBE_INITS } from "../ngx/probe-options.ts";
 import { APP_DATA_DIR } from "../paths.ts";
 import { adapterOption, choiceOption, flag, positionalArgs, runtimeDirOption } from "./args.ts";
 import { commandSpec } from "./commands.ts";
@@ -14,7 +15,7 @@ export async function probeCommand(args: string[]): Promise<void> {
     runtimeDir: runtimeDirOption(args),
     appDataPath: APP_DATA_DIR,
     projectInit: flag(args, "--project-init"),
-    // No fallback: probe.ts owns both defaults, so repeating them here would be a second copy.
+    // No fallback: probe-options.ts owns both defaults, so repeating them here would be a second copy.
     entry: choiceOption(args, "--entry", PROBE_ENTRIES),
     nullFeatureInfo: flag(args, "--null-feature-info"),
     init: choiceOption(args, "--init", PROBE_INITS),
