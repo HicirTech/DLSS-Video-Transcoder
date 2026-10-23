@@ -39,7 +39,8 @@ describe("videoInfoFrom", () => {
   });
 
   test("frames come from nb_frames, else duration x rate", () => {
-    expect(videoInfoFrom(stream({ r: "30/1", avg: "30/1" }), "in.mp4").frames).toBe(300);
+    // 25 fps over the fixture's 10.0 s would be 250 frames: 300 is nb_frames, which wins.
+    expect(videoInfoFrom(stream({ r: "25/1", avg: "25/1" }), "in.mp4").frames).toBe(300);
     const noCount: ProbeJson = { streams: [{ codec_type: "video", width: 640, height: 480, r_frame_rate: "25/1", nb_frames: "N/A" }], format: { duration: "4.0" } };
     expect(videoInfoFrom(noCount, "in.mp4").frames).toBe(100);
   });
