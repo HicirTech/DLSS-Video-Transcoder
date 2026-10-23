@@ -1,6 +1,6 @@
 /** PNG encoder: always colour type 6 at depth 8; the zlib layer is node:zlib, not Bun's (see encodePng). */
 import { deflateSync as nodeDeflate } from "node:zlib";
-import { PNG_SIGNATURE, TYPE_IDAT, TYPE_IEND, TYPE_IHDR, writeChunkInto, writeU32 } from "./chunks.ts";
+import { PNG_SIGNATURE, requireValidDimensions, TYPE_IDAT, TYPE_IEND, TYPE_IHDR, writeChunkInto, writeU32 } from "./chunks.ts";
 import { PngError, type PngEncodeOptions, type RgbaImage } from "./types.ts";
 
 /**
@@ -11,12 +11,7 @@ import { PngError, type PngEncodeOptions, type RgbaImage } from "./types.ts";
  */
 export function encodePng(img: RgbaImage, options: PngEncodeOptions = {}): Uint8Array {
   const { width, height, rgba } = img;
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
-    throw new PngError(`invalid image dimensions ${width}x${height}`);
-  }
-  if (width > 0x7fffffff || height > 0x7fffffff) {
-    throw new PngError(`image dimensions ${width}x${height} exceed the 2^31-1 limit`);
-  }
+  requireValidDimensions(img);
   const rowBytes = width * 4;
   if (rgba.length !== rowBytes * height) {
     throw new PngError(`rgba has ${rgba.length} bytes, expected ${rowBytes * height} for ${width}x${height} RGBA`);
