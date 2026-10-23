@@ -55,14 +55,11 @@ export interface GpuCandidate {
 /** The driver-level half of a CUDA lookup, shared by every candidate: how many devices, or why none could be asked for. */
 export type CudaSummary = Pick<CudaDeviceMap, "deviceCount" | "error">;
 
-export interface GpuChoice {
-  /** DXGI index of the adapter to use, for a job or for diagnostics; null when no adapter can be named. */
-  index: number | null;
-  /** CUDA device behind it; null makes the choice ineligible for a job. */
-  cudaOrdinal: number | null;
-  /** Why a job on this choice is refused, one sentence a user can act on; empty means eligible. */
-  reasons: string[];
-}
+export type GpuChoice =
+  /** A job can run here: the DXGI adapter and the CUDA device behind it. */
+  | { eligible: true; index: number; cudaOrdinal: number }
+  /** A job is refused. `index` still names the adapter probe should diagnose, or null when none can be named; `reasons` are sentences a user can act on. */
+  | { eligible: false; index: number | null; reasons: string[] };
 
 /** An adapter a job accepts: NVIDIA hardware with a CUDA device behind it. The probe reports this per adapter. */
 export function isEligibleGpu(c: GpuCandidate): boolean {
@@ -75,14 +72,22 @@ function alternatives(candidates: readonly GpuCandidate[]): string {
   return usable ? `Adapters with a CUDA device: ${usable}.` : "No listed NVIDIA adapter has a CUDA device.";
 }
 
-const describe = (c: GpuCandidate): string =>
-  `${c.info.index}: ${c.info.name}${c.cudaOrdinal === null ? "" : ` (LUID ${c.info.luid}, CUDA device ${c.cudaOrdinal}${c.cudaUuid ? `, ${c.cudaUuid}` : ""})`}`;
+const describe = (candidate: GpuCandidate): string =>
+  `${candidate.info.index}: ${candidate.info.name}${candidate.cudaOrdinal === null ? "" : ` (LUID ${candidate.info.luid}, CUDA device ${candidate.cudaOrdinal}${candidate.cudaUuid ? `, ${candidate.cudaUuid}` : ""})`}`;
+
+/** Every listed adapter, or "none". */
+const listedAdapters = (candidates: readonly GpuCandidate[]): string => candidates.map(describe).join(", ") || "none";
 
 /** Why CUDA reports no device for an adapter, from what the driver actually said. */
-function cudaVerdict(cuda: CudaSummary, c: GpuCandidate): string {
+function cudaVerdict(cuda: CudaSummary, candidate: GpuCandidate): string {
   if (cuda.error !== null) return `CUDA could not be queried: ${cuda.error}.`;
   if (cuda.deviceCount === 0) return "CUDA lists no device.";
-  return `CUDA lists ${cuda.deviceCount} device(s), none reporting this adapter's LUID ${c.info.luid}.`;
+  return `CUDA lists ${cuda.deviceCount} device(s), none reporting this adapter's LUID ${candidate.info.luid}.`;
+}
+
+/** Why an adapter without a CUDA device is refused, and what CUDA said about it. */
+function noCudaDevice(cuda: CudaSummary, candidate: GpuCandidate): string {
+  return `has no CUDA device behind it, and this tool requires one: video jobs encode with NVENC and run hardware optical flow on it. ${cudaVerdict(cuda, candidate)}`;
 }
 
 /**
@@ -101,37 +106,35 @@ export function chooseGpu(candidates: readonly GpuCandidate[], cuda: CudaSummary
   if (preferredIndex !== undefined) {
     const chosen = candidates.find((c) => c.info.index === preferredIndex);
     if (!chosen) {
-      const listed = candidates.map(describe).join(", ") || "none";
-      return { index: null, cudaOrdinal: null, reasons: [`No adapter at index ${preferredIndex}. Available adapters: ${listed}.`] };
+      return { eligible: false, index: null, reasons: [`No adapter at index ${preferredIndex}. Available adapters: ${listedAdapters(candidates)}.`] };
     }
     if (!isHardwareNvidia(chosen.info)) {
-      return { index: chosen.info.index, cudaOrdinal: null, reasons: [`Adapter ${chosen.info.index} (${chosen.info.name}) is not an NVIDIA GPU, and DLSS runs only on NVIDIA. ${alternatives(candidates)}`] };
+      return { eligible: false, index: chosen.info.index, reasons: [`Adapter ${chosen.info.index} (${chosen.info.name}) is not an NVIDIA GPU, and DLSS runs only on NVIDIA. ${alternatives(candidates)}`] };
     }
     if (chosen.cudaOrdinal === null) {
       // DXGI indices are per run: the same GPU can be listed under another
       // number next time, so the alternatives carry the LUID CUDA matched on.
       return {
+        eligible: false,
         index: chosen.info.index,
-        cudaOrdinal: null,
-        reasons: [`Adapter ${chosen.info.index} (${chosen.info.name}, LUID ${chosen.info.luid}) has no CUDA device behind it, and this tool's jobs run NVENC and hardware optical flow on CUDA. ${cudaVerdict(cuda, chosen)} ${alternatives(candidates)} DXGI indices can change between runs; match by LUID.`],
+        reasons: [`Adapter ${chosen.info.index} (${chosen.info.name}, LUID ${chosen.info.luid}) ${noCudaDevice(cuda, chosen)} ${alternatives(candidates)} DXGI indices can change between runs; match by LUID.`],
       };
     }
-    return { index: chosen.info.index, cudaOrdinal: chosen.cudaOrdinal, reasons: [] };
+    return { eligible: true, index: chosen.info.index, cudaOrdinal: chosen.cudaOrdinal };
   }
   // selectAdapter's sort is stable, so ordering by CUDA ordinal first turns a
   // VRAM tie into "lowest ordinal" instead of "whatever DXGI listed first".
   const best = selectAdapter([...withCuda].sort((a, b) => a.cudaOrdinal! - b.cudaOrdinal!));
-  if (best) return { index: best.info.index, cudaOrdinal: best.cudaOrdinal, reasons: [] };
+  if (best) return { eligible: true, index: best.info.index, cudaOrdinal: best.cudaOrdinal! };
   const fallback = selectAdapter(candidates);
   if (fallback) {
     return {
+      eligible: false,
       index: fallback.info.index,
-      cudaOrdinal: null,
-      reasons: [`${fallback.info.name} (adapter ${fallback.info.index}, LUID ${fallback.info.luid}) has no CUDA device behind it, and this tool's jobs run NVENC and hardware optical flow on CUDA. ${cudaVerdict(cuda, fallback)} No listed NVIDIA adapter has one.`],
+      reasons: [`${fallback.info.name} (adapter ${fallback.info.index}, LUID ${fallback.info.luid}) ${noCudaDevice(cuda, fallback)} No listed NVIDIA adapter has one.`],
     };
   }
-  const listed = candidates.map(describe).join(", ") || "none";
-  return { index: null, cudaOrdinal: null, reasons: [`No NVIDIA GPU was found; DLSS requires an NVIDIA RTX GPU. Available adapters: ${listed}.`] };
+  return { eligible: false, index: null, reasons: [`No NVIDIA GPU was found; DLSS requires an NVIDIA RTX GPU. Available adapters: ${listedAdapters(candidates)}.`] };
 }
 
 /** The adapter list as chooseGpu wants it, with one CUDA lookup for all of them. */
@@ -190,8 +193,9 @@ export function openGpu(options: GpuOptions = {}): GpuSession {
     preferredIndex = resolved.index;
   }
   const choice = chooseGpu(candidates, cuda, preferredIndex);
-  const adapter = choice.index === null ? undefined : adapters.find((a) => a.info.index === choice.index);
-  if (!adapter || choice.cudaOrdinal === null) throw refused(choice.reasons.join(" "));
+  if (!choice.eligible) throw refused(choice.reasons.join(" "));
+  // Candidates are built 1:1 from the adapters, so the chosen index is always one of them.
+  const adapter = adapters.find((a) => a.info.index === choice.index)!;
   const cudaOrdinal = choice.cudaOrdinal;
   const cudaUuid = candidates.find((c) => c.info.index === adapter.info.index)!.cudaUuid;
   let device: D3D12Device | null = null;
