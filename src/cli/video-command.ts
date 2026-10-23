@@ -27,7 +27,7 @@ import {
 import { takesGpuChoice } from "../server/settings-in-use.ts";
 import { validateJobRequest } from "../server/validate.ts";
 import { adapterOption, choiceOption, flag, numberOption, option, positionalArgs, runtimeDirOption } from "./args.ts";
-import { commandSpec, FG_MULTIPLIER_OPTION, optionName, QUALITY_OPTION, VIDEO_STEP_OPTS } from "./commands.ts";
+import { commandSpec, FG_MULTIPLIER_OPTION, NR_STACK_OPTION, optionName, QUALITY_OPTION, VIDEO_STEP_OPTS } from "./commands.ts";
 import { stepVersionOption } from "./dlss-version-option.ts";
 import { frameGenSummary, targetFpsOption } from "./fg-command.ts";
 import { interruptSignal } from "./interrupt.ts";
@@ -93,7 +93,7 @@ export function videoRequest(args: string[], runtimeDir: string): JobRequest {
     superResolution: steps.sr
       ? { scale: size ?? DEFAULT_SR_STEP.scale, motion: choiceOption(args, "--motion", MOTION_KINDS) ?? DEFAULT_SR_STEP.motion, dllDir: stepVersionOption(args, runtimeDir, "sr") }
       : undefined,
-    neuralRendering: steps.nr ? { settings: nrSettingsOption(args), dllDir: stepVersionOption(args, runtimeDir, "nr") } : undefined,
+    neuralRendering: steps.nr ? { settings: nrSettingsOption(args), stack: numberOption(args, "--stack", NR_STACK_OPTION), dllDir: stepVersionOption(args, runtimeDir, "nr") } : undefined,
     frameGen: steps.fg ? frameGenOption(args, runtimeDir) : undefined,
     // Super Resolution sets the output size itself; without it, --factor or --size is a resize.
     resize: steps.sr ? undefined : size,

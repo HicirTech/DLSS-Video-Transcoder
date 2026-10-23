@@ -6,7 +6,7 @@ import { featureByKey, type FeatureKey } from "../ngx/features.ts";
 import { DEFAULT_PROBE_ENTRY, DEFAULT_PROBE_INIT, PROBE_ENTRIES, PROBE_INITS } from "../ngx/probe-options.ts";
 import { DEFAULT_SR_PRESET, DLSS_RATIO, perfQualityName } from "../ngx/results.ts";
 import { cpuSiblingCodec, FFMPEG_NVENC_ENCODERS, isNvenc } from "../pipeline/encode-select.ts";
-import { AAC_KBPS, AUDIO_IN_CONTAINER, AUTO_GPU_CHOICE, DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, DEFAULT_SR_STEP, DEFAULT_WARMUP_FRAMES, DLSS_SR_MAX_OUTPUT_SIDE, ENCODE_CODECS, ENCODE_CONTAINERS, FRAME_GEN_AUTO_PATH, FRAME_GEN_CONTAINER, FRAME_GEN_FPS_CHOICES, FRAME_GEN_GPU_CHOICE, MOTION_KINDS, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, NVENC_MAX_SIDE, SETTING_RANGES, SR_FACTOR_MIN, STEP_KINDS, type StepKind } from "../server/api-types.ts";
+import { AAC_KBPS, AUDIO_IN_CONTAINER, AUTO_GPU_CHOICE, DEFAULT_ENCODE_SETTINGS, DEFAULT_FRAME_GEN_MULTIPLIER, DEFAULT_NR_SETTINGS, DEFAULT_NR_STACK, DEFAULT_SR_STEP, DEFAULT_WARMUP_FRAMES, DLSS_SR_MAX_OUTPUT_SIDE, ENCODE_CODECS, ENCODE_CONTAINERS, FRAME_GEN_AUTO_PATH, FRAME_GEN_CONTAINER, FRAME_GEN_FPS_CHOICES, FRAME_GEN_GPU_CHOICE, MOTION_KINDS, NR_IGNORED_NOTE, NR_INTENSITY_EFFECTIVE_MAX, NR_PASS_GPU_MEMORY_4K_GB, NR_PRESETS, NR_RUNTIME_MEASURED, NR_STYLE_LABELS, NR_STYLES, NVENC_MAX_SIDE, SETTING_RANGES, SR_FACTOR_MIN, STEP_KINDS, type StepKind } from "../server/api-types.ts";
 
 interface OptionSpec {
   /** As typed on the command line, e.g. "--factor N" or "--json". */
@@ -46,6 +46,14 @@ export const SR_FACTOR_OPTION = { min: SR_FACTOR_MIN, max: SETTING_RANGES.factor
 /** `sr` / `nr --warmup`: the extra passes an image job runs over a still, with the job's range and default. */
 export const WARMUP_OPTION = { ...SETTING_RANGES.warmupFrames, fallback: DEFAULT_WARMUP_FRAMES } as const;
 const WARMUP_OPT: OptionSpec = { flag: "--warmup N", desc: `extra passes over the same image so the temporal state settles, as an image job runs them, ${settingRange("warmupFrames")}`, def: String(WARMUP_OPTION.fallback) };
+
+/** `nr` / `video --stack`: the range the API validates neuralRendering.stack against, and the stack used when it is absent. */
+export const NR_STACK_OPTION = { ...SETTING_RANGES.stack, fallback: DEFAULT_NR_STACK } as const;
+const NR_STACK_OPT: OptionSpec = {
+  flag: "--stack N",
+  desc: `run Neural Rendering N times on each frame, each pass on the previous pass's output, a whole number ${settingRange("stack")}; for a stronger look than --intensity reaches. Each pass is one more DLSS NR instance: about ${NR_PASS_GPU_MEMORY_4K_GB} GB more GPU memory at 4K, and its time per frame`,
+  def: String(NR_STACK_OPTION.fallback),
+};
 
 /** `fg --multiplier`: the range the API validates frameGen.multiplier against, and the multiplier used when it is absent. */
 export const FG_MULTIPLIER_OPTION = { ...SETTING_RANGES.multiplier, fallback: DEFAULT_FRAME_GEN_MULTIPLIER } as const;
@@ -89,7 +97,7 @@ export const VIDEO_STEP_OPTS: Record<StepKind, readonly OptionSpec[]> = {
     { flag: "--motion MODE", desc: `Super Resolution's motion vectors: ${MOTION_KINDS.join(" or ")}; flow estimates optical flow between frames, with NVIDIA's NVOFA when it starts and a CPU estimator otherwise`, def: DEFAULT_SR_STEP.motion },
     versionOpt("--sr-version", "sr"),
   ],
-  nr: [...NR_SETTING_OPTS, versionOpt("--nr-version", "nr")],
+  nr: [...NR_SETTING_OPTS, NR_STACK_OPT, versionOpt("--nr-version", "nr")],
   fg: [FG_FPS_OPT, FG_MULTIPLIER_OPT, { flag: "--fg-path MODE", desc: FG_PATH_DESC, def: "auto" }, versionOpt("--fg-version", "fg")],
 };
 
@@ -150,9 +158,9 @@ export const COMMANDS = [
     usage: "bun run src/cli.ts nr <input.png> [output.png] [options]",
     args: [
       { name: "input.png", desc: "source image (PNG only)" },
-      { name: "output.png", desc: "destination; defaults to <input>.nr.png next to the input" },
+      { name: "output.png", desc: "destination; defaults to <input>.nr.png next to the input (<input>.nrx3.png with --stack 3), the name an image job gives it" },
     ],
-    options: [...NR_SETTING_OPTS, WARMUP_OPT, RUNTIME_OPT, ADAPTER_OPT],
+    options: [...NR_SETTING_OPTS, NR_STACK_OPT, WARMUP_OPT, RUNTIME_OPT, ADAPTER_OPT],
   },
   {
     name: "video",

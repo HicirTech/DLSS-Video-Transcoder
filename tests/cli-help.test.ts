@@ -20,12 +20,14 @@ describe("numeric option rows print the range that is enforced", () => {
     ["nr", "--local-tone", "localTone"],
     ["nr", "--local-structure", "localStructure"],
     ["nr", "--skin-structure", "skinStructure"],
+    ["nr", "--stack", "stack"],
     ["fg", "--quality", "quality"],
     ["video", "--factor", "factor"],
     ["video", "--size", "width"],
     ["video", "--size", "height"],
     ["video", "--quality", "quality"],
     ["video", "--intensity", "intensity"],
+    ["video", "--stack", "stack"],
   ] as const;
 
   for (const [command, flag, field] of rows) {

@@ -13,7 +13,7 @@ import { videoRequest } from "../src/cli/video-command.ts";
 import type { VersionEntry } from "../src/ngx/runtime-catalog.ts";
 import { DEFAULT_RUNTIME_DIR } from "../src/paths.ts";
 import { FG_MULTIPLIER_OPTION } from "../src/cli/commands.ts";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, DEFAULT_SR_STEP, jobSteps } from "../src/server/api-types.ts";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_NR_STACK, DEFAULT_SCALE_SETTINGS, DEFAULT_SR_STEP, jobSteps, SETTING_RANGES } from "../src/server/api-types.ts";
 import { validateJobRequest } from "../src/server/validate.ts";
 
 /** The UsageError `run` raises or rejects with; any other outcome fails the test. */
@@ -69,7 +69,7 @@ describe("video", () => {
   test("each step switch alone gives the request a job of that step gets by default, and the API accepts every combination", () => {
     expect(request()).toEqual({ kind: "video", input: INPUT, output: undefined, encode: DEFAULT_ENCODE_SETTINGS });
     expect(request("--sr").superResolution).toEqual({ scale: DEFAULT_SR_STEP.scale, motion: DEFAULT_SR_STEP.motion });
-    expect(request("--nr").neuralRendering).toEqual({ settings: DEFAULT_NR_SETTINGS });
+    expect(request("--nr").neuralRendering).toEqual({ settings: DEFAULT_NR_SETTINGS, stack: DEFAULT_NR_STACK });
     expect(request("--fg").frameGen).toEqual({ multiplier: FG_MULTIPLIER_OPTION.fallback });
     for (const switches of [[], ["--sr"], ["--nr"], ["--fg"], ["--sr", "--nr"], ["--sr", "--fg"], ["--nr", "--fg"], ["--fg", "--nr", "--sr"]]) {
       const built = request(...switches);
@@ -81,13 +81,13 @@ describe("video", () => {
   test("every option lands in its request field", () => {
     const built = request(
       "C:\\out.mkv", "--sr", "--nr", "--size", "1280X720", "--motion", "flow", "--codec", "hevc", "--quality", "28",
-      "--container", "mkv", "--no-audio", "--intensity", "0.5", "--style", "2", "--skin-structure", "-1", "--auto-mask",
+      "--container", "mkv", "--no-audio", "--intensity", "0.5", "--style", "2", "--skin-structure", "-1", "--auto-mask", "--stack", "3",
     );
     expect(built.output).toBe("C:\\out.mkv");
     expect(built.superResolution).toEqual({ scale: { ...DEFAULT_SCALE_SETTINGS, mode: "size", width: 1280, height: 720 }, motion: "flow" });
     expect(built.resize).toBeUndefined();
     expect(built.encode).toEqual({ codec: "hevc", quality: 28, container: "mkv", copyAudio: false });
-    expect(built.neuralRendering).toEqual({ settings: { ...DEFAULT_NR_SETTINGS, intensity: 0.5, style: 2, autoMask: true } });
+    expect(built.neuralRendering).toEqual({ settings: { ...DEFAULT_NR_SETTINGS, intensity: 0.5, style: 2, autoMask: true }, stack: 3 });
     expect(request("--fg", "--fps", "120", "--fg-path", "cascade").frameGen).toEqual({ targetFps: "120", multiplier: FG_MULTIPLIER_OPTION.fallback, engine: "cascade" });
     expect(request("--fg", "--multiplier", "3").frameGen).toEqual({ multiplier: 3 });
   });
@@ -108,7 +108,7 @@ describe("video", () => {
   test("a request the API refuses is a usage error with the API's message", async () => {
     const cases = [
       { args: ["--sr", "--factor", "0.5"], fields: { superResolution: { scale: { ...DEFAULT_SCALE_SETTINGS, mode: "factor", factor: 0.5 }, motion: "none" } } },
-      { args: ["--nr", "--size", "8x720"], fields: { neuralRendering: { settings: DEFAULT_NR_SETTINGS }, resize: { ...DEFAULT_SCALE_SETTINGS, mode: "size", width: 8, height: 720 } } },
+      { args: ["--nr", "--size", "8x720"], fields: { neuralRendering: { settings: DEFAULT_NR_SETTINGS, stack: DEFAULT_NR_STACK }, resize: { ...DEFAULT_SCALE_SETTINGS, mode: "size", width: 8, height: 720 } } },
     ];
     for (const { args, fields } of cases) {
       const apiMessage = validateJobRequest({ kind: "video", input: INPUT, encode: DEFAULT_ENCODE_SETTINGS, ...fields });
@@ -128,6 +128,14 @@ describe("video", () => {
     expect(motion.message).toBe("--motion applies only with --sr; add --sr or leave it out");
     const rate = await usageErrorOf(() => request("--fps", "60"));
     expect(rate.message).toBe("--fps applies only with --fg; add --fg or leave it out");
+    const stack = await usageErrorOf(() => request("--sr", "--stack", "2"));
+    expect(stack.message).toBe("--stack applies only with --nr; add --nr or leave it out");
+  });
+
+  test("--stack takes a whole number in the API's range", async () => {
+    const { min, max } = SETTING_RANGES.stack;
+    expect((await usageErrorOf(() => request("--nr", "--stack", String(max + 1)))).message).toBe(`--stack must be between ${min} and ${max}, got ${max + 1}`);
+    expect((await usageErrorOf(() => request("--nr", "--stack", "1.5"))).message).toBe(`--stack expects a whole number between ${min} and ${max}, got "1.5"`);
   });
 
   test("the options a step switch replaced name their replacements", async () => {
