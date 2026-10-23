@@ -124,7 +124,7 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
             result={sourceFps !== null && outputFps !== null ? `${formatFps(sourceFps)} → ${formatFps(outputFps)} fps` : null}
           >
             <Stack spacing={2}>
-              <FrameGenEditor value={settings.frameGen} sourceFps={sourceFps} outputFps={outputFps} onChange={(frameGen) => update({ frameGen })} />
+              <FrameGenEditor value={settings.frameGen} onChange={(frameGen) => update({ frameGen })} />
               <VersionSelect feature="fg" value={dllDirs.fg} onChange={setDllDir("fg")} />
               {unused.gpu !== null ? <FormHelperText>{unused.gpu}</FormHelperText> : null}
             </Stack>

@@ -1,8 +1,15 @@
 import { useId } from "react";
 import { FormControl, FormHelperText, InputLabel, MenuItem, Select, Stack, ToggleButton, ToggleButtonGroup } from "@mui/material";
-import { FRAME_GEN_AUTO_PATH, FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, type FrameGenEngine, type FrameGenFps, SETTING_RANGES } from "../../../src/server/api-types";
-import { formatFps } from "../format";
-import type { StoredFrameGen } from "../hooks/useSettings";
+import {
+  DEFAULT_FRAME_GEN_MULTIPLIER,
+  FRAME_GEN_AUTO_PATH,
+  FRAME_GEN_ENGINES,
+  FRAME_GEN_FPS_CHOICES,
+  type FrameGenEngine,
+  type FrameGenFps,
+  SETTING_RANGES,
+} from "../../../src/server/api-types";
+import type { StoredFrameGen } from "../stored-settings";
 import { NumberField } from "./NumberField";
 
 // Record<...>: a path the API accepts without menu words is a build error, not a blank item.
@@ -14,21 +21,16 @@ const PATH_LABELS: Record<FrameGenEngine, string> = {
 
 interface FrameGenEditorProps {
   value: StoredFrameGen;
-  /** The source's nominal rate, which frame generation plans on, once it is known. */
-  sourceFps: number | null;
-  /** The output rate these settings give (frameGenOutputFps), once it is known. */
-  outputFps: number | null;
   onChange: (next: StoredFrameGen) => void;
 }
 
 /** Frame generation's output rate, given as a named rate or a multiple of the source's, and its path. */
-export function FrameGenEditor({ value, sourceFps, outputFps, onChange }: FrameGenEditorProps) {
+export function FrameGenEditor({ value, onChange }: FrameGenEditorProps) {
   const fpsLabelId = useId();
   const pathLabelId = useId();
   const helpId = useId();
   const update = (patch: Partial<StoredFrameGen>): void => onChange({ ...value, ...patch });
   const { min, max } = SETTING_RANGES.multiplier;
-  const multiplied = sourceFps !== null && outputFps !== null ? `: ${formatFps(sourceFps)} → ${formatFps(outputFps)} fps` : "";
 
   return (
     <Stack spacing={1.5}>
@@ -70,7 +72,7 @@ export function FrameGenEditor({ value, sourceFps, outputFps, onChange }: FrameG
             max={max}
             step={1}
             integer
-            helperText={`${min}–${max}× the source rate${multiplied}.`}
+            helperText={`${min}–${max}× the source rate. Default ${DEFAULT_FRAME_GEN_MULTIPLIER}×.`}
             sx={{ width: 240 }}
             onChange={(multiplier) => update({ multiplier })}
           />
