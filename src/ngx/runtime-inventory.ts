@@ -8,21 +8,18 @@ import { resolve } from "node:path";
 import { parsePe } from "../native/pe.ts";
 import { parseVersionInfo } from "../native/version-info.ts";
 import type { ProbeReport, RuntimeFile } from "../server/api-types.ts";
-import { featureByKey, runtimeDllCandidates, type FeatureDescriptor } from "./runtime-catalog.ts";
+import { featureByKey, runtimeDllCandidates, toSizeMB } from "./runtime-catalog.ts";
 
-// Only the report's wording lives here. Which file each feature needs, and where
-// it may sit under runtime/, is runtime-catalog.ts's rule — so the report and
-// the version list cannot disagree about what is installed.
-const RUNTIME_FILES: { feature: FeatureDescriptor; role: string }[] = [
-  { feature: featureByKey("nr"), role: "DLSS 5 Neural Rendering (feature 18)" },
-  { feature: featureByKey("sr"), role: "DLSS Super Resolution (feature 1)" },
-  { feature: featureByKey("fg"), role: "DLSS Frame Generation (feature 11)" },
-];
+// Which file each feature needs, and where it may sit under runtime/, is
+// runtime-catalog.ts's rule — so the report and the version list cannot
+// disagree about what is installed. This picks the features the report lists.
+const RUNTIME_FEATURES = [featureByKey("nr"), featureByKey("sr"), featureByKey("fg")];
 
 async function inventoryRuntimeFiles(runtimeDir: string): Promise<RuntimeFile[]> {
   const files: RuntimeFile[] = [];
-  for (const { feature, role } of RUNTIME_FILES) {
+  for (const feature of RUNTIME_FEATURES) {
     const name = feature.dllName;
+    const role = `${feature.name} (feature ${feature.id})`;
     // The first candidate is the flat copy when there is one — the file a job
     // with no dllDir loads — and otherwise the first version folder holding it.
     const found = runtimeDllCandidates(runtimeDir, feature)[0] ?? null;

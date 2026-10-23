@@ -31,7 +31,7 @@ describe("runtimeReport", () => {
     const report = await runtimeReport(runtime);
     expect(report.folder).toBe(resolve(runtime));
     expect(report.files.map((file) => [file.name, file.role, file.present])).toEqual([
-      ["nvngx_dlssnr.dll", "DLSS 5 Neural Rendering (feature 18)", false],
+      ["nvngx_dlssnr.dll", "DLSS Neural Rendering (feature 18)", false],
       ["nvngx_dlss.dll", "DLSS Super Resolution (feature 1)", false],
       ["nvngx_dlssg.dll", "DLSS Frame Generation (feature 11)", false],
     ]);
@@ -44,7 +44,7 @@ describe("runtimeReport", () => {
     const [installed, ...missing] = (await runtimeReport(runtime)).files;
     expect(installed).toEqual({
       name: "nvngx_dlssnr.dll",
-      role: "DLSS 5 Neural Rendering (feature 18)",
+      role: "DLSS Neural Rendering (feature 18)",
       present: true,
       path: join(runtime, "dlssnr", "nvngx_dlssnr.dll"),
       sizeMB: 0,
