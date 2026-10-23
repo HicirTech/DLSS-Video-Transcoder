@@ -202,23 +202,14 @@ export function enumerateSwapperFeature(feature: FeatureDescriptor, cacheDir = s
   return out;
 }
 
-/** Sort newest first, de-duping on (version, source, dir) so the same DLL reached by two roots lists once. */
-function mergeVersions(entries: VersionEntry[]): VersionEntry[] {
-  const seen = new Set<string>();
-  const unique: VersionEntry[] = [];
-  for (const entry of entries) {
-    const dedupeKey = `${entry.version}|${entry.source}|${entry.dir}`;
-    if (seen.has(dedupeKey)) continue;
-    seen.add(dedupeKey);
-    unique.push(entry);
-  }
-  unique.sort((a, b) => {
-    const ka = BigInt(a.sortKey);
-    const kb = BigInt(b.sortKey);
-    if (ka !== kb) return ka > kb ? -1 : 1;
+/** Sort newest first; equal versions order by source name so the list is stable. */
+function sortNewestFirst(entries: VersionEntry[]): VersionEntry[] {
+  return [...entries].sort((a, b) => {
+    const aSortKey = BigInt(a.sortKey);
+    const bSortKey = BigInt(b.sortKey);
+    if (aSortKey !== bSortKey) return aSortKey > bSortKey ? -1 : 1;
     return a.source.localeCompare(b.source);
   });
-  return unique;
 }
 
 /**
@@ -228,7 +219,7 @@ function mergeVersions(entries: VersionEntry[]): VersionEntry[] {
  */
 export function buildRuntimeCatalog(runtimeDir: string, cacheDir = swapperCacheDir()): RuntimeManifest {
   const features: FeatureManifest[] = FEATURES.map((feature) => {
-    const versions = mergeVersions([
+    const versions = sortNewestFirst([
       ...enumerateRuntimeFeature(runtimeDir, feature),
       ...enumerateSwapperFeature(feature, cacheDir),
     ]);
