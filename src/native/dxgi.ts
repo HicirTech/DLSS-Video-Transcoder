@@ -16,7 +16,9 @@ const dxgi = dlopen("dxgi.dll", {
 export const IID_IDXGIFactory1 = guid("{770aae78-f26f-4dba-a829-253c83d1b387}");
 
 const DXGI_ADAPTER_FLAG_SOFTWARE = 2;
-export const VENDOR_NVIDIA = 0x10de;
+const VENDOR_NVIDIA = 0x10de;
+/** Defensive bound on EnumAdapters1: DXGI documents no maximum, and the loop normally ends on DXGI_ERROR_NOT_FOUND. */
+const MAX_ADAPTERS = 32;
 
 export interface AdapterInfo {
   index: number;
@@ -91,12 +93,15 @@ export class DxgiFactory extends ComObject {
     return new DxgiFactory(out.value, "IDXGIFactory1");
   }
 
-  /** Enumerate hardware adapters in DXGI order. The returned objects own their COM references. */
+  /**
+   * Enumerate every adapter in DXGI order, the software rasteriser included (filter with isHardwareNvidia), up to
+   * MAX_ADAPTERS. The returned objects own their COM references.
+   */
   enumerate(): DxgiAdapter[] {
     const adapters: DxgiAdapter[] = [];
     const out = new OutPointer();
     try {
-      for (let index = 0; index < 32; index++) {
+      for (let index = 0; index < MAX_ADAPTERS; index++) {
         out.reset();
         const hr = this.call(12, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.i32 }, index, out.bytes) as number;
         if (hr === DXGI_ERROR_NOT_FOUND) break;
