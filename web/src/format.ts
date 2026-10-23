@@ -40,17 +40,20 @@ export function formatDuration(ms: number): string {
   return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
 
-/** Wall-clock time in the browser's locale, or "-" when the timestamp is missing. */
-export function formatTime(iso: string | null): string {
+/** "-" when the timestamp is missing, the input itself when it does not parse, otherwise the rendered date. */
+function formatTimestamp(iso: string | null, render: (date: Date) => string): string {
   if (!iso) return "-";
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleTimeString();
+  return Number.isNaN(date.getTime()) ? iso : render(date);
+}
+
+/** Wall-clock time in the browser's locale; "-" when the timestamp is missing, the input itself when it does not parse. */
+export function formatTime(iso: string | null): string {
+  return formatTimestamp(iso, (date) => date.toLocaleTimeString());
 }
 
 export function formatDateTime(iso: string | null): string {
-  if (!iso) return "-";
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+  return formatTimestamp(iso, (date) => date.toLocaleString());
 }
 
 /** "-" when null, one decimal below 10 MB, whole MB up to 1024, GB with one decimal above. */
