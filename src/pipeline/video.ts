@@ -17,7 +17,7 @@ import { aspectArgs, audioArgs, decodeArgv, encoderArgs, faststartArgs, muxCopyA
 import { ffmpegFailedMessage, NoFramesDecodedError } from "./ffmpeg-failure.ts";
 import type { FrameCounts } from "./frame-flow.ts";
 import { frameProgress, type ProgressReporter } from "./frame-progress.ts";
-import { defaultOutputPath } from "./output-path.ts";
+import { defaultOutputPath, inputAsOutputProblem } from "./output-path.ts";
 import { framesWrittenOf, removePartialOutput } from "./partial-output.ts";
 import { tryParseRate } from "./rational.ts";
 import { createFrameGuide, type FrameGuide } from "./frame-guide.ts";
@@ -165,6 +165,8 @@ async function prepareVideoJob(options: VideoJobOptions): Promise<VideoJob> {
   const steps = jobSteps({ superResolution: sr, neuralRendering: options.neuralRendering });
   const resized = !sr && options.resize !== undefined && options.resize.mode !== "none";
   const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resized), `.${requestedEncode.container}`);
+  const inputProblem = inputAsOutputProblem(options.input, output);
+  if (inputProblem) throw new Error(inputProblem);
   // Whether the destination is ours to delete after an abnormal end: see partial-output.ts.
   const outputExisted = existsSync(output);
   // SR upscales inside DLSS: decode at source size and let the engine write the
