@@ -49,8 +49,7 @@ export function JobCard({ job, now, onCancel, cancelling = false, defaultExpande
         {job.steps.length ? (
           job.steps.map((step) => <Chip key={step} label={STEP_TITLES[step]} variant="outlined" />)
         ) : (
-          // No step: the job only re-encodes, or resizes, what it decodes.
-          <Chip label="copy" variant="outlined" />
+          <Chip label="re-encode" variant="outlined" />
         )}
         <Box sx={{ flex: 1 }} />
         <Mono dim>{job.id}</Mono>

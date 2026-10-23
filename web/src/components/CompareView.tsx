@@ -61,7 +61,8 @@ export function CompareView({ beforeSrc, afterSrc, beforeLabel = "Before", after
     <Box>
       {failed.length > 0 ? (
         <Alert severity="warning" sx={{ mb: 1 }}>
-          Could not load the {failed.join(" and ")} preview. The file path must be readable by the server.
+          Could not load the {failed.join(" and ")} preview: the file was moved or deleted after the job ran, or the browser
+          cannot display it. Check that the input and output files still exist where they were when the job ran.
         </Alert>
       ) : null}
       <Box
