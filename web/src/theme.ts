@@ -23,6 +23,8 @@ export const appTheme = createTheme({
     MuiSlider: { defaultProps: { size: "small" } },
     MuiSwitch: { defaultProps: { size: "small" } },
     MuiTooltip: { defaultProps: { arrow: true } },
+    MuiTabs: { styleOverrides: { root: { minHeight: 40 } } },
+    MuiTab: { styleOverrides: { root: { minHeight: 40 } } },
     MuiPaper: { styleOverrides: { root: { backgroundImage: "none" } } },
   },
 });
