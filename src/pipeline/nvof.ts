@@ -52,16 +52,33 @@ function fn(index: number, sig: Signature): (...args: unknown[]) => unknown {
   return callableAt(Number(functions()[index]!), sig);
 }
 
-/** What probeNvof learned about the engine; the probe report adds the CUDA ordinal on top (ProbeOpticalFlow). */
-export interface NvofCaps {
-  status: "ok" | "unavailable";
-  /** "ok", or why the engine could not be brought up. */
-  detail: string;
-  /** Input frame size the engine accepts; null unless status is "ok". */
-  limits: OpticalFlowLimits | null;
-  /** Output grid sizes (one flow vector per NxN block) the engine offers; null unless status is "ok". */
-  outGridSizes: number[] | null;
+function ckof(status: unknown, what: string): void {
+  if ((status as number) !== OK) throw new Error(`NVOFA ${what} failed: NV_OF_STATUS ${status}`);
 }
+
+/** Create an NVOFA instance on CUDA context `ctx` (nvCreateOpticalFlowCuda); the caller owns the handle until destroyInstance. */
+function createInstance(ctx: bigint): bigint {
+  const hOut = new OutU64();
+  ckof(fn(FN.create, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(ctx, hOut.bytes), "nvCreateOpticalFlowCuda");
+  return hOut.value;
+}
+
+function destroyInstance(hOf: bigint): void {
+  fn(FN.destroy, { args: [FFIType.u64], returns: FFIType.i32 })(hOf);
+}
+
+/** What probeNvof learned about the engine; the probe report adds the CUDA ordinal on top (ProbeOpticalFlow). */
+export type NvofCaps =
+  | {
+      status: "ok";
+      detail: "ok";
+      /** Input frame size the engine accepts. */
+      limits: OpticalFlowLimits;
+      /** Output grid sizes (one flow vector per NxN block) the engine offers. */
+      outGridSizes: number[];
+    }
+  /** `detail` says why the engine could not be brought up. */
+  | { status: "unavailable"; detail: string };
 
 /**
  * Bring up NVOFA on CUDA device `ordinal` and read back its capabilities —
@@ -73,16 +90,11 @@ export interface NvofCaps {
  * as it found it, which matters for the server's long-lived main thread.
  */
 export function probeNvof(ordinal: number): NvofCaps {
-  const unavailable = (detail: string): NvofCaps => ({ status: "unavailable", detail, limits: null, outGridSizes: null });
   let pushed = false;
   try {
     const ctx = cudaCreateContext(ordinal);
     pushed = true;
-    const create = fn(FN.create, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 });
-    const hOut = new OutU64();
-    const st = create(ctx, hOut.ptr) as number;
-    if (st !== OK) return unavailable(`nvCreateOpticalFlowCuda failed: NV_OF_STATUS ${st}`);
-    const hOf = hOut.value;
+    const hOf = createInstance(ctx);
     try {
       const getCaps = fn(FN.getCaps, { args: [FFIType.u64, FFIType.i32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 });
       // nvOFGetCaps is a two-call API: a NULL value buffer only reports the count.
@@ -112,7 +124,7 @@ export function probeNvof(ordinal: number): NvofCaps {
       fn(FN.destroy, { args: [FFIType.u64], returns: FFIType.i32 })(hOf);
     }
   } catch (error) {
-    return unavailable((error as Error).message);
+    return { status: "unavailable", detail: (error as Error).message };
   } finally {
     if (pushed) {
       try {
@@ -134,10 +146,6 @@ const FMT_SHORT2 = 5;
 const USAGE_INPUT = 1;
 const USAGE_OUTPUT = 2;
 const CUDA_BUF_DEVPTR = 2;
-
-function ckof(status: unknown, what: string): void {
-  if ((status as number) !== OK) throw new Error(`NVOFA ${what} failed: NV_OF_STATUS ${status}`);
-}
 
 interface NvofBuffer {
   handle: bigint;
@@ -309,11 +317,8 @@ function nvofBackend(session: NvofSession): FlowBackend {
   };
 }
 
-/** A hardware backend, or null plus the reason to show before falling back to the CPU matcher. */
-export interface NvofAttempt {
-  backend: FlowBackend | null;
-  reason: string | null;
-}
+/** A hardware backend, or the reason to show before falling back to the CPU matcher. */
+export type NvofAttempt = { backend: FlowBackend; reason: null } | { backend: null; reason: string };
 
 /**
  * Try to build an NVOFA optical-flow backend on CUDA device `ordinal` for
