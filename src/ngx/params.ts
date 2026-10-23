@@ -18,7 +18,10 @@ import { ngxOk } from "./results.ts";
 
 export type VtableLayout = "msvc" | "declared";
 
-interface Slots {
+// NVSDK_NGX_Parameter (nvsdk_ngx_params.h, NVIDIA/DLSS v310.9.1) declares eight `Set` overloads, eight `Get`
+// overloads and `Reset`. MSVC lays adjacent overloads out in reverse declaration order, so the layout defaults to
+// MSVC's; detectLayout() confirms it at runtime by round-tripping a float through the object.
+export interface Slots {
   setU64: number;
   setF32: number;
   setF64: number;
@@ -44,7 +47,7 @@ const DECLARED: Slots = {
   reset: 16,
 };
 
-const MSVC: Slots = {
+export const MSVC: Slots = {
   setPointer: 0, setD3d12: 1, setD3d11: 2, setI32: 3, setU32: 4, setF64: 5, setF32: 6, setU64: 7,
   getPointer: 8, getD3d12: 9, getD3d11: 10, getI32: 11, getU32: 12, getF64: 13, getF32: 14, getU64: 15,
   reset: 16,
