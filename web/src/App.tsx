@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+/** The app shell: the top bar and the tabbed panels, with the selected tab remembered in localStorage. */
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { AppBar, Box, Chip, Container, Tab, Tabs, Toolbar, Typography } from "@mui/material";
 import MemoryIcon from "@mui/icons-material/Memory";
 import type { ProbeReport, ToolsReport } from "../../src/server/api-types";
@@ -16,12 +17,18 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { VideoPanel } from "./components/VideoPanel";
 
 const TAB_KEY = "neural-render.tab";
-const TAB_COUNT = 5;
+/** The tabs in display order; the stored tab is an index into this list. */
+const TABS = ["probe", "image", "video", "jobs", "settings"] as const;
+type TabId = (typeof TABS)[number];
+
+function tabIndex(id: TabId): number {
+  return TABS.indexOf(id);
+}
 
 function readTab(): number {
   try {
     const value = Number(localStorage.getItem(TAB_KEY));
-    return Number.isInteger(value) && value >= 0 && value < TAB_COUNT ? value : 0;
+    return Number.isInteger(value) && value >= 0 && value < TABS.length ? value : 0;
   } catch {
     return 0;
   }
@@ -51,6 +58,7 @@ function TabPanel({ active, children }: { active: boolean; children: ReactNode }
 function Shell() {
   const toast = useToast();
   const feed = useJobsFeed();
+  const tabsId = useId();
   const [tab, setTab] = useState(readTab);
   const [probe, setProbe] = useState<ProbeReport | null>(null);
   const [probing, setProbing] = useState(false);
@@ -95,6 +103,10 @@ function Shell() {
     storeTab(value);
   };
 
+  /** What ties a tab to its panel: the index Tabs selects by, and the ids each names the other with. */
+  const tabProps = (id: TabId) => ({ value: tabIndex(id), id: `${tabsId}-tab-${id}`, "aria-controls": `${tabsId}-panel-${id}` });
+  const panelProps = (id: TabId) => ({ active: tab === tabIndex(id), id: `${tabsId}-panel-${id}`, labelledBy: `${tabsId}-tab-${id}` });
+
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <AppBar position="sticky" color="default" elevation={0} sx={{ borderBottom: 1, borderColor: "divider" }}>
@@ -115,12 +127,12 @@ function Shell() {
           />
           <ReadyChip probe={probe} probing={probing} onProbe={() => void runProbe()} />
         </Toolbar>
-        <Tabs value={tab} onChange={(_event, value: number) => selectTab(value)} sx={{ px: 1, minHeight: 40 }}>
-          <Tab label="Probe" sx={{ minHeight: 40 }} />
-          <Tab label="Image" sx={{ minHeight: 40 }} />
-          <Tab label="Video" sx={{ minHeight: 40 }} />
-          <Tab label={activeJobs > 0 ? `Jobs (${activeJobs})` : "Jobs"} sx={{ minHeight: 40 }} />
-          <Tab label="Settings" sx={{ minHeight: 40 }} />
+        <Tabs value={tab} onChange={(_event, value: number) => selectTab(value)} sx={{ px: 1 }}>
+          <Tab label="Probe" {...tabProps("probe")} />
+          <Tab label="Image" {...tabProps("image")} />
+          <Tab label="Video" {...tabProps("video")} />
+          <Tab label={activeJobs > 0 ? `Jobs (${activeJobs})` : "Jobs"} {...tabProps("jobs")} />
+          <Tab label="Settings" {...tabProps("settings")} />
         </Tabs>
       </AppBar>
 
@@ -128,16 +140,16 @@ function Shell() {
         <TabPanel active={tab === 0}>
           <ProbePanel probe={probe} probing={probing} onProbe={() => void runProbe()} />
         </TabPanel>
-        <TabPanel active={tab === 1}>
+        <TabPanel {...panelProps("image")}>
           <ImagePanel jobs={feed.jobs} now={now} />
         </TabPanel>
-        <TabPanel active={tab === 2}>
+        <TabPanel {...panelProps("video")}>
           <VideoPanel jobs={feed.jobs} now={now} tools={tools} toolsError={toolsError} />
         </TabPanel>
         <TabPanel active={tab === 3}>
           <JobsPanel jobs={feed.jobs} now={now} connected={feed.connected} onRefresh={() => void feed.refresh()} />
         </TabPanel>
-        <TabPanel active={tab === 4}>
+        <TabPanel {...panelProps("settings")}>
           <SettingsPanel probe={probe} probing={probing} onProbe={() => void runProbe()} />
         </TabPanel>
       </Container>
