@@ -55,8 +55,15 @@ function streamHash(path: string): string {
   }
 }
 
-function line(name: string, rc: number, extra: string): void {
-  console.log(`${name.padEnd(52)} rc=${rc} ${extra}`);
+function line(name: string, exitCode: number, extra: string): void {
+  console.log(`${name.padEnd(52)} rc=${exitCode} ${extra}`);
+}
+
+/** An error row keeps the first ERROR_MESSAGE_CHARS characters of its message. */
+const ERROR_MESSAGE_CHARS = 90;
+
+function failureLine(name: string, error: unknown): void {
+  line(name, 1, `error="${(error as Error).message.slice(0, ERROR_MESSAGE_CHARS)}"`);
 }
 
 const NONE: ScaleSettings = { mode: "none", factor: 1, width: 0, height: 0 };
@@ -100,12 +107,12 @@ async function imageJob({ name, steps, scale, nr = settings }: { name: string; s
     await processImage({ input: image, output, ...stepsOf(steps, scale, nr, "none"), runtimeDir, onProgress: where.onProgress });
     line(`image ${name}`, 0, `sha=${await sha(output)} bytes=${statSync(output).size}`);
   } catch (error) {
-    line(`image ${name}`, 1, `error="${(error as Error).message.slice(0, 90)}"`);
+    failureLine(`image ${name}`, error);
   }
   where.print();
 }
 
-async function videoJob(name: string, steps: Steps, motion: MotionKind, scale: ScaleSettings, encode: EncodeSettings): Promise<void> {
+async function videoJob({ name, steps, motion, scale, encode }: { name: string; steps: Steps; motion: MotionKind; scale: ScaleSettings; encode: EncodeSettings }): Promise<void> {
   const output = join(outDir, `vid-${safe(name)}.${encode.container}`);
   const where = provenance();
   try {
@@ -116,7 +123,7 @@ async function videoJob(name: string, steps: Steps, motion: MotionKind, scale: S
     const digest = encode.codec === "hevc" ? "x265-nondeterministic" : streamHash(output);
     line(`video ${name}`, 0, `stream=${digest} ${r.width}x${r.height} frames=${r.frames} cuts=${r.sceneCuts}`);
   } catch (error) {
-    line(`video ${name}`, 1, `error="${(error as Error).message.slice(0, 90)}"`);
+    failureLine(`video ${name}`, error);
   }
   where.print();
 }
@@ -147,11 +154,12 @@ await imageJob({
 
 for (const engine of ["bypass", "nr", "sr"] as const) {
   for (const motion of ["none", "flow"] as const) {
-    await videoJob(`${engine} motion=${motion}`, engine, motion, engine === "sr" ? FACTOR2 : NONE, {
-      codec: "h264",
-      quality: 20,
-      container: "mp4",
-      copyAudio: false,
+    await videoJob({
+      name: `${engine} motion=${motion}`,
+      steps: engine,
+      motion,
+      scale: engine === "sr" ? FACTOR2 : NONE,
+      encode: { codec: "h264", quality: 20, container: "mp4", copyAudio: false },
     });
   }
 }
@@ -163,16 +171,16 @@ for (const [codec, container] of [
   ["hevc_nvenc", "mov"],
   ["av1_nvenc", "mp4"],
 ] as const) {
-  await videoJob(`nr ${codec}/${container}`, "nr", "none", NONE, { codec, quality: 22, container, copyAudio: true });
+  await videoJob({ name: `nr ${codec}/${container}`, steps: "nr", motion: "none", scale: NONE, encode: { codec, quality: 22, container, copyAudio: true } });
 }
 
-await videoJob("nr scale=size copyAudio", "nr", "none", SIZE, { codec: "h264", quality: 20, container: "mp4", copyAudio: true });
+await videoJob({ name: "nr scale=size copyAudio", steps: "nr", motion: "none", scale: SIZE, encode: { codec: "h264", quality: 20, container: "mp4", copyAudio: true } });
 
 // Both steps in one job, which a job of one engine could not run.
 await imageJob({ name: "sr+nr scale=factor2", steps: "sr+nr", scale: FACTOR2 });
 for (const motion of ["none", "flow"] as const) {
-  await videoJob(`sr+nr motion=${motion}`, "sr+nr", motion, FACTOR2, { codec: "h264", quality: 20, container: "mp4", copyAudio: false });
+  await videoJob({ name: `sr+nr motion=${motion}`, steps: "sr+nr", motion, scale: FACTOR2, encode: { codec: "h264", quality: 20, container: "mp4", copyAudio: false } });
 }
-await videoJob("sr+nr h264_nvenc/mp4", "sr+nr", "none", FACTOR2, { codec: "h264_nvenc", quality: 22, container: "mp4", copyAudio: true });
+await videoJob({ name: "sr+nr h264_nvenc/mp4", steps: "sr+nr", motion: "none", scale: FACTOR2, encode: { codec: "h264_nvenc", quality: 22, container: "mp4", copyAudio: true } });
 
 process.exit(0);
