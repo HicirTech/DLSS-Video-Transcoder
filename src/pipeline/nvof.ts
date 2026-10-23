@@ -271,14 +271,13 @@ class NvofSession {
   }
 
   close(): void {
-    try {
-      this.destroyBuf(this.input.handle);
-      this.destroyBuf(this.reference.handle);
-      this.destroyBuf(this.output.handle);
-      this.destroy(this.hOf);
-    } catch {
-      // best-effort teardown; the process/worker exit reclaims the rest
+    // Best effort, one handle at a time so one failure cannot skip the rest. The
+    // primary context lives for the whole process (see open()), so a handle the
+    // driver refuses to free stays allocated until the process exits, not the worker.
+    for (const handle of [this.input.handle, this.reference.handle, this.output.handle]) {
+      try { this.destroyBuf(handle); } catch { /* best effort */ }
     }
+    try { destroyInstance(this.hOf); } catch { /* best effort */ }
   }
 }
 
