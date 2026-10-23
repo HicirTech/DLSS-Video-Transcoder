@@ -134,3 +134,17 @@ export class WorkerPairRun<Result> {
     this.options.release?.();
   }
 }
+
+/** Starts a run's decode and encode workers, or neither: a failure to start the second terminates the first. */
+export function startWorkerPair(
+  scripts: { decode: URL; encode: URL },
+  createWorker: (script: URL) => Worker = (script) => new Worker(script.href),
+): { decodeWorker: Worker; encodeWorker: Worker } {
+  const decodeWorker = createWorker(scripts.decode);
+  try {
+    return { decodeWorker, encodeWorker: createWorker(scripts.encode) };
+  } catch (error) {
+    decodeWorker.terminate();
+    throw error;
+  }
+}

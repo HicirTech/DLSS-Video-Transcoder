@@ -19,7 +19,7 @@ import { throwIfAborted } from "./cancel.ts";
 import { connectFrameFlow, type FrameCounts } from "./frame-flow.ts";
 import type { ProgressReporter } from "./frame-progress.ts";
 import type { GpuSession } from "./gpu.ts";
-import { WorkerPairRun } from "./worker-pair-run.ts";
+import { WorkerPairRun, startWorkerPair } from "./worker-pair-run.ts";
 import type { AsyncEncodeFrame, AsyncEncodeOpen, AsyncEncodeOut } from "./workers/async-encode-worker.ts";
 
 /** Shared buffer slots, and so the most frames in flight between DLSS and NVENC. */
@@ -104,17 +104,14 @@ function releaseSharedPool(pool: SharedPool): void {
   }
 }
 
-/** Both workers, or neither: a failure to start the second terminates the first. */
-function startWorkers(): { encodeWorker: Worker; decodeWorker: Worker } {
-  const encodeWorker = new Worker(new URL("./workers/async-encode-worker.ts", import.meta.url).href);
-  try {
-    return { encodeWorker, decodeWorker: new Worker(new URL("./workers/decode-worker.ts", import.meta.url).href) };
-  } catch (error) {
-    encodeWorker.terminate();
-    throw error;
-  }
-}
-
+/**
+ * The main thread records DLSS eval plus a copy of the result into a shared
+ * D3D12 buffer slot, submits it without waiting and signals a shared fence; the
+ * encode worker imports pool and fence into CUDA, waits that fence value and
+ * encodes the slot straight from GPU memory. DLSS runs on D3D12 compute and
+ * NVENC on the separate encoder units, so frame i+1's DLSS overlaps frame i's
+ * encode.
+ */
 export function runAsyncNrEncode(p: AsyncNrEncodeParams): Promise<FrameCounts> {
   // Before anything below is allocated or spawned.
   throwIfAborted(p.signal);
@@ -122,9 +119,9 @@ export function runAsyncNrEncode(p: AsyncNrEncodeParams): Promise<FrameCounts> {
   const frameBytes = p.width * p.height * 4;
 
   const pool = createSharedPool(p.session, POOL_SLOTS, p.totalBytes);
-  let workers: { encodeWorker: Worker; decodeWorker: Worker };
+  let workers: { decodeWorker: Worker; encodeWorker: Worker };
   try {
-    workers = startWorkers();
+    workers = startWorkerPair({ decode: new URL("./workers/decode-worker.ts", import.meta.url), encode: new URL("./workers/async-encode-worker.ts", import.meta.url) });
   } catch (error) {
     closeSharedHandles(pool.bufferHandles, pool.fenceHandle);
     releaseSharedPool(pool);
