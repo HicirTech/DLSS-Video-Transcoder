@@ -22,14 +22,8 @@ export interface PreparedFrame {
   reset: boolean;
 }
 
-/** A frame the guide thread has analysed; its grid flow still needs packing unless the guide packed inline. */
-export interface AnalyzedFrame {
-  frame: TimedFrame;
-  previousTimestamp: Rational | null;
-  reset: boolean;
-  small: Float32Array | null;
-  half: Uint16Array | null;
-}
+/** A frame the guide thread has analysed: its grid flow still to pack ("grid"), or its motion packed already, or none ("packed"). */
+export type AnalyzedFrame = { frame: TimedFrame; previousTimestamp: Rational | null; reset: boolean } & ({ kind: "grid"; small: Float32Array } | { kind: "packed"; half: Uint16Array | null });
 
 /** What a stage is built from once its parts have opened (openStages in framegen.ts). */
 export interface StageParts {
@@ -85,8 +79,7 @@ export class Stage {
           frame: m.segment === pendingGuide.frame.segment ? pendingGuide.frame : { ...pendingGuide.frame, segment: m.segment },
           previousTimestamp: m.previousTsNum !== null && m.previousTsDen !== null ? { num: m.previousTsNum, den: m.previousTsDen } : null,
           reset: m.reset,
-          small: m.small ? new Float32Array(m.small) : null,
-          half: m.half ? new Uint16Array(m.half) : null,
+          ...(m.small ? { kind: "grid" as const, small: new Float32Array(m.small) } : { kind: "packed" as const, half: m.half ? new Uint16Array(m.half) : null }),
         });
       } else if (m.type === "error") {
         this.fail(new Error(`frame-generation guide worker: ${m.message}`));
@@ -135,12 +128,12 @@ export class Stage {
   /** Upsample + pack the grid flow on this stage's packer thread; immediate when the guide already packed it. */
   pack(analyzed: AnalyzedFrame, id: number): Promise<PreparedFrame> {
     if (this.failed) return Promise.reject(this.failed);
-    if (analyzed.small === null) return Promise.resolve({ frame: analyzed.frame, previousTimestamp: analyzed.previousTimestamp, half: analyzed.half, reset: analyzed.reset });
+    if (analyzed.kind === "packed") return Promise.resolve({ frame: analyzed.frame, previousTimestamp: analyzed.previousTimestamp, half: analyzed.half, reset: analyzed.reset });
     const packer = this.packer;
     if (!packer) return Promise.reject(new Error("frame-generation stage got unpacked flow but has no packer thread"));
     return new Promise<PreparedFrame>((resolve, reject) => {
       this.packWaiter = { id, analyzed, resolve, reject };
-      const buffer = analyzed.small!.buffer as ArrayBuffer;
+      const buffer = analyzed.small.buffer as ArrayBuffer;
       packer.postMessage({ type: "pack", id, small: buffer } satisfies GuidePack, [buffer]);
     });
   }

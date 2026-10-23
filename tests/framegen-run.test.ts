@@ -31,7 +31,7 @@ function passThroughStage(): Stage {
     generatedCount: 1,
     generatedTotal: 0,
     intervals: 0,
-    prepare: async (frame: AnalyzedFrame["frame"]): Promise<AnalyzedFrame> => ({ frame, previousTimestamp: null, reset: true, small: null, half: null }),
+    prepare: async (frame: AnalyzedFrame["frame"]): Promise<AnalyzedFrame> => ({ frame, previousTimestamp: null, reset: true, kind: "packed", half: null }),
     pack: async (analyzed: AnalyzedFrame): Promise<PreparedFrame> => ({ frame: analyzed.frame, previousTimestamp: null, half: null, reset: true }),
     evaluate: async (prepared: PreparedFrame) => [prepared.frame],
   };
