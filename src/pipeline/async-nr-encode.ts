@@ -77,7 +77,7 @@ function createSharedPool(session: GpuSession, slots: number, bytesPerSlot: numb
     }
     fence = device.createSharedFence(0n);
     fenceHandle = device.createSharedHandle(fence);
-    const submit = new AsyncSubmit(device, gpu.queue, fence, slots);
+    const submit = new AsyncSubmit({ device, queue: gpu.queue, fence, depth: slots });
     return { buffers, stagings, bufferHandles, fence, fenceHandle, submit };
   } catch (error) {
     // Nothing owns a partly built pool yet, so it is undone here.

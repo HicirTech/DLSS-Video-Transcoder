@@ -112,10 +112,22 @@ export class GpuContext {
   private closed = false;
 
   constructor(readonly device: D3D12Device) {
-    this.queue = device.createCommandQueue();
-    this.allocator = device.createCommandAllocator();
-    this.list = device.createCommandList(this.allocator);
-    this.fence = device.createFence();
+    const created: { release(): void }[] = [];
+    const track = <T extends { release(): void }>(object: T): T => {
+      created.push(object);
+      return object;
+    };
+    try {
+      this.queue = track(device.createCommandQueue());
+      this.allocator = track(device.createCommandAllocator());
+      this.list = track(device.createCommandList(this.allocator));
+      this.fence = track(device.createFence());
+    } catch (error) {
+      // Nothing owns a partly built context yet, so what was created and the event are released here, newest first.
+      for (const object of created.reverse()) object.release();
+      this.event.close();
+      throw error;
+    }
   }
 
   /** Close the list, execute it, block until the GPU is done, and reopen the list. */
