@@ -2,7 +2,7 @@
  * In-memory job queue. One job runs at a time (one GPU), each in its own
  * worker so the HTTP server never blocks on native calls.
  */
-import { CANCELLED_MESSAGE, isTerminalState, JOB_LOG_LIMIT, jobSteps, type JobRequest, type JobStatus, type WsEvent } from "./api-types.ts";
+import { CANCELLED_MESSAGE, isTerminalState, jobSteps, type JobRequest, type JobStatus, trimJobLog, type WsEvent } from "./api-types.ts";
 import { HOST_PROCESS_NAME } from "../pipeline/dlssg-host-launch.ts";
 import type { FrameTally } from "../pipeline/frame-progress.ts";
 import type { CancelMessage, RunMessage, WorkerMessage } from "../pipeline/worker.ts";
@@ -32,6 +32,12 @@ const FINISHING_GRACE_MS = 60_000;
 
 const CANCELLING_MESSAGE = "cancelling";
 const TOO_LATE_MESSAGE = "finishing: the cancel arrived after the last frame, so the job completes and keeps its output";
+
+/** Adds a line to a job's log, which keeps at most JOB_LOG_LIMIT lines (trimJobLog). */
+function appendLog(status: JobStatus, line: string): void {
+  status.log.push(line);
+  trimJobLog(status.log);
+}
 
 export interface JobManagerOptions {
   runtimeDir: string;
@@ -211,18 +217,17 @@ export class JobManager {
         break;
       }
       case "log":
-        status.log.push(message.line);
-        if (status.log.length > JOB_LOG_LIMIT) status.log.splice(0, status.log.length - JOB_LOG_LIMIT);
+        appendLog(status, message.line);
         this.options.broadcast({ type: "log", jobId: status.id, line: message.line });
         break;
       case "done":
         status.output = message.output;
-        status.log.push(`done: ${JSON.stringify(message.detail)}`);
+        appendLog(status, `done: ${JSON.stringify(message.detail)}`);
         this.finish(entry, "done", "complete");
         break;
       case "failed":
-        status.log.push(message.error);
-        this.finish(entry, "failed", message.error.split("\n")[0] ?? "failed");
+        appendLog(status, message.error);
+        this.finish(entry, "failed", message.error.split("\n")[0] || "failed");
         break;
       case "finishing":
         entry.finishing = true;
