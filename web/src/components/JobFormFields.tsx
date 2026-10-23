@@ -14,12 +14,11 @@ const MOTION_MENU_LABELS: Record<MotionKind, string> = {
 interface InputPathFieldProps {
   kind: "image" | "video";
   value: string;
-  disabled?: boolean;
   onChange: (value: string) => void;
 }
 
 /** The absolute input path, typed or filled in by an upload; shared by the Image and Video tabs. */
-export function InputPathField({ kind, value, disabled, onChange }: InputPathFieldProps) {
+export function InputPathField({ kind, value, onChange }: InputPathFieldProps) {
   const example = kind === "image" ? "C:\\Pictures\\photo.png" : "D:\\Footage\\clip.mp4";
   // Image jobs read PNG only (processImage); the server queues any other format and the job then fails.
   const accept = kind === "image" ? ".png,image/png" : "video/*";
@@ -52,7 +51,6 @@ export function InputPathField({ kind, value, disabled, onChange }: InputPathFie
         label="Input path"
         placeholder={example}
         value={value}
-        disabled={disabled}
         fullWidth
         required
         error={Boolean(uploadError)}
@@ -68,7 +66,7 @@ export function InputPathField({ kind, value, disabled, onChange }: InputPathFie
         component="label"
         variant="outlined"
         startIcon={<UploadFileIcon />}
-        disabled={disabled || uploading}
+        disabled={uploading}
         sx={{ mt: 1, whiteSpace: "nowrap", flexShrink: 0 }}
       >
         {uploading ? "Uploading…" : "Upload"}

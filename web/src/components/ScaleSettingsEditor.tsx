@@ -15,7 +15,7 @@ interface ScaleSettingsEditorProps {
   /** What the size is for, as its menu is labelled: "Upscale to" in Super Resolution's card, "Resize to" for the resize. */
   label: string;
   value: ScaleSettings;
-  /** What the step that sets the size can write (outputSizeLimits): the fields hold to it and a stored value outside it is marked. */
+  /** What the step that sets the size can write (outputSizeLimits): the fields hold to it. */
   limits: OutputSizeLimits;
   /** The menu words for mode none, when keeping the source size means more than that (Super Resolution runs DLAA). */
   noneLabel?: string;
@@ -24,13 +24,12 @@ interface ScaleSettingsEditorProps {
 
 export function ScaleSettingsEditor({ label, value, limits, noneLabel, onChange }: ScaleSettingsEditorProps) {
   const modeLabelId = useId();
+  const noteId = useId();
   const update = (patch: Partial<ScaleSettings>): void => onChange({ ...value, ...patch });
   const factorMin = Math.max(SETTING_RANGES.factor.min, limits.factorMin ?? SETTING_RANGES.factor.min);
   const widthMax = Math.min(SETTING_RANGES.width.max, limits.sideMax ?? SETTING_RANGES.width.max);
   const heightMax = Math.min(SETTING_RANGES.height.max, limits.sideMax ?? SETTING_RANGES.height.max);
-  // A value stored under wider limits can sit outside these until it is edited, which clamps it.
-  const outside =
-    (value.mode === "factor" && value.factor < factorMin) || (value.mode === "size" && (value.width > widthMax || value.height > heightMax));
+  const showNote = limits.note !== null && value.mode !== "none";
 
   return (
     <Stack spacing={0.5}>
@@ -41,6 +40,7 @@ export function ScaleSettingsEditor({ label, value, limits, noneLabel, onChange 
             labelId={modeLabelId}
             label={label}
             value={value.mode}
+            aria-describedby={showNote ? noteId : undefined}
             onChange={(event) => update({ mode: event.target.value })}
           >
             {SCALE_MODES.map((mode) => (
@@ -57,7 +57,6 @@ export function ScaleSettingsEditor({ label, value, limits, noneLabel, onChange 
             min={factorMin}
             max={SETTING_RANGES.factor.max}
             step={0.25}
-            error={outside}
             helperText={`Multiplies source resolution. ${factorMin}–${SETTING_RANGES.factor.max}×, default ${DEFAULT_SCALE_SETTINGS.factor}×.`}
             sx={{ width: 200 }}
             onChange={(factor) => update({ factor })}
@@ -72,7 +71,6 @@ export function ScaleSettingsEditor({ label, value, limits, noneLabel, onChange 
               max={widthMax}
               step={16}
               integer
-              error={value.width > widthMax}
               helperText={`Output width in pixels (${SETTING_RANGES.width.min}–${widthMax}). Default ${DEFAULT_SCALE_SETTINGS.width}.`}
               sx={{ width: 220 }}
               onChange={(width) => update({ width })}
@@ -84,7 +82,6 @@ export function ScaleSettingsEditor({ label, value, limits, noneLabel, onChange 
               max={heightMax}
               step={16}
               integer
-              error={value.height > heightMax}
               helperText={`Output height in pixels (${SETTING_RANGES.height.min}–${heightMax}). Default ${DEFAULT_SCALE_SETTINGS.height}.`}
               sx={{ width: 220 }}
               onChange={(height) => update({ height })}
@@ -92,7 +89,7 @@ export function ScaleSettingsEditor({ label, value, limits, noneLabel, onChange 
           </>
         ) : null}
       </Stack>
-      {limits.note && value.mode !== "none" ? <FormHelperText error={outside}>{limits.note}</FormHelperText> : null}
+      {showNote ? <FormHelperText id={noteId}>{limits.note}</FormHelperText> : null}
     </Stack>
   );
 }
