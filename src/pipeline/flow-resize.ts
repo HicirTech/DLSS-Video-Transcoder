@@ -109,7 +109,9 @@ export function allFinite(values: Float32Array): boolean {
  * (outW, outH). Magnitudes are NOT rescaled here: the caller multiplies the
  * channels by outW/inW and outH/inH afterward, as guides.py does.
  */
-export function resizeFlowBilinear(flow: Float32Array, inW: number, inH: number, outW: number, outH: number): Float32Array {
+export function resizeFlowBilinear(flow: Float32Array, from: FieldSize, to: FieldSize): Float32Array {
+  const { width: inW, height: inH } = from;
+  const { width: outW, height: outH } = to;
   const out = new Float32Array(outW * outH * 2);
   if (inW === outW && inH === outH) {
     out.set(flow);

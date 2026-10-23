@@ -7,7 +7,7 @@ import { floatToHalf, halfToFloat } from "./half-float.ts";
 
 /** The estimator's original three-pass path: resize -> scale (float32 store) -> pack. */
 function referencePack(flow: Float32Array, inW: number, inH: number, outW: number, outH: number): Uint16Array {
-  const full = resizeFlowBilinear(flow, inW, inH, outW, outH);
+  const full = resizeFlowBilinear(flow, { width: inW, height: inH }, { width: outW, height: outH });
   const kx = outW / inW;
   const ky = outH / inH;
   for (let i = 0; i < outW * outH; i++) {
