@@ -7,11 +7,11 @@
 import { motionFieldBytes, rgbaFrameBytes, type DlssgSetup } from "./dlssg-protocol.ts";
 
 /**
- * Slots in the mapping, each an input half and an output half. The parent waits for a frame's reply
- * before it sends the next, so one slot is all that is ever in flight; double buffering raises this,
- * puts a slot number in the frame header and offsets every range below by slot * the slot's size.
+ * Frame sets in the mapping, each an input slot and an output slot. The parent waits for a frame's reply
+ * before it sends the next, so one set is all that is ever in flight; double buffering raises this,
+ * puts a set number in the frame header and offsets every range below by set * the set's size.
  */
-const SLOT_COUNT = 1;
+const FRAME_SET_COUNT = 1;
 
 export interface ByteRange {
   readonly offset: number;
@@ -40,7 +40,7 @@ export function sharedFrameLayout({ width, height, generatedCount }: Pick<DlssgS
   const motion = { offset: rgba.byteLength, byteLength: motionFieldBytes(width, height) };
   const inputBytes = motion.offset + motion.byteLength;
   const generated = Array.from({ length: generatedCount }, (_, index) => ({ offset: inputBytes + index * frameBytes, byteLength: frameBytes }));
-  return { rgba, motion, generated, totalBytes: SLOT_COUNT * (inputBytes + generatedCount * frameBytes) };
+  return { rgba, motion, generated, totalBytes: FRAME_SET_COUNT * (inputBytes + generatedCount * frameBytes) };
 }
 
 /** The bytes of `range` in the mapped `bytes`, as a view that shares their memory. */

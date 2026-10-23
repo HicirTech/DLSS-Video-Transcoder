@@ -311,14 +311,14 @@ class FrameMemory {
   /** Puts the real frame where the host reads it; the host looks only once it has the frame header. */
   writeFrame(rgba: Uint8Array, motion: Uint16Array): void {
     const motionBytes = new Uint8Array(motion.buffer, motion.byteOffset, motion.byteLength);
-    const { rgba: rgbaSlot, motion: motionSlot } = this.layout;
+    const { rgba: rgbaRange, motion: motionRange } = this.layout;
     // A frame of another size would spill into its neighbour in the slot, or leave stale bytes, with nothing to say so.
-    if (rgba.byteLength !== rgbaSlot.byteLength || motionBytes.byteLength !== motionSlot.byteLength) {
-      throw new Error(`DLSS Frame Generation was given ${rgba.byteLength} bytes of colour and ${motionBytes.byteLength} bytes of motion for a session whose frames take ${rgbaSlot.byteLength} and ${motionSlot.byteLength}`);
+    if (rgba.byteLength !== rgbaRange.byteLength || motionBytes.byteLength !== motionRange.byteLength) {
+      throw new Error(`DLSS Frame Generation was given ${rgba.byteLength} bytes of colour and ${motionBytes.byteLength} bytes of motion for a session whose frames take ${rgbaRange.byteLength} and ${motionRange.byteLength}`);
     }
     const bytes = this.memory.bytes;
-    bytes.set(rgba, rgbaSlot.offset);
-    bytes.set(motionBytes, motionSlot.offset);
+    bytes.set(rgba, rgbaRange.offset);
+    bytes.set(motionBytes, motionRange.offset);
   }
 
   /**
@@ -327,9 +327,9 @@ class FrameMemory {
    */
   copyGenerated(count: number): Uint8Array[] {
     const bytes = this.memory.bytes;
-    return this.layout.generated.slice(0, count).map((slot) => {
-      const frame = allocateFrame(slot.byteLength, this.sharedFrames);
-      frame.set(viewRange(bytes, slot));
+    return this.layout.generated.slice(0, count).map((range) => {
+      const frame = allocateFrame(range.byteLength, this.sharedFrames);
+      frame.set(viewRange(bytes, range));
       return frame;
     });
   }
