@@ -37,6 +37,13 @@ export interface AdapterInfo {
   isNvidia: boolean;
 }
 
+/** An enumerated adapter before its description is read. */
+class RawAdapter extends ComObject {
+  getDesc1(desc: NativeStruct): void {
+    this.callHr(10, { args: [FFIType.ptr], returns: FFIType.i32 }, "GetDesc1", desc.bytes);
+  }
+}
+
 export class DxgiAdapter extends ComObject {
   constructor(
     ptr: number,
@@ -47,19 +54,13 @@ export class DxgiAdapter extends ComObject {
 }
 
 /** The DXGI_ADAPTER_DESC1 of one adapter, as an AdapterInfo. */
-function readAdapterInfo(raw: ComObject, index: number): AdapterInfo {
+function readAdapterInfo(raw: RawAdapter, index: number): AdapterInfo {
   // DXGI_ADAPTER_DESC1 (dxgi.h, x64, 312 bytes): Description WCHAR[128] @0;
   // VendorId @256; DeviceId @260; SubSysId @264; Revision @268;
   // DedicatedVideoMemory @272; DedicatedSystemMemory @280; SharedSystemMemory @288;
   // AdapterLuid {LowPart u32 @296, HighPart i32 @300}; Flags @304.
   const desc = new NativeStruct(312);
-  const hrDesc = (raw as unknown as { call: ComObject["call"] }).call.call(
-    raw,
-    10,
-    { args: [FFIType.ptr], returns: FFIType.i32 },
-    desc.bytes,
-  ) as number;
-  checkHresult(hrDesc, `IDXGIAdapter1.GetDesc1(${index})`);
+  raw.getDesc1(desc);
   const nameChars: number[] = [];
   for (let i = 0; i < 128; i++) {
     const code = desc.getU16(i * 2);
@@ -108,7 +109,7 @@ export class DxgiFactory extends ComObject {
         if (hr === DXGI_ERROR_NOT_FOUND) break;
         checkHresult(hr, `IDXGIFactory1.EnumAdapters1(${index})`);
         const adapterPtr = out.value;
-        const raw = new ComObject(adapterPtr, `IDXGIAdapter1[${index}]`);
+        const raw = new RawAdapter(adapterPtr, `IDXGIAdapter1[${index}]`);
         let info: AdapterInfo;
         try {
           info = readAdapterInfo(raw, index);
