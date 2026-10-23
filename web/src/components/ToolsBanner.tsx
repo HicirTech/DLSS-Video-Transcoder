@@ -10,8 +10,9 @@ const NVENC_CHIP_HELP =
 export function ToolsBanner({ tools, toolsError }: { tools: ToolsReport | null; toolsError: string | null }) {
   if (toolsError) {
     return (
-      <Alert severity="info" variant="outlined">
-        Could not check for ffmpeg ({toolsError}); its availability is unknown.
+      <Alert severity="info" variant="outlined" role="status">
+        Could not check for ffmpeg and ffprobe ({toolsError}), so whether video jobs can run is unknown. The check runs
+        again when the page reconnects to the server; reload the page to run it now.
       </Alert>
     );
   }
