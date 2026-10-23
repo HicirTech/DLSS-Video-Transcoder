@@ -67,7 +67,7 @@ export function isEligibleGpu(candidate: GpuCandidate): boolean {
   return isHardwareNvidia(candidate.info) && candidate.cudaOrdinal !== null;
 }
 
-/** The sentence every refusal ends with: the adapters a user can pick instead, with the identifiers to pick them by. */
+/** The sentence naming the adapters a user can pick instead, with the identifiers to pick them by. */
 function alternatives(candidates: readonly GpuCandidate[]): string {
   const usable = candidates.filter(isEligibleGpu).map(describe).join(", ");
   return usable ? `Adapters with a CUDA device: ${usable}.` : "No listed NVIDIA adapter has a CUDA device.";
