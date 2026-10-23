@@ -12,7 +12,7 @@ import { callableAt, type OwnedCallable, type Signature } from "../native/com.ts
 import { cudaCreateContext, cudaMemcpy2DDtoH, cudaMemcpy2DHtoD, cudaReleaseContext, cudaSynchronize } from "../native/cuda.ts";
 import { OutU64 } from "../native/memory.ts";
 import type { OpticalFlowLimits } from "../server/api-types.ts";
-import type { FlowBackend } from "./block-match.ts";
+import type { FlowBackend } from "./flow-backend.ts";
 import { flowGridSize } from "./flow-grid.ts";
 
 const NV_OF_API_VERSION = 0x20; // (major 2 << 4) | minor 0
@@ -244,7 +244,8 @@ class NvofSession {
     // NV_OF_EXECUTE_INPUT_PARAMS: inputFrame@0, referenceFrame@8,
     // disableTemporalHints@24. With hints left on, the driver seeds from the
     // previous execute's vectors, which only helps if the calls really are
-    // consecutive frames of one sequence.
+    // consecutive frames of one sequence; the backend turns them off at a
+    // sequence start (FlowBackend.calc).
     const inParams = new Uint8Array(56);
     const iv = new DataView(inParams.buffer);
     iv.setBigUint64(0, this.input.handle, true);
@@ -291,8 +292,7 @@ function nvofBackend(session: NvofSession): FlowBackend {
   const cur = new Uint8Array(n);
   const prev = new Uint8Array(n);
   return {
-    name: "nvof",
-    calc: (current, previous, w, h) => {
+    calc: (current, previous, w, h, sequenceStart) => {
       if (w !== session.width || h !== session.height) {
         throw new Error(`nvof backend: expected ${session.width}x${session.height}, got ${w}x${h}`);
       }
@@ -300,7 +300,7 @@ function nvofBackend(session: NvofSession): FlowBackend {
         cur[i] = toByte(current[i]!);
         prev[i] = toByte(previous[i]!);
       }
-      const raw = session.computeFlow(cur, prev, false);
+      const raw = session.computeFlow(cur, prev, sequenceStart);
       const out = new Float32Array(n * 2);
       for (let i = 0; i < n * 2; i++) out[i] = raw[i]! / 32; // S10.5 -> pixels
       return out;

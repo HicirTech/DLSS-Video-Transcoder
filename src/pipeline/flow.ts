@@ -12,7 +12,8 @@
  * downscaled gray grid (guides.py:24-55). Everything here is GPU-free, so it is
  * unit-testable without a GPU.
  */
-import { createBlockMatchBackend, type FlowBackend } from "./block-match.ts";
+import { createBlockMatchBackend } from "./block-match.ts";
+import type { FlowBackend } from "./flow-backend.ts";
 import { flowGridSize, smallGray } from "./flow-grid.ts";
 import { allFinite, packFlowResizedR16G16, resizeFlowBilinear } from "./flow-resize.ts";
 import { encodeMotionR16G16 } from "./half-float.ts";
@@ -146,7 +147,8 @@ class DisMotionEstimator implements MotionEstimator {
     }
 
     // Grid pixels, current -> previous; the caller scales to render pixels.
-    const small = this.backend.calc(gray, this.prevGray, this.flowW, this.flowH);
+    const small = this.backend.calc(gray, this.prevGray, this.flowW, this.flowH, this.sequenceStart);
+    this.sequenceStart = false;
     this.prevGray = gray;
     this.prevSamples = samples;
     return { settled: false, small, sceneScore };
