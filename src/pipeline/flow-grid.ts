@@ -28,16 +28,16 @@ export function smallGray(rgba: Uint8Array, frame: { width: number; height: numb
   const { flowW, flowH } = grid;
   const out = new Float32Array(flowW * flowH);
   // Exact integer downscale — the usual case, e.g. 1280x720 -> 640x360. Every
-  // output pixel averages the same sx*sy block, so the general path's
-  // per-pixel divisions and bounds checks fall away. It sums the same source
-  // pixels in the same order, so the two paths agree bit for bit.
+  // output pixel averages the same blockWidth*blockHeight block, so the general
+  // path's per-pixel divisions and bounds checks fall away. It sums the same
+  // source pixels in the same order, so the two paths agree bit for bit.
   if (width % flowW === 0 && height % flowH === 0) {
-    const sx = width / flowW;
-    const sy = height / flowH;
-    const n = sx * sy;
+    const blockWidth = width / flowW;
+    const blockHeight = height / flowH;
+    const blockPixels = blockWidth * blockHeight;
     for (let oy = 0; oy < flowH; oy++) {
-      const yTop = oy * sy;
-      for (let ox = 0; ox < flowW; ox++) out[oy * flowW + ox] = sumLumaBlock(rgba, width, ox * sx, yTop, sx, sy) / n;
+      const yTop = oy * blockHeight;
+      for (let ox = 0; ox < flowW; ox++) out[oy * flowW + ox] = sumLumaBlock(rgba, width, ox * blockWidth, yTop, blockWidth, blockHeight) / blockPixels;
     }
     return out;
   }
