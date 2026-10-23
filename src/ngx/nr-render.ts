@@ -62,23 +62,36 @@ export class DlssNrSession {
     });
 
     const params = new NgxParamObject();
-    params.setU32(NrParam.Width, opts.width); // output width (DLSSNR.Width, not the absent generic "Width")
-    params.setU32(NrParam.Height, opts.height);
-    params.setU32("PerfQualityValue", PerfQuality.DLAA);
-    params.setU32("CreationNodeMask", 1);
-    params.setU32("VisibilityNodeMask", 1);
-    params.setU32(NrParam.Enabled, 1);
-    params.setI32(NrParam.HintRenderPreset, opts.settings.preset);
+    let handle = 0;
+    let color: D3D12Resource | undefined;
+    try {
+      // The DLL reads its size from DLSSNR.Width / DLSSNR.Height; the generic Width/Height names do not exist in it.
+      params.setU32(NrParam.Width, opts.width);
+      params.setU32(NrParam.Height, opts.height);
+      params.setU32(NgxParam.PerfQualityValue, PerfQuality.DLAA);
+      params.setU32(NgxParam.CreationNodeMask, 1);
+      params.setU32(NgxParam.VisibilityNodeMask, 1);
+      params.setU32(NrParam.Enabled, 1);
+      params.setI32(NrParam.HintRenderPreset, opts.settings.preset);
 
-    const created = core.createFeature(session.gpu.list.ptr, 18, params);
-    ngxCheck(created.result, "DLSS NR CreateFeature");
-    session.gpu.submitAndWait();
+      const created = core.createFeature(session.gpu.list.ptr, NgxFeature.NeuralRendering, params);
+      ngxCheck(created.result, "DLSS NR CreateFeature");
+      handle = created.handle;
+      session.gpu.submitAndWait();
 
-    const device = session.device;
-    const color = device.createTexture2D({ width: opts.width, height: opts.height, format: DXGI_FORMAT_R8G8B8A8_UNORM, allowUnorderedAccess: true, label: "nr color" });
-    const output = device.createTexture2D({ width: opts.width, height: opts.height, format: DXGI_FORMAT_R8G8B8A8_UNORM, allowUnorderedAccess: true, label: "nr output" });
-
-    return new DlssNrSession(session, core, params, created.handle, opts.width, opts.height, opts.settings, color, output);
+      const device = session.device;
+      color = device.createTexture2D({ width: opts.width, height: opts.height, format: DXGI_FORMAT_R8G8B8A8_UNORM, allowUnorderedAccess: true, label: "nr color" });
+      const output = device.createTexture2D({ width: opts.width, height: opts.height, format: DXGI_FORMAT_R8G8B8A8_UNORM, allowUnorderedAccess: true, label: "nr output" });
+      return new DlssNrSession(session, core, params, handle, opts.width, opts.height, opts.settings, color, output);
+    } catch (error) {
+      // After a GPU timeout the feature may still be in use, so it and its texture are left allocated.
+      if (session.gpu.drain()) {
+        color?.release();
+        if (handle !== 0) core.releaseFeature(handle);
+      }
+      params.close();
+      throw error;
+    }
   }
 
   /** The runtime reads the look controls at evaluate, so every one is re-set per frame. */
