@@ -1,7 +1,11 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { Alert, Snackbar } from "@mui/material";
 
-type Severity = "error" | "warning" | "info" | "success";
+type Severity = "error" | "success";
+
+const ERROR_TOAST_MS = 8000;
+const TOAST_MS = 4000;
+const TOAST_MAX_WIDTH_PX = 640;
 
 interface Toast {
   message: string;
@@ -10,8 +14,6 @@ interface Toast {
 
 export interface ToastApi {
   showError(message: string): void;
-  showWarning(message: string): void;
-  showInfo(message: string): void;
   showSuccess(message: string): void;
 }
 
@@ -34,8 +36,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const toastApi = useMemo<ToastApi>(
     () => ({
       showError: (message) => show(message, "error"),
-      showWarning: (message) => show(message, "warning"),
-      showInfo: (message) => show(message, "info"),
       showSuccess: (message) => show(message, "success"),
     }),
     [show],
