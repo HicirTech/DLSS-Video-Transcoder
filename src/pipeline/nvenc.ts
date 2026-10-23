@@ -391,11 +391,11 @@ export class NvencEncoder {
     const ownsDevice = !opts.inputs;
 
     const opened = openEncodeSession(cudaCreateContext(opts.ordinal));
-    ckenc(opened.status, "nvEncOpenEncodeSessionEx", 0n);
+    throwOnNvencError(opened.status, "nvEncOpenEncodeSessionEx", 0n);
     const enc = opened.session;
 
     const lastError = fn(FN.getLastErrorString, { args: [FFIType.u64], returns: FFIType.ptr });
-    const check = (st: unknown, what: string): void => ckenc(st, what, enc, lastError);
+    const check: CheckStatus = (st, what) => throwOnNvencError(st, what, enc, lastError);
 
     // Out here so the failure path can release them: any step below can throw
     // after an earlier one succeeded, and destroyEncoder does not own the CUDA buffer.
@@ -453,11 +453,11 @@ export class NvencEncoder {
   private encodeMapped(registered: bigint): Uint8Array {
     // NV_ENC_MAP_INPUT_RESOURCE: registeredResource in at +16, mappedResource out at +24.
     const map = new Uint8Array(1544);
-    const mdv = new DataView(map.buffer);
-    mdv.setUint32(0, STRUCT_VER.MAP_INPUT_RESOURCE, true);
-    mdv.setBigUint64(16, registered, true);
+    const mapView = new DataView(map.buffer);
+    mapView.setUint32(0, STRUCT_VER.MAP_INPUT_RESOURCE, true);
+    mapView.setBigUint64(16, registered, true);
     this.check(this.api.mapInput(this.enc, map), "nvEncMapInputResource");
-    const mapped = mdv.getBigUint64(24, true);
+    const mapped = mapView.getBigUint64(24, true);
 
     let encoded = false;
     try {
@@ -491,12 +491,12 @@ export class NvencEncoder {
   /** Copies out of the driver's mapping: the returned bytes outlive the unlock. */
   private lockAndRead(): Uint8Array {
     const lock = new Uint8Array(1544);
-    const ldv = new DataView(lock.buffer);
-    ldv.setUint32(0, STRUCT_VER.LOCK_BITSTREAM, true);
-    ldv.setBigUint64(8, this.bitstream, true); // outputBitstream
+    const lockView = new DataView(lock.buffer);
+    lockView.setUint32(0, STRUCT_VER.LOCK_BITSTREAM, true);
+    lockView.setBigUint64(8, this.bitstream, true); // outputBitstream
     this.check(this.api.lockBitstream(this.enc, lock), "nvEncLockBitstream");
-    const size = ldv.getUint32(36, true); // bitstreamSizeInBytes
-    const dataPtr = ldv.getBigUint64(56, true); // bitstreamBufferPtr
+    const size = lockView.getUint32(36, true); // bitstreamSizeInBytes
+    const dataPtr = lockView.getBigUint64(56, true); // bitstreamBufferPtr
     const bytes = copyFromNative(Number(dataPtr), size);
     this.check(this.api.unlockBitstream(this.enc, this.bitstream), "nvEncUnlockBitstream");
     return bytes;
@@ -526,11 +526,11 @@ export class NvencEncoder {
   }
 
   private check(st: unknown, what: string): void {
-    ckenc(st, what, this.enc, this.api.lastError);
+    throwOnNvencError(st, what, this.enc, this.api.lastError);
   }
 }
 
-function ckenc(st: unknown, what: string, enc: bigint, lastError?: (...a: unknown[]) => unknown): void {
+function throwOnNvencError(st: unknown, what: string, enc: bigint, lastError?: (...a: unknown[]) => unknown): void {
   if ((st as number) === OK) return;
   let extra = "";
   if (enc !== 0n && lastError) {
