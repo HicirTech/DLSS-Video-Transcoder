@@ -37,7 +37,7 @@ function start(signal: AbortSignal, onFinishing?: () => void) {
           decodeArgs: [],
           frameBytes: 16,
           sinkArgs: [],
-          enc: { width: 2, height: 2, fpsNum: 30, fpsDen: 1, codec: "h264", ordinal: 0 },
+          enc: { width: 2, height: 2, fpsNum: 30, fpsDen: 1, codec: "h264", cq: 20, ordinal: 0 },
           totalFrames: 2,
           guide: () => ({ reset: false, motion: null, sceneCut: false }),
           signal,
