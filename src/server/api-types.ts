@@ -297,6 +297,11 @@ export function stepsSuffix(steps: readonly StepKind[], resized: boolean): strin
   return resized ? "resize" : "copy";
 }
 
+/** Whether a job resizes its frames itself: only without Super Resolution, which sets the output size on its own. */
+export function resizesFrames(request: Pick<JobRequest, "superResolution" | "resize">): boolean {
+  return request.superResolution === undefined && request.resize !== undefined && request.resize.mode !== "none";
+}
+
 /** States in which a job still occupies the queue or the GPU, so a cancel can still reach it. */
 const ACTIVE_JOB_STATES = ["queued", "running"] as const;
 /** States a job never leaves. */

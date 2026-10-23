@@ -3,7 +3,7 @@
  * dependency, so the Bun mock server (web/mock-server.ts) and the browser (`?mock=1`) share it.
  */
 import type { JobRequest, JobStatus, WsEvent } from "../../../src/server/api-types";
-import { CANCELLED_MESSAGE, DEFAULT_ENCODE_SETTINGS, JOB_LOG_LIMIT, jobSteps, stepsSuffix } from "../../../src/server/api-types";
+import { CANCELLED_MESSAGE, DEFAULT_ENCODE_SETTINGS, JOB_LOG_LIMIT, jobSteps, resizesFrames, stepsSuffix } from "../../../src/server/api-types";
 
 export function timestamp(): string {
   return new Date().toISOString();
@@ -15,8 +15,7 @@ function outputPathFor(request: JobRequest): string {
   const slash = Math.max(request.input.lastIndexOf("\\"), request.input.lastIndexOf("/"));
   const stem = dot > slash ? request.input.slice(0, dot) : request.input;
   const extension = request.kind === "video" ? `.${request.encode?.container ?? DEFAULT_ENCODE_SETTINGS.container}` : ".png";
-  const resized = request.superResolution === undefined && request.resize !== undefined && request.resize.mode !== "none";
-  return `${stem}.${stepsSuffix(jobSteps(request), resized)}${extension}`;
+  return `${stem}.${stepsSuffix(jobSteps(request), resizesFrames(request))}${extension}`;
 }
 
 function cloneJob(job: JobStatus): JobStatus {
