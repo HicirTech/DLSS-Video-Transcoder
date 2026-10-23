@@ -87,7 +87,6 @@ const FN = {
   encodePicture: 16,
   lockBitstream: 17,
   unlockBitstream: 18,
-  getSequenceParams: 22,
   mapInputResource: 25,
   unmapInputResource: 26,
   destroyEncoder: 27,
@@ -506,19 +505,20 @@ export class NvencEncoder {
   }
 
   /**
-   * Signal end of stream. Always returns empty: with zeroReorderDelay set in
-   * open() the encoder never holds a frame back, so there is nothing to drain.
+   * Signal end of stream. Returns nothing: with zeroReorderDelay set in open()
+   * the encoder never holds a frame back, so there is nothing to drain.
    */
-  finish(): Uint8Array {
-    if (this.closed) return new Uint8Array(0);
-    const pic = new Uint8Array(3360);
-    const cdv = new DataView(pic.buffer);
-    cdv.setUint32(0, STRUCT_VER.PIC_PARAMS, true);
-    cdv.setUint32(16, PIC_FLAG_EOS, true); // encodePicFlags = EOS
+  finish(): void {
+    if (this.closed) return;
+    const pic = new Uint8Array(PIC_PARAMS_BYTES);
+    const picView = new DataView(pic.buffer);
+    picView.setUint32(0, STRUCT_VER.PIC_PARAMS, true);
+    picView.setUint32(16, PIC_FLAG_EOS, true); // encodePicFlags = EOS
     // inputBuffer / outputBitstream stay NULL for an EOS flush.
     const st = this.api.encodePicture(this.enc, pic) as number;
-    if (st !== OK && st !== 17) this.check(st, "nvEncEncodePicture(EOS)");
-    return new Uint8Array(0);
+    // Tolerated: encodeMapped() throws on NEED_MORE_INPUT for every real frame and zeroReorderDelay holds none
+    // back, so nothing is pending and no frame can be lost here.
+    if (st !== OK && st !== NEED_MORE_INPUT) this.check(st, "nvEncEncodePicture(EOS)");
   }
 
   close(): void {
