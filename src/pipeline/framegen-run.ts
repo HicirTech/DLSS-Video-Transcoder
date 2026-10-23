@@ -10,6 +10,16 @@ import type { FrameSource } from "./frame-reader.ts";
 import type { AnalyzedFrame, PreparedFrame, Stage } from "./framegen-stage.ts";
 import type { NearestTimestampWriter, TimedFrame } from "./nearest-timestamp-writer.ts";
 import { type Rational, ratDiv, rational } from "./rational.ts";
+
+/** Credits a source frame holds until its evaluation: its decoded buffer (startDecode) and its motion storage (startGuides). */
+const SOURCE_FRAME_CREDITS = 2;
+/** Fewest frames an edge queue holds, however few the stages generate: the reference pipeline.py's edge_capacity = max(4, max_generated + 1). */
+const MIN_EDGE_CAPACITY = 4;
+/** Analysed and packed frames a stage may hold ahead of its evaluation, so analysis runs a little ahead of packing. */
+const MAX_FRAMES_AHEAD = 3;
+/** Credits a decode leaves free beyond the native output headroom, so the guide for the frame it decodes can always start. */
+const DECODE_HEADROOM_CREDITS = 1;
+
 /** What a runner reports back. `peak` is the credit ledger's high-water mark in frame slots, or null from a runner that keeps no ledger. */
 export interface RunResult {
   decoded: number;
@@ -30,6 +40,25 @@ export interface RunParams {
   check: () => void;
   /** Cooperative cancellation: checked on every turn of the frame loop, including runs with no DLSSG stage. */
   signal?: AbortSignal;
+}
+
+/** The most frames one evaluation of any stage generates, so the most output credits one evaluation reserves. */
+function maxGeneratedCount(stages: Stage[]): number {
+  return Math.max(0, ...stages.map((stage) => stage.generatedCount));
+}
+
+/**
+ * Whether runOverlapped can make progress in `capacity` credits. The bound is the reference pipeline.py's
+ * `capacity < max_generated + 3` fallback, carried over: for enormous frames even one input/output transaction may
+ * not fit the window.
+ */
+export function fitsOverlapped(stages: Stage[], capacity: number): boolean {
+  return capacity >= maxGeneratedCount(stages) + 3;
+}
+
+/** A decoded buffer as the source frame at `index`: timestamp index / sourceRate, segment 0. */
+function sourceFrame(rgba: Uint8Array, index: number, sourceRate: Rational): TimedFrame {
+  return { rgba, timestamp: ratDiv(rational(index), sourceRate), segment: 0, provenance: "Source", sourceIndex: index };
 }
 
 /**
@@ -57,7 +86,8 @@ class OverlappedRun {
   private readonly analyzed: AnalyzedFrame[][];
   private readonly prepared: PreparedFrame[][];
   private readonly pending = new Set<string>();
-  private readonly done: Array<{ name: string; value?: unknown; error?: Error }> = [];
+  /** Settled work in completion order: a handler for its value, or its error. */
+  private readonly done: Array<{ apply: () => void } | { error: Error }> = [];
   private readonly busy: Record<string, number> = {};
   private wake: (() => void) | null = null;
   private used = 0;
@@ -68,25 +98,25 @@ class OverlappedRun {
   private guideSeq = 0;
   private ended = false;
 
-  constructor(private readonly p: RunParams) {
-    this.stages = p.stages;
-    this.capacity = p.capacity;
-    this.maxGenerated = Math.max(0, ...this.stages.map((s) => s.generatedCount));
-    this.edgeCapacity = Math.max(4, this.maxGenerated + 1);
+  constructor(private readonly params: RunParams) {
+    this.stages = params.stages;
+    this.capacity = params.capacity;
+    this.maxGenerated = maxGeneratedCount(this.stages);
+    this.edgeCapacity = Math.max(MIN_EDGE_CAPACITY, this.maxGenerated + 1);
     this.edges = Array.from({ length: this.stages.length + 1 }, () => []);
     this.analyzed = this.stages.map(() => []);
     this.prepared = this.stages.map(() => []);
   }
 
   async run(): Promise<RunResult> {
-    const { p } = this;
+    const { params } = this;
     // An evaluation blocked on a wedged DLSS-G host never settles, so an abort
     // wakes the loop itself. Left registered: the signal belongs to this job and
     // ends with it, and once the loop is done `wake` is null.
-    p.signal?.addEventListener("abort", () => this.wake?.(), { once: true });
+    params.signal?.addEventListener("abort", () => this.wake?.(), { once: true });
 
     for (;;) {
-      throwIfAborted(p.signal);
+      throwIfAborted(params.signal);
       this.harvest();
       this.startEncode();
       this.startEvaluations();
@@ -100,8 +130,8 @@ class OverlappedRun {
       }
       if (this.done.length === 0) await new Promise<void>((resolve) => { this.wake = () => { this.wake = null; resolve(); }; });
     }
-    p.writer.endAt(this.decoded, p.sourceRate);
-    await p.writer.finish();
+    params.writer.endAt(this.decoded, params.sourceRate);
+    await params.writer.finish();
     return { decoded: this.decoded, peak: this.peak, busy: this.busy };
   }
 
@@ -111,60 +141,59 @@ class OverlappedRun {
     if (this.used > this.peak) this.peak = this.used;
   }
 
-  private start(name: string, promise: Promise<unknown>): void {
+  /** Runs `promise` as the pending work `name`; harvest() hands its value to `onValue`, or throws its error. */
+  private start<T>(name: string, promise: Promise<T>, onValue: (value: T) => void): void {
     this.pending.add(name);
     const t0 = performance.now();
     const settle = (): void => { this.busy[name] = (this.busy[name] ?? 0) + (performance.now() - t0); this.pending.delete(name); };
     promise.then(
-      (value) => { settle(); this.done.push({ name, value }); this.wake?.(); },
-      (error) => { settle(); this.done.push({ name, error: error instanceof Error ? error : new Error(String(error)) }); this.wake?.(); },
+      (value) => { settle(); this.done.push({ apply: () => onValue(value) }); this.wake?.(); },
+      (error) => { settle(); this.done.push({ error: error instanceof Error ? error : new Error(String(error)) }); this.wake?.(); },
     );
   }
 
   private async decodeOne(): Promise<TimedFrame | null> {
     const index = this.decodeSeq++;
-    const rgba = await this.p.reader.next(this.p.frameBytes);
+    const rgba = await this.params.reader.next(this.params.frameBytes);
     if (!rgba) return null;
-    return { rgba, timestamp: ratDiv(rational(index), this.p.sourceRate), segment: 0, provenance: "Source", sourceIndex: index };
+    return sourceFrame(rgba, index, this.params.sourceRate);
   }
 
   private async consume(items: TimedFrame[]): Promise<number> {
-    for (const item of items) await this.p.writer.push(item);
+    for (const item of items) await this.params.writer.push(item);
     return items.length;
   }
 
   /** Takes in everything that finished. Results own their buffers until consumed. */
   private harvest(): void {
     while (this.done.length) {
-      const d = this.done.shift()!;
-      if (d.error) throw d.error;
-      this.accept(d);
+      const completed = this.done.shift()!;
+      if ("error" in completed) throw completed.error;
+      completed.apply();
     }
   }
 
-  private accept(d: { name: string; value?: unknown }): void {
-    if (d.name === "decode") {
-      const frame = d.value as TimedFrame | null;
-      if (frame === null) { this.ended = true; this.used -= 1; }
-      else {
-        this.edges[0]!.push(frame);
-        this.decoded++;
-        // Without a stage nothing evaluates, so onProcessed would never fire: the decode is the only per-frame step left to report.
-        if (this.stages.length === 0) this.p.onProcessed(this.decoded);
-      }
-    } else if (d.name.startsWith("guide:")) {
-      this.analyzed[Number(d.name.slice(6))]!.push(d.value as AnalyzedFrame);
-    } else if (d.name.startsWith("pack:")) {
-      this.prepared[Number(d.name.slice(5))]!.push(d.value as PreparedFrame);
-    } else if (d.name.startsWith("native:")) {
-      const k = Number(d.name.slice(7));
-      const { items, credits } = d.value as { items: TimedFrame[]; credits: number };
-      if (items.length > credits + 1) throw new Error("DLSSG produced more frames than reserved.");
-      this.edges[k + 1]!.push(...items);
-      this.used -= 2 + credits - items.length;
-      if (k === 0) { this.processed++; this.p.onProcessed(this.processed); this.p.check(); }
-    } else if (d.name === "encode") {
-      this.used -= d.value as number;
+  private acceptDecode(frame: TimedFrame | null): void {
+    if (frame === null) {
+      this.ended = true;
+      this.used -= 1;
+      return;
+    }
+    this.edges[0]!.push(frame);
+    this.decoded++;
+    // Without a stage nothing evaluates, so onProcessed would never fire: the decode is the only per-frame step left to report.
+    if (this.stages.length === 0) this.params.onProcessed(this.decoded);
+  }
+
+  /** Takes in an evaluation of stage `stageIndex` that reserved `credits` output credits. */
+  private acceptEvaluation(stageIndex: number, items: TimedFrame[], credits: number): void {
+    if (items.length > credits + 1) throw new Error("DLSSG produced more frames than reserved.");
+    this.edges[stageIndex + 1]!.push(...items);
+    this.used -= SOURCE_FRAME_CREDITS + credits - items.length;
+    if (stageIndex === 0) {
+      this.processed++;
+      this.params.onProcessed(this.processed);
+      this.params.check();
     }
   }
 
@@ -172,7 +201,7 @@ class OverlappedRun {
     const last = this.edges[this.stages.length]!;
     if (!this.pending.has("encode") && last.length) {
       const items = last.splice(0, Math.min(this.edgeCapacity, last.length));
-      this.start("encode", this.consume(items));
+      this.start("encode", this.consume(items), (released) => { this.used -= released; });
     }
   }
 
@@ -184,7 +213,7 @@ class OverlappedRun {
       if (!this.pending.has(name) && this.prepared[k]!.length && this.used + count <= this.capacity && this.edges[k + 1]!.length + count + 1 <= this.edgeCapacity) {
         this.reserve(count);
         const item = this.prepared[k]!.shift()!;
-        this.start(name, stage.evaluate(item).then((items) => ({ items, credits: count })));
+        this.start(name, stage.evaluate(item), (items) => this.acceptEvaluation(k, items, count));
       }
     }
   }
@@ -195,7 +224,7 @@ class OverlappedRun {
       // The analysed item already holds this frame's motion credit; packing just swaps the grid flow for the full field.
       if (!this.pending.has(name) && this.analyzed[k]!.length) {
         const item = this.analyzed[k]!.shift()!;
-        this.start(name, this.stages[k]!.pack(item, ++this.guideSeq));
+        this.start(name, this.stages[k]!.pack(item, ++this.guideSeq), (packed) => { this.prepared[k]!.push(packed); });
       }
     }
   }
@@ -207,7 +236,7 @@ class OverlappedRun {
       if (!this.pending.has(name) && this.edges[k]!.length && this.analyzed[k]!.length + this.prepared[k]!.length < 3 && this.used + 1 <= this.capacity - this.maxGenerated) {
         this.reserve(1);
         const frame = this.edges[k]!.shift()!;
-        this.start(name, this.stages[k]!.prepare(frame, ++this.guideSeq));
+        this.start(name, this.stages[k]!.prepare(frame, ++this.guideSeq), (analyzed) => { this.analyzed[k]!.push(analyzed); });
       }
     }
   }
@@ -215,7 +244,7 @@ class OverlappedRun {
   private startDecode(): void {
     if (!this.ended && !this.pending.has("decode") && this.edges[0]!.length < this.edgeCapacity && this.used + 1 <= this.capacity - this.maxGenerated - 1) {
       this.reserve(1);
-      this.start("decode", this.decodeOne());
+      this.start("decode", this.decodeOne(), (frame) => this.acceptDecode(frame));
     }
   }
 }
