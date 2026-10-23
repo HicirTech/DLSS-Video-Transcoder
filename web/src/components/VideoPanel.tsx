@@ -48,7 +48,8 @@ export function VideoPanel({ jobs, now, tools, toolsError }: VideoPanelProps) {
   const [output, setOutput] = useState("");
   const [dllDirs, setDllDirs] = useState<DllDirs>(BUNDLED_DLLS);
   const media = useMediaInfo(input);
-  const source = media.info?.kind === "video" ? media.info : null;
+  const info = media.status === "ready" ? media.info : null;
+  const source = info?.kind === "video" ? info : null;
   const steps = settings.videoSteps;
   const plan = planJob({ kind: "video", input, source, steps, srScale: settings.superResolution.scale, resize: settings.resize, container: settings.encode.container });
   const unused = unusedSettings(steps);
