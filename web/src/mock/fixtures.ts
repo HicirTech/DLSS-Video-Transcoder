@@ -1,5 +1,5 @@
 /*
- * Static mock answers for the read-only endpoints: hardware probe, tools, runtime catalog, upload and media
+ * Stateless mock answers for the endpoints that need no job state: hardware probe, tools, runtime catalog, upload and media
  * info. No DOM dependency, so the Bun mock server (web/mock-server.ts) and the browser
  * (`?mock=1`) share them.
  */
