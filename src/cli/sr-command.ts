@@ -2,6 +2,7 @@
 import { isPng } from "../codec/png/chunks.ts";
 import { decodePng } from "../codec/png/decode.ts";
 import { encodePng } from "../codec/png/encode.ts";
+import type { RgbaImage } from "../codec/png/types.ts";
 import { DlssSrSession } from "../ngx/sr.ts";
 import { DEFAULT_SR_PRESET, DlssRenderPreset, perfQualityName, qualityForSizes } from "../ngx/results.ts";
 import { describeGpu, openGpu } from "../pipeline/gpu.ts";
@@ -41,23 +42,31 @@ export async function srCommand(args: string[]): Promise<void> {
   const session = openGpu({ adapterIndex: adapterOption(args) });
   console.log(describeGpu(session));
   const started = performance.now();
-  const sr = DlssSrSession.open(session, {
-    renderWidth: image.width,
-    renderHeight: image.height,
-    outputWidth: target.width,
-    outputHeight: target.height,
-    quality,
-    preset,
-    runtimeDir,
-    dllDir,
-  });
-  const enhanced = await enhanceStill(image, async (colour) => ({
-    rgba: await runStillPasses(true, warmupFrames, (reset) => sr.evaluate(colour, reset)),
-    width: target.width,
-    height: target.height,
-  }));
+  let enhanced: RgbaImage;
+  try {
+    const sr = DlssSrSession.open(session, {
+      renderWidth: image.width,
+      renderHeight: image.height,
+      outputWidth: target.width,
+      outputHeight: target.height,
+      quality,
+      preset,
+      runtimeDir,
+      dllDir,
+    });
+    try {
+      enhanced = await enhanceStill(image, async (colour) => ({
+        rgba: await runStillPasses(true, warmupFrames, (reset) => sr.evaluate(colour, reset)),
+        width: target.width,
+        height: target.height,
+      }));
+    } finally {
+      sr.close();
+    }
+  } finally {
+    session.close();
+  }
   await Bun.write(output, encodePng(enhanced, { level: 6 }));
-  sr.close();
   // The mode name, not the PerfQuality index: the index is meaningless to a user
   // and its order is counter-intuitive (0 is the fastest mode, not the best).
   console.log(`DLSS SR: ${image.width}x${image.height} -> ${target.width}x${target.height} (${perfQualityName(quality)} mode, preset ${presetKey}, ${warmupFrames + 1} passes) in ${(performance.now() - started).toFixed(1)} ms`);
