@@ -35,7 +35,12 @@ export function frameProgress(written: number, total: number | null): FrameRepor
   };
 }
 
-/** Held below the 0.97 and 0.98 reports that follow once the stream has ended (framegen.ts), so the bar never runs backwards. */
+/** Frame generation's line once the stream has ended: how busy each pipeline owner was. */
+export const FRAME_GENERATION_BUSY_PROGRESS = 0.97;
+/** Frame generation's line while the muxed output is read back and verified. */
+export const FRAME_GENERATION_VERIFY_PROGRESS = 0.98;
+
+/** Held below FRAME_GENERATION_BUSY_PROGRESS and FRAME_GENERATION_VERIFY_PROGRESS, which follow once the stream has ended, so the bar never runs backwards. */
 const FRAME_GENERATION_PROGRESS_CEILING = 0.96;
 
 /**
