@@ -67,7 +67,7 @@ const FG_MULTIPLIER_OPT: OptionSpec = { flag: "--multiplier N", desc: `output/in
 const FG_PATH_DESC = `auto = ${FRAME_GEN_AUTO_PATH}; native or cascade force that path`;
 
 /** The Neural Rendering look rows nr and video share; nrSettingsOption reads them, and video refuses them without --nr. */
-export const NR_SETTING_OPTS: readonly OptionSpec[] = [
+const NR_SETTING_OPTS: readonly OptionSpec[] = [
   { flag: "--intensity F", desc: `overall strength, ${settingRange("intensity")}; the installed ${NR_RUNTIME_MEASURED} stops responding above ${NR_INTENSITY_EFFECTIVE_MAX}, so every value from there up gives the same image`, def: String(DEFAULT_NR_SETTINGS.intensity) },
   { flag: "--style N", desc: `look style: ${NR_STYLES.map((style) => `${style} = ${NR_STYLE_LABELS[style]}`).join(", ")} (strong, visible effect)`, def: String(DEFAULT_NR_SETTINGS.style) },
   { flag: "--preset ID", desc: `NR model preset hint ${NR_PRESETS[0]}..${NR_PRESETS.at(-1)}; ${NR_IGNORED_NOTE}`, def: String(DEFAULT_NR_SETTINGS.preset) },
