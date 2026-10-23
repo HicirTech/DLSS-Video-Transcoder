@@ -29,15 +29,13 @@ function decodedFrames(count: number): FrameReader {
 
 /** A stage whose evaluation hands the real frame back and generates nothing. */
 function passThroughStage(): Stage {
-  const stage = {
+  const stage: Pick<Stage, "generatedCount" | "prepare" | "pack" | "evaluate"> = {
     generatedCount: 1,
-    generatedTotal: 0,
-    intervals: 0,
     prepare: async (frame: AnalyzedFrame["frame"]): Promise<AnalyzedFrame> => ({ frame, previousTimestamp: null, reset: true, kind: "packed", half: null }),
     pack: async (analyzed: AnalyzedFrame): Promise<PreparedFrame> => ({ frame: analyzed.frame, previousTimestamp: null, half: null, reset: true }),
     evaluate: async (prepared: PreparedFrame) => [prepared.frame],
   };
-  return stage as unknown as Stage;
+  return stage as Stage;
 }
 
 /** A stage whose evaluation aborts `controller` and then never settles, as one blocked on a wedged DLSS-G host does. */

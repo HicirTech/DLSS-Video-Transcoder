@@ -43,7 +43,7 @@ describe("target rates", () => {
   });
 
   test("resolveTargetRate rejects garbage and non-positive rates with the choice list", () => {
-    expect(() => resolveTargetRate("abc")).toThrow(/Choose one of: 23.976, 25, 29.97/);
+    expect(() => resolveTargetRate("abc")).toThrow(`Choose one of: ${FRAME_GEN_FPS_CHOICES.join(", ")}`);
     expect(() => resolveTargetRate("0")).toThrow(/positive/);
     expect(() => resolveTargetRate("-30")).toThrow(/positive/);
   });
@@ -170,7 +170,7 @@ describe("chooseInterpolationPlan", () => {
 
   test("validation", () => {
     for (const engine of FRAME_GEN_ENGINES) expect(() => planTo(rational(60), { engine }), engine).not.toThrow();
-    expect(() => planTo(rational(60), { engine: "turbo" as never })).toThrow(/Unknown frame-generation engine "turbo"\. Choose one of: auto, native, cascade\./);
+    expect(() => planTo(rational(60), { engine: "turbo" as never })).toThrow(`Unknown frame-generation engine "turbo". Choose one of: ${FRAME_GEN_ENGINES.join(", ")}.`);
     expect(() => planTo(rational(60), { sourceRate: rational(0) })).toThrow(/positive/);
   });
 });
