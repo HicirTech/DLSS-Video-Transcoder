@@ -45,11 +45,11 @@ export class SpyParameter {
     }
     // Object layout: first 8 bytes point at the vtable; pad so reads past it stay inside our memory.
     this.object = new NativeStruct(64);
-    this.object.pointer(0, this.vtable.ptr as unknown as number);
+    this.object.pointer(0, this.vtable.ptr);
   }
 
   get ptr(): number {
-    return this.object.ptr as unknown as number;
+    return this.object.ptr;
   }
 
   summary(): string {
