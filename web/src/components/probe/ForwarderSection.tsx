@@ -8,8 +8,8 @@ export function ForwarderSection({ forwarder }: { forwarder: ProbeReport["forwar
   return (
     <Paper variant="outlined" sx={{ p: 1.5 }}>
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-        A small generated DLL that lets the app reach NVIDIA&apos;s NGX runtime. This self-test confirms it can be built
-        and loaded on this machine.
+        A small generated DLL that lets the app reach NVIDIA&apos;s NGX runtime. State shows whether it was generated and
+        loaded; the self-test sends test calls through it and checks they arrive unchanged.
       </Typography>
       <KeyValueList
         rows={[
