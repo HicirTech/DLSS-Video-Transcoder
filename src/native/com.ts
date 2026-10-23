@@ -25,7 +25,7 @@ type OwnedArguments<Args extends unknown[]> = { [K in keyof Args]: OwnedArgument
 
 /**
  * A native function that refuses Pointer arguments (OwnedArgument). Not covered: callableAt's raw
- * callables, dlopen symbols (the calls in cuda.ts), and an address already cast to number.
+ * callables, dlopen symbols, and an address already cast to number.
  */
 export type OwnedCallable = <Args extends unknown[]>(...args: OwnedArguments<Args>) => unknown;
 

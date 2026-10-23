@@ -1,7 +1,7 @@
 /**
- * Minimal Portable Executable reader: enough to list the exports of a DLL
- * without loading it, which lets the probe report what an NGX runtime offers
- * before any code from it runs.
+ * Minimal Portable Executable reader: the headers, section table and export table of a DLL, read without loading it,
+ * which lets the probe report what an NGX runtime offers before any code from it runs. Layouts follow the Microsoft
+ * PE/COFF specification (learn.microsoft.com/windows/win32/debug/pe-format) as winnt.h declares them.
  */
 
 export interface PeExport {
@@ -110,6 +110,7 @@ export function parsePe(bytes: Uint8Array): PeInfo {
   if (peOffset + 24 > bytes.length || view.getUint32(peOffset, true) !== IMAGE_NT_SIGNATURE) {
     throw new Error("Not a PE file: missing PE signature");
   }
+  // IMAGE_FILE_HEADER (winnt.h): Machine @0, NumberOfSections @2, SizeOfOptionalHeader @16, Characteristics @18.
   const coff = peOffset + 4;
   const machine = view.getUint16(coff, true);
   const sectionCount = view.getUint16(coff + 2, true);
@@ -120,6 +121,8 @@ export function parsePe(bytes: Uint8Array): PeInfo {
   const is64 = magic === IMAGE_NT_OPTIONAL_HDR64_MAGIC;
   if (!is64 && magic !== IMAGE_NT_OPTIONAL_HDR32_MAGIC) throw new Error(`Unknown optional header magic 0x${magic.toString(16)}`);
 
+  // IMAGE_OPTIONAL_HEADER32/64 (winnt.h): AddressOfEntryPoint @16, ImageBase @28 (PE32) / @24 u64 (PE32+),
+  // SizeOfImage @56, NumberOfRvaAndSizes @92/@108, DataDirectory[] of {VirtualAddress, Size} @96/@112.
   const entryPoint = view.getUint32(optional + 16, true);
   const imageBase = is64 ? view.getBigUint64(optional + 24, true) : BigInt(view.getUint32(optional + 28, true));
   const sizeOfImage = view.getUint32(optional + 56, true);
@@ -130,6 +133,8 @@ export function parsePe(bytes: Uint8Array): PeInfo {
     dataDirectories.push({ rva: view.getUint32(directoriesOffset + i * 8, true), size: view.getUint32(directoriesOffset + i * 8 + 4, true) });
   }
 
+  // IMAGE_SECTION_HEADER (winnt.h, 40 bytes): Name[8] @0, VirtualSize @8, VirtualAddress @12, SizeOfRawData @16,
+  // PointerToRawData @20, Characteristics @36.
   const sections: PeSection[] = [];
   let sectionOffset = optional + optionalSize;
   for (let i = 0; i < sectionCount; i++, sectionOffset += 40) {

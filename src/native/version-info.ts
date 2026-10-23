@@ -17,6 +17,8 @@ export interface VersionInfo {
   stringFileVersion: string | null;
 }
 
+// RT_VERSION from winuser.h; VS_FFI_SIGNATURE and VS_FFI_STRUCVERSION from verrsrc.h; the subdirectory flag is
+// IMAGE_RESOURCE_DATA_IS_DIRECTORY from winnt.h, and the resources are data directory IMAGE_DIRECTORY_ENTRY_RESOURCE.
 const RT_VERSION = 16;
 const FIXED_FILE_INFO_SIGNATURE = 0xfeef04bd;
 const STRUC_VERSION = 0x00010000;
@@ -125,9 +127,9 @@ export function parseVersionInfo(bytes: Uint8Array): VersionInfo {
     if (!blob) return NULL_VERSION;
 
     const blobEnd = Math.min(blob.offset + blob.size, bytes.length);
-    // The 0xFEEF04BD signature alone matches unrelated bytes elsewhere in a DLL,
-    // so require dwStrucVersion == 0x00010000 right behind it and stay inside the
-    // located blob.
+    // VS_FIXEDFILEINFO (verrsrc.h): dwSignature @0, dwStrucVersion @4, dwFileVersionMS/LS @8/@12,
+    // dwProductVersionMS/LS @16/@20. The 0xFEEF04BD signature alone matches unrelated bytes elsewhere in a DLL,
+    // so require dwStrucVersion == 0x00010000 right behind it and stay inside the located blob.
     for (let p = blob.offset; p + 24 <= blobEnd; p += 4) {
       if (view.getUint32(p, true) === FIXED_FILE_INFO_SIGNATURE && view.getUint32(p + 4, true) === STRUC_VERSION) {
         const fileVersion = `${formatVersionWord(view.getUint32(p + 8, true))}.${formatVersionWord(view.getUint32(p + 12, true))}`;

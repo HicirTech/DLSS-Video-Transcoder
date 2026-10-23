@@ -31,7 +31,10 @@ export class NativeModule {
     readonly handle: number,
   ) {}
 
-  /** Load a DLL by absolute path. Dependencies resolve from the DLL's own folder and the system folders. */
+  /**
+   * Load a DLL by absolute path. With the default flags, dependencies resolve from the DLL's own folder, then the
+   * application (bun.exe) folder and System32; PATH and the working directory are not searched.
+   */
   static load(path: string, flags = LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS): NativeModule {
     const wide = wstring(path);
     const handle = asPtr(kernel32.symbols.LoadLibraryExW(wide, null, flags));

@@ -1,14 +1,8 @@
 /**
- * Multi-buffered D3D12 submission: a pool of `depth` allocators/lists so the CPU
- * can record and submit frame i+1 while the GPU still works on frame i.
- *
- * Every submit signals a SHARED fence with the next monotonic value. A CUDA
- * worker that imported that fence as an external semaphore waits on value i
- * before encoding frame i, which is what lets DLSS (D3D12 compute) and NVENC
- * (separate encoder units) run concurrently instead of in lockstep.
- *
- * D3D12Resource.state tracking stays correct only because one queue executes
- * lists in submit order, which is the order the CPU recorded them in.
+ * Multi-buffered D3D12 submission: a pool of `depth` allocators/lists so the CPU can record and submit frame i+1
+ * while the GPU still works on frame i, each submit signalling the caller's fence with the next monotonic value.
+ * D3D12Resource.state tracking stays correct only because one queue executes lists in submit order, which is the
+ * order the CPU recorded them in.
  */
 import {
   D3D12CommandQueue, D3D12CommandAllocator, D3D12Fence, D3D12GraphicsCommandList, D3D12Device, FENCE_WAIT_TIMEOUT_MS, gpuTimeoutError,

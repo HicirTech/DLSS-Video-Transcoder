@@ -1,14 +1,7 @@
 /**
- * Minimal CUDA Driver API (nvcuda.dll) bindings: context creation and host<->device
- * copies, enough to feed the hardware Optical Flow engine in src/pipeline/nvof.ts
- * alongside our D3D12 device.
- *
- * CUresult 0 = CUDA_SUCCESS. 64-bit handles (CUcontext, CUdeviceptr) are carried
- * as bigint; CUdevice is a 32-bit ordinal.
- *
- * The DLL is loaded on first use, not at import: the probe reports a missing or
- * broken CUDA driver as a report field, which it could not do if importing this
- * module already required the DLL to be present.
+ * CUDA Driver API (nvcuda.dll) bindings the pipeline shares: the CUDA device behind each D3D12 adapter by LUID (with
+ * its UUID), primary contexts, device memory, and host/device copies for NVOF and NVENC. The DLL is loaded on first
+ * use rather than at import, so the probe can report a missing or broken driver as a report field.
  */
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import { formatDeviceUuid } from "./device-uuid.ts";
@@ -33,6 +26,7 @@ const SYMBOLS = {
   cuMemFree_v2: { args: [FFIType.u64], returns: FFIType.i32 },
 } as const;
 
+// CUresult 0 = CUDA_SUCCESS. CUcontext and CUdeviceptr are 64-bit handles carried as bigint; CUdevice is a 32-bit ordinal.
 const CU_NAMES: Record<number, string> = {
   0: "SUCCESS", 1: "INVALID_VALUE", 2: "OUT_OF_MEMORY", 3: "NOT_INITIALIZED", 100: "NO_DEVICE",
   101: "INVALID_DEVICE", 201: "INVALID_CONTEXT", 209: "NO_BINARY_FOR_GPU", 304: "OPERATING_SYSTEM", 999: "UNKNOWN",
