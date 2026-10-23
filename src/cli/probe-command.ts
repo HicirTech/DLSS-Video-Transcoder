@@ -6,7 +6,7 @@ import { commandSpec } from "./commands.ts";
 import { printProbe } from "./probe-report.ts";
 
 export async function probeCommand(args: string[]): Promise<void> {
-  // probe takes no positionals; validate the flag set before the GPU is touched.
+  // Rejects any positional and undeclared flag before the GPU is touched.
   positionalArgs(args, commandSpec("probe"));
   const report = await runProbe({
     adapterIndex: adapterOption(args),

@@ -4,7 +4,7 @@ import { positionalArgs, runtimeDirOption } from "./args.ts";
 import { commandSpec } from "./commands.ts";
 
 export async function versionsCommand(args: string[]): Promise<void> {
-  // versions takes no positionals; validate before the catalog is built.
+  // Rejects any positional and undeclared flag before the catalog is built.
   positionalArgs(args, commandSpec("versions"));
   const catalog = buildRuntimeCatalog(runtimeDirOption(args));
   for (const feature of catalog.features) {

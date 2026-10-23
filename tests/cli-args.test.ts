@@ -75,4 +75,13 @@ describe("positionalArgs", () => {
     expect(usageErrorOf(() => positionalArgs(["in.png", "--factor", ""], sr)).message).toContain("the value was empty");
     expect(usageErrorOf(() => positionalArgs(["in.png", "--factor", "--preset", "L"], sr)).message).toContain("'--preset' is another option");
   });
+
+  test("a positional the command does not declare is a usage error, so a forgotten flag name cannot fall back to a default", () => {
+    const extra = usageErrorOf(() => positionalArgs(["in.png", "out.png", "extra"], sr));
+    expect(extra.message).toBe("unexpected argument 'extra' for sr");
+    expect(extra.command).toBe("sr");
+    const forwarder = commandSpec("forwarder");
+    expect(usageErrorOf(() => positionalArgs(["D:\\x.dll"], forwarder)).message).toBe("forwarder takes options only, got 'D:\\x.dll'");
+    expect(positionalArgs(["--out", "D:\\x.dll"], forwarder)).toEqual([]);
+  });
 });

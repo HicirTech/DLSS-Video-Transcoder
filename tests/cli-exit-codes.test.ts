@@ -44,4 +44,20 @@ describe("a command the CLI does not have ends with the usage status", () => {
       expect(out, args.join(" ")).toBe("");
     }
   }, SPAWN_TIMEOUT_MS);
+
+  test("nor is a name every object inherits", () => {
+    const { status, out, err } = runCli("toString");
+    expect(status).toBe(EXIT_USAGE);
+    expect(err).toBe("error: unknown command 'toString'. Run 'bun run src/cli.ts help' for the list.\n");
+    expect(out).toBe("");
+  }, SPAWN_TIMEOUT_MS);
+});
+
+describe("a positional a command does not declare ends with the usage status", () => {
+  test("versions given a folder without --runtime lists nothing and points at its help page", () => {
+    const { status, out, err } = runCli("versions", "D:\\dlls");
+    expect(status).toBe(EXIT_USAGE);
+    expect(err).toStartWith("error: versions takes options only, got 'D:\\dlls'\n");
+    expect(out).toStartWith("versions — ");
+  }, SPAWN_TIMEOUT_MS);
 });

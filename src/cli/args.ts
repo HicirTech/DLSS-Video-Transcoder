@@ -104,10 +104,11 @@ function isFlagToken(token: string): boolean {
 }
 
 /**
- * The one structural check argv gets: it validates the flags against the
- * command's spec and returns the positionals. Every reader below — option,
- * numberOption, enumOption, choiceOption, adapterOption — may therefore assume a
- * flag that is present is followed by a real value.
+ * The one structural check argv gets: it validates the flags and the number of
+ * positionals against the command's spec and returns the positionals. Every
+ * reader in this module — option, numberOption, enumOption, choiceOption,
+ * adapterOption — may therefore assume a flag that is present is followed by a
+ * real value.
  *
  * A value-bearing flag's value token is skipped: without that, the `3` in
  * `sr in.png --factor 3` would be read as the output path.
@@ -116,6 +117,9 @@ function isFlagToken(token: string): boolean {
  * skipping it would leave its value token to be read as the output path
  * (`fg movie.mp4 --adapter 0` would write a file named `0`).
  *
+ * A positional beyond the ones the spec declares is rejected too: `forwarder
+ * D:\shim.dll`, with --out forgotten, must not write the shim to its default path.
+ *
  * A flag whose value is missing, blank or another flag is a usage error, never
  * a default: `fg in.mp4 --fps`, or `--fps "$Unset"` where the shell drops the
  * argument or passes it empty, must not run the job at the default rate.
@@ -123,21 +127,25 @@ function isFlagToken(token: string): boolean {
 export function positionalArgs(args: string[], spec: CommandSpec): string[] {
   const valued = valueFlagNames(spec);
   const known = flagNames(spec);
-  const out: string[] = [];
+  const positionals: string[] = [];
   for (let i = 0; i < args.length; i++) {
-    const a = args[i]!;
-    if (!isFlagToken(a)) {
-      out.push(a);
+    const token = args[i]!;
+    if (!isFlagToken(token)) {
+      positionals.push(token);
       continue;
     }
-    if (!known.has(a)) usageError(`unknown option '${a}' for ${spec.name}`, spec.name);
-    if (valued.has(a)) {
+    if (!known.has(token)) usageError(`unknown option '${token}' for ${spec.name}`, spec.name);
+    if (valued.has(token)) {
       const value = args[i + 1];
-      if (value === undefined || isFlagToken(value) || value.trim() === "") throwMissingValue(spec, a, value);
+      if (value === undefined || isFlagToken(value) || value.trim() === "") throwMissingValue(spec, token, value);
       i++; // skip this flag's value token
     }
   }
-  return out;
+  const declared = spec.args?.length ?? 0;
+  if (positionals.length > declared) {
+    usageError(declared === 0 ? `${spec.name} takes options only, got '${positionals[0]}'` : `unexpected argument '${positionals[declared]}' for ${spec.name}`, spec.name);
+  }
+  return positionals;
 }
 
 /** Usage error for a value-bearing flag whose value is missing, blank or another flag. */

@@ -6,7 +6,7 @@ import { option, positionalArgs } from "./args.ts";
 import { commandSpec } from "./commands.ts";
 
 export async function forwarderCommand(args: string[]): Promise<void> {
-  // forwarder takes no positionals; validate before anything is written.
+  // Rejects any positional and undeclared flag before anything is written.
   positionalArgs(args, commandSpec("forwarder"));
   const out = option(args, "--out") ?? shimPath(callerDir(DEFAULT_RUNTIME_DIR));
   const built = buildForwarderDll();
