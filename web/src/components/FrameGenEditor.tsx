@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { FormControl, FormHelperText, InputLabel, MenuItem, Select, Stack, ToggleButton, ToggleButtonGroup } from "@mui/material";
-import { FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, FRAME_GEN_NATIVE_MAXIMUM, type FrameGenEngine, type FrameGenFps, SETTING_RANGES } from "../../../src/server/api-types";
+import { FRAME_GEN_AUTO_PATH, FRAME_GEN_ENGINES, FRAME_GEN_FPS_CHOICES, type FrameGenEngine, type FrameGenFps, SETTING_RANGES } from "../../../src/server/api-types";
 import { formatFps } from "../format";
 import type { StoredFrameGen } from "../hooks/useSettings";
 import { NumberField } from "./NumberField";
@@ -87,11 +87,8 @@ export function FrameGenEditor({ value, sourceFps, outputFps, onChange }: FrameG
       </Stack>
       <FormHelperText>
         DLSS Frame Generation runs last, on the frames the steps before it made, and keeps the source duration; a rate
-        at or below the source's generates nothing and only resamples. Path Auto runs one native DLSSG session when
-        output ÷ source is an exact integer the runtime supports ({FRAME_GEN_NATIVE_MAXIMUM}) and, from 3× up,
-        hardware-accelerated GPU scheduling (HAGS) is on; otherwise it chains 2× stages in memory (1 stage for 2×, 2
-        for 4×, else 3 on an 8× grid) and places the nearest frame on each output instant. When the runtime generates
-        nothing in a native multi-frame session, Auto falls back to the cascade by itself. Always writes MP4.
+        at or below the source's generates nothing and only resamples. Path Auto: {FRAME_GEN_AUTO_PATH}. Always writes
+        MP4.
       </FormHelperText>
     </Stack>
   );
