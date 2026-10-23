@@ -1,6 +1,6 @@
 /**
- * External tool discovery: ffmpeg / ffprobe are optional and only needed for
- * video. They are looked up on PATH and in a few conventional folders.
+ * External tool discovery: ffmpeg / ffprobe are optional and only needed for video. They come from FFMPEG_PATH /
+ * FFPROBE_PATH when set, otherwise from PATH and a few conventional folders.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -21,13 +21,17 @@ const EXTRA_DIRS = [
 ];
 
 /**
- * Locate a tool, in order: the `<NAME>_PATH` environment variable (FFMPEG_PATH,
- * FFPROBE_PATH — the documented override, and the only way to pin a specific
- * build), then PATH, then EXTRA_DIRS. Null when none of them has it.
+ * Locate a tool: the `<NAME>_PATH` environment variable (FFMPEG_PATH, FFPROBE_PATH — the documented override, and
+ * the only way to pin a specific build) when it is set, which is an error when nothing is there rather than skipped;
+ * otherwise PATH, then EXTRA_DIRS. Null when the variable is unset and none of those has it.
  */
 export function findTool(name: string): string | null {
-  const env = process.env[`${name.toUpperCase()}_PATH`];
-  if (env && existsSync(env)) return env;
+  const variable = `${name.toUpperCase()}_PATH`;
+  const pinned = process.env[variable];
+  if (pinned) {
+    if (existsSync(pinned)) return pinned;
+    throw new Error(`${variable}=${pinned} does not exist; point it at your ${name}.exe or unset it to search PATH and the runtime/ffmpeg/bin folder.`);
+  }
   const onPath = Bun.which(name);
   if (onPath) return onPath;
   for (const dir of EXTRA_DIRS) {

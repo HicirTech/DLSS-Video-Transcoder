@@ -87,7 +87,13 @@ const server = Bun.serve({
       }
     },
     "/api/runtime": async () => json(await runtimeReport(RUNTIME_DIR)),
-    "/api/tools": () => json(toolsReport()),
+    "/api/tools": async () => {
+      try {
+        return json(await toolsReport());
+      } catch (error) {
+        return fail((error as Error).message, 500);
+      }
+    },
     "/api/catalog": () => json(buildRuntimeCatalog(RUNTIME_DIR)),
     "/api/settings/defaults": () => json(SETTINGS_DEFAULTS),
     "/api/jobs": {
