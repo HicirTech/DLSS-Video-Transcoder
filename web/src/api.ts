@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+/** The browser's transport to the server: the ApiClient over HTTP and the /ws job event source, or their ?mock=1 stand-ins. */
 import {
   type JobRequest,
   type JobStatus,
@@ -6,7 +6,6 @@ import {
   type ProbeReport,
   type SettingsDefaults,
   type ToolsReport,
-  trimJobLog,
   type UploadResult,
   type WsEvent,
 } from "../../src/server/api-types";
@@ -192,76 +191,5 @@ const mockBackend = isMockMode() ? createMockBackend() : null;
 
 /** The API client used by the whole UI (mock-backed when the page URL has `?mock=1`). */
 export const api: ApiClient = mockBackend ? mockBackend.client : createHttpClient();
-const jobEvents: JobEventSource = mockBackend ? mockBackend.events : createWebSocketSource();
-
-/** Merges one WsEvent into a job list, returning a new array when something changed. */
-export function applyWsEvent(jobs: JobStatus[], event: WsEvent): JobStatus[] {
-  switch (event.type) {
-    case "hello":
-      return jobs;
-    case "job": {
-      const index = jobs.findIndex((job) => job.id === event.job.id);
-      if (index < 0) return [...jobs, event.job];
-      const next = jobs.slice();
-      next[index] = event.job;
-      return next;
-    }
-    case "log": {
-      const index = jobs.findIndex((job) => job.id === event.jobId);
-      if (index < 0) return jobs;
-      const job = jobs[index];
-      const log = [...job.log, event.line];
-      trimJobLog(log);
-      const next = jobs.slice();
-      next[index] = { ...job, log };
-      return next;
-    }
-  }
-}
-
-export interface JobsFeed {
-  jobs: JobStatus[];
-  /** True while the /ws socket is open (always true in mock mode). */
-  connected: boolean;
-  /** Last error from fetching /api/jobs, cleared by the next successful fetch. */
-  error: string | null;
-  refresh(): Promise<void>;
-}
-
-/** Fetches /api/jobs, then keeps the list current from the /ws feed (resyncing after every reconnect). */
-export function useJobsFeed(): JobsFeed {
-  const [jobs, setJobs] = useState<JobStatus[]>([]);
-  const [connected, setConnected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async (): Promise<void> => {
-    try {
-      const list = await api.listJobs();
-      setJobs(list);
-      setError(null);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    void refresh();
-    const stop = jobEvents.connect({
-      onEvent: (event) => {
-        if (active) setJobs((current) => applyWsEvent(current, event));
-      },
-      onConnection: (isConnected) => {
-        if (!active) return;
-        setConnected(isConnected);
-        if (isConnected) void refresh();
-      },
-    });
-    return () => {
-      active = false;
-      stop();
-    };
-  }, [refresh]);
-
-  return { jobs, connected, error, refresh };
-}
+/** The /ws job event feed, or the mock backend's simulation of it. */
+export const jobEvents: JobEventSource = mockBackend ? mockBackend.events : createWebSocketSource();

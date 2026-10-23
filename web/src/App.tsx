@@ -3,9 +3,10 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { AppBar, Box, Chip, Container, Tab, Tabs, Toolbar, Typography } from "@mui/material";
 import MemoryIcon from "@mui/icons-material/Memory";
 import type { ProbeReport, ToolsReport } from "../../src/server/api-types";
-import { api, isMockMode, useJobsFeed } from "./api";
+import { api, isMockMode } from "./api";
 import { errorMessage } from "./errors";
 import { isJobActive } from "./format";
+import { useJobsFeed } from "./hooks/useJobsFeed";
 import { useNow } from "./hooks/useNow";
 import { SettingsProvider } from "./hooks/useSettings";
 import { ToastProvider, useToast } from "./hooks/useToast";
@@ -95,8 +96,8 @@ function Shell() {
   }, []);
 
   useEffect(() => {
-    if (feed.error) toast.showError(`Could not load the job list: ${feed.error}`);
-  }, [feed.error, toast]);
+    if (feed.status.kind === "failed") toast.showError(`Could not load the job list: ${feed.status.error}`);
+  }, [feed.status, toast]);
 
   const selectTab = (value: number): void => {
     setTab(value);
@@ -121,8 +122,8 @@ function Shell() {
           <Box sx={{ flex: 1 }} />
           {isMockMode() ? <Chip label="mock data" color="warning" variant="outlined" /> : null}
           <Chip
-            label={feed.connected ? "live" : "offline"}
-            color={feed.connected ? "success" : "default"}
+            label={feed.connected ? "live" : "reconnecting..."}
+            color={feed.connected ? "success" : "warning"}
             variant="outlined"
           />
           <ReadyChip probe={probe} probing={probing} onProbe={() => void runProbe()} />
@@ -146,8 +147,8 @@ function Shell() {
         <TabPanel {...panelProps("video")}>
           <VideoPanel jobs={feed.jobs} now={now} tools={tools} toolsError={toolsError} />
         </TabPanel>
-        <TabPanel active={tab === 3}>
-          <JobsPanel jobs={feed.jobs} now={now} connected={feed.connected} onRefresh={() => void feed.refresh()} />
+        <TabPanel {...panelProps("jobs")}>
+          <JobsPanel jobs={feed.jobs} now={now} status={feed.status} onRefresh={() => void feed.refresh()} />
         </TabPanel>
         <TabPanel {...panelProps("settings")}>
           <SettingsPanel probe={probe} probing={probing} onProbe={() => void runProbe()} />
