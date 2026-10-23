@@ -32,8 +32,9 @@ let fnList: bigint[] | null = null;
 /**
  * Load the DLL and create the NVOFA CUDA instance on first use, caching its
  * function-pointer table. Loading here rather than at import lets the probe
- * (which imports this module on the server's main thread) report a missing
- * nvofapi64.dll as an unavailable engine instead of failing at startup.
+ * (ngx/probe.ts, which imports this module) report a missing nvofapi64.dll as
+ * an unavailable engine, and a video job fall back to the CPU matcher, instead
+ * of failing at import.
  */
 function functions(): bigint[] {
   if (fnList) return fnList;
@@ -87,7 +88,8 @@ export type NvofCaps =
  * unsupported GPU comes back as status "unavailable" with the cause. A partial
  * answer (a limit the driver would not report) is "unavailable" too, so "ok"
  * always carries every number. Leaves the calling thread's CUDA context stack
- * as it found it, which matters for the server's long-lived main thread.
+ * as it found it (unless cudaReleaseContext itself fails, which is ignored):
+ * runProbe (ngx/probe.ts) goes on to bring up NGX on the same thread.
  */
 export function probeNvof(ordinal: number): NvofCaps {
   let pushed = false;
@@ -130,8 +132,7 @@ export function probeNvof(ordinal: number): NvofCaps {
       try {
         cudaReleaseContext(ordinal);
       } catch {
-        // The context could not be given back; the stack entry it leaves behind
-        // is the fault this probe reports, not one it can repair.
+        // A failed release is ignored: the result is already decided and the probe cannot repair the stack.
       }
     }
   }
