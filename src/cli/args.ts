@@ -1,6 +1,6 @@
 /** Flag and option readers over argv, and the one structural check argv gets against a command's spec. */
 import { DEFAULT_RUNTIME_DIR } from "../paths.ts";
-import type { CommandSpec } from "./commands.ts";
+import { type CommandSpec, optionName, takesValue } from "./commands.ts";
 import { usageError } from "./usage-error.ts";
 
 export function flag(args: string[], name: string): boolean {
@@ -81,17 +81,12 @@ export function runtimeDirOption(args: string[]): string {
 
 /** Flag names that consume a following value token, derived from a command spec ("--factor N" does, "--json" does not). */
 function valueFlagNames(spec: CommandSpec): Set<string> {
-  const s = new Set<string>();
-  for (const o of spec.options) {
-    const [name, ...rest] = o.flag.split(/\s+/);
-    if (rest.length && name) s.add(name);
-  }
-  return s;
+  return new Set(spec.options.filter(takesValue).map(optionName));
 }
 
 /** Every flag this command declares, value-bearing or not. */
 function flagNames(spec: CommandSpec): Set<string> {
-  return new Set(spec.options.map((o) => o.flag.split(/\s+/)[0]!));
+  return new Set(spec.options.map(optionName));
 }
 
 /**
@@ -151,7 +146,7 @@ export function positionalArgs(args: string[], spec: CommandSpec): string[] {
 /** Usage error for a value-bearing flag whose value is missing, blank or another flag. */
 function throwMissingValue(spec: CommandSpec, name: string, value: string | undefined): never {
   // The caller checked the flag against flagNames(spec), so the spec carries it.
-  const declared = spec.options.find((o) => o.flag.split(/\s+/)[0] === name)!;
+  const declared = spec.options.find((o) => optionName(o) === name)!;
   const cause =
     value === undefined ? "nothing followed it" : value.trim() === "" ? "the value was empty" : `'${value}' is another option`;
   const shown = declared.def === undefined ? "" : ` (default ${declared.def})`;
