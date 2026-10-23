@@ -61,6 +61,10 @@ export function checkHresult(hresult: number, what: string): void {
   }
 }
 
+/** IDXGIFactory1::EnumAdapters1's answer past the last adapter; i32, as the call returns it. */
+export const DXGI_ERROR_NOT_FOUND = 0x887a0002 | 0;
+
+// HRESULT values from winerror.h (Windows SDK), which also defines the DXGI_ERROR_* and D3D12_ERROR_* codes. Keys use hex32's form.
 const KNOWN_HRESULTS: Record<string, string> = {
   "0x80004001": "E_NOTIMPL",
   "0x80004002": "E_NOINTERFACE",
@@ -68,7 +72,7 @@ const KNOWN_HRESULTS: Record<string, string> = {
   "0x80070057": "E_INVALIDARG",
   "0x8007000E": "E_OUTOFMEMORY",
   "0x887A0001": "DXGI_ERROR_INVALID_CALL",
-  "0x887A0002": "DXGI_ERROR_NOT_FOUND",
+  [hex32(DXGI_ERROR_NOT_FOUND)]: "DXGI_ERROR_NOT_FOUND",
   "0x887A0004": "DXGI_ERROR_UNSUPPORTED",
   "0x887A0005": "DXGI_ERROR_DEVICE_REMOVED",
   "0x887A0006": "DXGI_ERROR_DEVICE_HUNG",
