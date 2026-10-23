@@ -31,27 +31,45 @@ export interface AnalyzedFrame {
   half: Uint16Array | null;
 }
 
+/** What a stage is built from once its parts have opened (openStages in framegen.ts). */
+export interface StageParts {
+  session: DlssgSession;
+  guide: Worker;
+  packer: Worker | null;
+  generatedCount: number;
+  /** Zero motion, sent for a reset or a duplicate frame. */
+  zeros: Uint16Array;
+  /** How the guide reported it estimates flow when it opened. */
+  guideFlow: GuideFlow;
+}
+
 /** One DLSSG stage: a host-process session driven from the main thread, a guide thread, and (for the bottleneck stage) a packer thread. */
 export class Stage {
   sceneCuts = 0;
   /** Real intervals (no reset) this stage has evaluated. */
   intervals = 0;
   generatedTotal = 0;
-  flow: "nvof" | "cpu" | "?" = "?";
+  readonly session: DlssgSession;
+  readonly guide: Worker;
+  readonly packer: Worker | null;
+  readonly generatedCount: number;
+  readonly flow: GuideFlow["flow"];
   /** Why this stage fell back to the CPU matcher, when it did. */
-  flowReason: string | null = null;
+  readonly flowReason: string | null;
+  private readonly zeros: Uint16Array;
   private nextIndex = 0;
   private waiter: { id: number; frame: TimedFrame; resolve: (a: AnalyzedFrame) => void; reject: (e: Error) => void } | null = null;
   private packWaiter: { id: number; analyzed: AnalyzedFrame; resolve: (p: PreparedFrame) => void; reject: (e: Error) => void } | null = null;
   private failed: Error | null = null;
 
-  constructor(
-    readonly session: DlssgSession,
-    readonly guide: Worker,
-    readonly packer: Worker | null,
-    readonly generatedCount: number,
-    private readonly zeros: Uint16Array,
-  ) {
+  constructor({ session, guide, packer, generatedCount, zeros, guideFlow }: StageParts) {
+    this.session = session;
+    this.guide = guide;
+    this.packer = packer;
+    this.generatedCount = generatedCount;
+    this.zeros = zeros;
+    this.flow = guideFlow.flow;
+    this.flowReason = guideFlow.flowReason;
     guide.onmessage = (event: MessageEvent) => {
       const m = event.data as GuideOut;
       if (m.type === "prepared") {
@@ -193,13 +211,15 @@ async function releaseGuideThread(guide: Worker): Promise<void> {
 }
 
 /**
- * Start a guide-side worker in either role and wait until it is ready (its NVOFA session included).
- * `createWorker` starts the thread; tests hand in a stand-in.
+ * Start a guide-side worker in either role and wait until it is ready (a guide's NVOFA session included); a guide
+ * also hands back how it estimates flow. `createWorker` starts the thread; tests hand in a stand-in.
  */
+export function openGuideWorker(open: GuideOpen, createWorker?: (script: URL) => Worker): Promise<{ worker: Worker } & GuideFlow>;
+export function openGuideWorker(open: PackerOpen, createWorker?: (script: URL) => Worker): Promise<{ worker: Worker }>;
 export async function openGuideWorker(
   open: GuideOpen | PackerOpen,
   createWorker: (script: URL) => Worker = (script) => new Worker(script.href),
-): Promise<{ worker: Worker; flow: "nvof" | "cpu" | "pack"; flowReason: string | null }> {
+): Promise<{ worker: Worker } | ({ worker: Worker } & GuideFlow)> {
   const role = open.type === "open" ? "guide" : "packer";
   const worker = createWorker(new URL("./workers/framegen-guide-worker.ts", import.meta.url));
   try {
@@ -207,8 +227,8 @@ export async function openGuideWorker(
       const onError = (e: Event) => { reject(new Error(`frame-generation ${role} worker failed to start: ${(e as ErrorEvent).message}`)); };
       worker.addEventListener("error", onError, { once: true });
       worker.onmessage = (event: MessageEvent) => {
-        const m = event.data as { type: string; flow?: "nvof" | "cpu" | "pack"; flowReason?: string | null; message?: string };
-        if (m.type === "opened") { worker.removeEventListener("error", onError); worker.onmessage = null; resolve({ worker, flow: m.flow ?? "cpu", flowReason: m.flowReason ?? null }); }
+        const m = event.data as GuideOut;
+        if (m.type === "opened") { worker.removeEventListener("error", onError); worker.onmessage = null; resolve("flow" in m ? { worker, flow: m.flow, flowReason: m.flowReason } : { worker }); }
         else if (m.type === "error") { reject(new Error(`frame-generation ${role} worker: ${m.message}`)); }
       };
       worker.postMessage(open);

@@ -479,10 +479,14 @@ async function openStages({ options, progress, width, height, plan }: FrameGenJo
       });
       throw results.find((r): r is PromiseRejectedResult => r.status === "rejected")!.reason;
     }
-    const stage = new Stage(sessionResult.value, guideResult.value.worker, packerResult.value ? packerResult.value.worker : null, generatedCount, zeros);
-    stage.flow = guideResult.value.flow === "pack" ? "cpu" : guideResult.value.flow;
-    stage.flowReason = guideResult.value.flowReason;
-    return stage;
+    return new Stage({
+      session: sessionResult.value,
+      guide: guideResult.value.worker,
+      packer: packerResult.value ? packerResult.value.worker : null,
+      generatedCount,
+      zeros,
+      guideFlow: { flow: guideResult.value.flow, flowReason: guideResult.value.flowReason },
+    });
   };
   const opened = await Promise.allSettled(generatedCounts.map((generatedCount, index) => openStage(index, generatedCount)));
   for (const result of opened) if (result.status === "fulfilled") stages.push(result.value); // so `finally` closes them
