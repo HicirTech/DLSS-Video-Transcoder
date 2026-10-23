@@ -299,9 +299,13 @@ async function processFrameGenOnce(options: FrameGenOptions): Promise<FrameGenRe
     // file, so the partial file can be deleted here and a failed job never
     // leaves a misleading one behind. The stages close at the same time, not
     // after it: each is bounded by ABORT_TIMEOUT_MS on its own (worker-abort.ts).
-    try { decoder.kill(); } catch {}
+    // A stream that ended without a frame is the decoder's own end, so it is
+    // left to exit: a kill would replace the exit code that says why.
+    const decodeEnded = error instanceof NoFramesDecodedError;
+    if (!decodeEnded) try { decoder.kill(); } catch {}
     await Promise.allSettled([sink.abort(), closeStages(), decoder.exited, decodeErrDrained]);
     removePartialOutput(output, sink.framesWritten, outputExisted);
+    if (decodeEnded) await throwIfDecodeFailed();
     throw error;
   } finally {
     sink.close();
@@ -531,7 +535,6 @@ async function runPipeline(
     const parts = Object.entries(run.busy).sort(([a], [b]) => a.localeCompare(b)).map(([name, ms]) => `${name} ${(ms / 1000).toFixed(1)}`);
     progress(0.97, `pipeline busy (s) over ${wall.toFixed(1)} s wall: ${parts.join(", ")}`);
   }
-  if (inputFrames === 0) throw new NoFramesDecodedError();
   // Clips shorter than the probe window still must not pass off a duplicate-frame resample as generation.
   if (expectsGeneration && stages[0]!.intervals >= 1 && noneGenerated()) throw new FrameGenDisabledError(noFramesGeneratedMessage(plan, { disabledFrames: stages[0]?.session.disabledFrames ?? 0, hagsEnabled: caps.hagsEnabled }), plan);
   // Not before the checks above: a FrameGenDisabledError from them makes an
