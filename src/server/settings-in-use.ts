@@ -2,14 +2,10 @@
  * Which settings of a job take effect, from the steps it runs: the one statement of it for the web forms, which
  * show the reason where a job ignores a setting. It imports no Node module: the web bundles it.
  */
-import { FRAME_GEN_GPU_CHOICE } from "./api-types.ts";
+import { FRAME_GEN_GPU_CHOICE, type StepKind } from "./api-types.ts";
 
 /** Which steps a job runs. */
-export interface JobShape {
-  sr: boolean;
-  nr: boolean;
-  fg: boolean;
-}
+export type JobShape = Record<StepKind, boolean>;
 
 /** For the settings a form shows outside the step cards: null when the job uses them as set, otherwise the reason. */
 export interface UnusedSettings {

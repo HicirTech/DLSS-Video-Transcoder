@@ -23,6 +23,7 @@ import {
   type ScaleSettings,
   SETTING_RANGES,
   STEP_KINDS,
+  stepsPresent,
   type StepKind,
 } from "../server/api-types.ts";
 import { takesGpuChoice } from "../server/settings-in-use.ts";
@@ -38,7 +39,7 @@ export async function videoCommand(args: string[]): Promise<void> {
   const runtimeDir = runtimeDirOption(args);
   const request = videoRequest(args, runtimeDir);
   const adapterIndex = adapterOption(args);
-  const shape = { sr: request.superResolution !== undefined, nr: request.neuralRendering !== undefined, fg: request.frameGen !== undefined };
+  const shape = stepsPresent(request);
   if (adapterIndex !== undefined && !takesGpuChoice(shape)) {
     usageError(`--adapter picks the GPU for --sr and --nr; frame generation picks its own (${FRAME_GEN_GPU_CHOICE}), so with --fg alone leave it out`, "video");
   }
