@@ -450,7 +450,7 @@ function releaseGpu({ factory, adapters, device }: ProbeGpu): void {
   // releases only what it owns. Measured: three consecutive probes in one
   // process then each get a fresh device.
   device?.release();
-  for (const a of adapters) a.release();
+  for (const adapter of adapters) adapter.release();
   factory?.release();
 }
 

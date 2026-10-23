@@ -40,17 +40,17 @@ export function loadForwarder(path: string): ForwarderModule {
   const evaluate = callableAt(addresses.fwd_evaluate, EVALUATE_SIGNATURE);
   const release = callableAt(addresses.fwd_release, RELEASE_SIGNATURE);
 
-  const nz = (p: number) => (p === 0 ? null : p);
+  const nullIfZero = (pointer: number) => (pointer === 0 ? null : pointer);
   return {
     path,
     module,
     addresses,
-    setSlots: (c, e, r) => {
-      setSlots(nz(c), nz(e), nz(r));
+    setSlots: (createSlot, evaluateSlot, releaseSlot) => {
+      setSlots(nullIfZero(createSlot), nullIfZero(evaluateSlot), nullIfZero(releaseSlot));
     },
-    create: (cmdList, featureId, params, outHandle) => create(nz(cmdList), featureId, nz(params), nz(outHandle)) as number,
-    evaluate: (cmdList, handle, params, callback) => evaluate(nz(cmdList), nz(handle), nz(params), nz(callback)) as number,
-    release: (handle) => release(nz(handle)) as number,
+    create: (cmdList, featureId, params, outHandle) => create(nullIfZero(cmdList), featureId, nullIfZero(params), nullIfZero(outHandle)) as number,
+    evaluate: (cmdList, handle, params, callback) => evaluate(nullIfZero(cmdList), nullIfZero(handle), nullIfZero(params), nullIfZero(callback)) as number,
+    release: (handle) => release(nullIfZero(handle)) as number,
   };
 }
 
@@ -109,22 +109,22 @@ function checkStackArguments(fwd: ForwarderModule): { ok: boolean; seen: number[
 export function selfTestForwarder(fwd: ForwarderModule): SelfTestResult {
   const seen: { name: string; args: number[] }[] = [];
   const createTarget = new JSCallback(
-    (a: number, b: number, c: number, d: number) => {
-      seen.push({ name: "create", args: [asPtr(a), b, asPtr(c), asPtr(d)] });
+    (cmdList: number, featureId: number, params: number, outHandle: number) => {
+      seen.push({ name: "create", args: [asPtr(cmdList), featureId, asPtr(params), asPtr(outHandle)] });
       return 0x1;
     },
     CREATE_SIGNATURE,
   );
   const evaluateTarget = new JSCallback(
-    (a: number, b: number, c: number, d: number) => {
-      seen.push({ name: "evaluate", args: [asPtr(a), asPtr(b), asPtr(c), asPtr(d)] });
+    (cmdList: number, handle: number, params: number, callback: number) => {
+      seen.push({ name: "evaluate", args: [asPtr(cmdList), asPtr(handle), asPtr(params), asPtr(callback)] });
       return 0x2;
     },
     EVALUATE_SIGNATURE,
   );
   const releaseTarget = new JSCallback(
-    (a: number) => {
-      seen.push({ name: "release", args: [asPtr(a)] });
+    (handle: number) => {
+      seen.push({ name: "release", args: [asPtr(handle)] });
       return 0x3;
     },
     RELEASE_SIGNATURE,
