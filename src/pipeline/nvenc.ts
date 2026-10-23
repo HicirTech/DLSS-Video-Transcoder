@@ -489,6 +489,7 @@ export class NvencEncoder {
     this.check(this.api.mapInput(this.enc, map), "nvEncMapInputResource");
     const mapped = mdv.getBigUint64(24, true);
 
+    let encoded = false;
     try {
       // NV_ENC_PIC_PARAMS (3360B); offsets below name its fields.
       const pic = new Uint8Array(3360);
@@ -507,9 +508,13 @@ export class NvencEncoder {
       if (st === 17) throw new Error("NVENC returned NEED_MORE_INPUT unexpectedly (B-frames/lookahead should be disabled)");
       this.check(st, "nvEncEncodePicture");
       this.frameIdx++;
-      return this.lockAndRead();
+      const bytes = this.lockAndRead();
+      encoded = true;
+      return bytes;
     } finally {
-      this.check(this.api.unmapInput(this.enc, mapped), "nvEncUnmapInputResource");
+      // Always unmapped, but a failed unmap is reported only when it is the first failure, not over the one before it.
+      const unmapped = this.api.unmapInput(this.enc, mapped);
+      if (encoded) this.check(unmapped, "nvEncUnmapInputResource");
     }
   }
 
