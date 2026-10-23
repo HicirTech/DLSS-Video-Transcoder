@@ -5,7 +5,7 @@
  */
 import { toArrayBuffer, type Pointer } from "bun:ffi";
 import { asPtr, hex32, wstring } from "./memory.ts";
-import { kernel32Symbols, lastError } from "./win32.ts";
+import { closeHandle, kernel32Symbols, lastError } from "./win32.ts";
 
 // hFile of CreateFileMappingW that asks for a mapping backed by the system paging file, not by a file
 // (INVALID_HANDLE_VALUE): https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-createfilemappingw
@@ -58,7 +58,7 @@ export class SharedMemory {
     const handle = asPtr(created);
     if (handle === 0) throw new Error(win32Failure("CreateFileMappingW", name, code));
     if (code === ERROR_ALREADY_EXISTS) {
-      kernel32Symbols.CloseHandle(handle as Pointer);
+      closeHandle(handle);
       throw new Error(`Shared memory "${name}" already exists; a new mapping needs a name no process has used`);
     }
     return SharedMemory.mapView(name, handle, byteLength);
@@ -86,7 +86,7 @@ export class SharedMemory {
     const code = lastError();
     const address = asPtr(mapped);
     if (address === 0) {
-      kernel32Symbols.CloseHandle(handle as Pointer);
+      closeHandle(handle);
       // Windows reports a view larger than the mapping as error 5, "access denied".
       throw new Error(`${win32Failure("MapViewOfFile", name, code)}; the mapping may be smaller than the ${byteLength} bytes asked for`);
     }
@@ -96,7 +96,7 @@ export class SharedMemory {
     } catch (error) {
       // Bun 1.4.2 raises a RangeError for a Uint8Array over 2^32 bytes.
       kernel32Symbols.UnmapViewOfFile(address as Pointer);
-      kernel32Symbols.CloseHandle(handle as Pointer);
+      closeHandle(handle);
       throw error;
     }
   }
@@ -121,6 +121,6 @@ export class SharedMemory {
     if (this.closed) return;
     this.closed = true;
     kernel32Symbols.UnmapViewOfFile(this.viewAddress as Pointer);
-    kernel32Symbols.CloseHandle(this.mappingHandle as Pointer);
+    closeHandle(this.mappingHandle);
   }
 }
