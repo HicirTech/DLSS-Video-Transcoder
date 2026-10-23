@@ -6,13 +6,13 @@
  * crash inside NVIDIA code then leaves the last trace line as the culprit.
  */
 import { mkdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { D3D12Device } from "../native/d3d12.ts";
 import { DxgiFactory, type DxgiAdapter } from "../native/dxgi.ts";
 import { hex32 } from "../native/memory.ts";
 import { parsePe } from "../native/pe.ts";
 import { parseVersionInfo } from "../native/version-info.ts";
-import { callerDir } from "../paths.ts";
+import { callerDir, featureDir } from "../paths.ts";
 import { MAX_FLOW_LONG_SIDE, MIN_FLOW_SIDE } from "../pipeline/flow-grid.ts";
 import { chooseGpu, gpuCandidates, isEligibleGpu } from "../pipeline/gpu.ts";
 import { probeNvof } from "../pipeline/nvof.ts";
@@ -213,12 +213,16 @@ function probeOpticalFlow({ report, say, pipelineGrid }: ProbeContext, { adapter
   }
 }
 
-/** Lists the runtime DLLs; true when nvngx_dlssnr.dll, the one feature 18 needs, is installed. */
+/** Lists the runtime DLLs; true when the DLL feature 18 needs is where a job that names no DLL folder loads it. */
 async function inspectRuntimeFolder({ report, reasons, runtimeDir }: ProbeContext): Promise<boolean> {
   report.runtime = await runtimeReport(runtimeDir);
-  const dlssnr = report.runtime.files.find((f) => f.name === "nvngx_dlssnr.dll");
-  if (!dlssnr?.present) reasons.push(`The DLSS Neural Rendering runtime file nvngx_dlssnr.dll was not found in ${runtimeDir}. Copy it into that folder.`);
-  return Boolean(dlssnr?.present);
+  const nr = featureByKey("nr");
+  const dll = report.runtime.files.find((f) => f.name === nr.dllName);
+  // A job with no dllDir loads only this flat copy (nr-render.ts); a version folder alone does not make it runnable.
+  const flat = join(featureDir(report.runtime.folder, "nr"), nr.dllName);
+  if (!dll?.present) reasons.push(`The ${nr.name} runtime file ${nr.dllName} was not found in ${featureDir(runtimeDir, "nr")} or a version folder inside it. Place it at ${flat}.`);
+  else if (dll.path !== flat) reasons.push(`${nr.dllName} is only in the version folder ${dirname(dll.path!)}, and a job that names no DLL folder loads ${flat}. Copy it there, or pick that version for the job.`);
+  return dll?.path === flat;
 }
 
 /** Finds the NGX core, reads its version and exports, and loads it; null when there is none or it will not load. */
