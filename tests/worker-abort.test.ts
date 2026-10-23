@@ -3,9 +3,21 @@
  * (src/pipeline/worker-abort.ts): the waiting side with stand-in workers, and
  * the answering side against a real child process.
  */
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { abortWorkers, answerAbort } from "../src/pipeline/worker-abort.ts";
 import { FakeWorker } from "./fake-worker.ts";
+
+/** Stand-in children a failed answerAbort test may have left running: a timed-out test never reaches its own cleanup. */
+const children: Bun.Subprocess[] = [];
+afterEach(() => {
+  for (const child of children.splice(0)) {
+    try {
+      child.kill();
+    } catch {
+      // already gone, as it should be
+    }
+  }
+});
 
 describe("abortWorkers", () => {
   test("resolves only once every worker has acknowledged the abort", async () => {
@@ -42,6 +54,7 @@ describe("abortWorkers", () => {
 describe("answerAbort", () => {
   test("kills the child, waits for it to exit, releases, then acknowledges", async () => {
     const child = Bun.spawn([process.execPath, "-e", "setInterval(() => {}, 1000)"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    children.push(child);
     const order: string[] = [];
     void child.exited.then(() => order.push("exited"));
     const scope = new FakeWorker();
