@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  JOB_LOG_LIMIT,
   type JobRequest,
   type JobStatus,
   type MediaInfo,
   type ProbeReport,
   type SettingsDefaults,
   type ToolsReport,
+  trimJobLog,
   type UploadResult,
   type WsEvent,
 } from "../../src/server/api-types";
@@ -211,7 +211,7 @@ export function applyWsEvent(jobs: JobStatus[], event: WsEvent): JobStatus[] {
       if (index < 0) return jobs;
       const job = jobs[index];
       const log = [...job.log, event.line];
-      if (log.length > JOB_LOG_LIMIT) log.splice(0, log.length - JOB_LOG_LIMIT);
+      trimJobLog(log);
       const next = jobs.slice();
       next[index] = { ...job, log };
       return next;
