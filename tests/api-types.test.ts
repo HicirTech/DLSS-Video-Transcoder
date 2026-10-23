@@ -5,6 +5,7 @@ import {
   DEFAULT_FRAME_GEN_MULTIPLIER,
   DEFAULT_FRAME_GEN_STEP,
   DEFAULT_NR_SETTINGS,
+  DEFAULT_NR_STACK,
   DEFAULT_SCALE_SETTINGS,
   DEFAULT_SR_STEP,
   DEFAULT_WARMUP_FRAMES,
@@ -24,6 +25,7 @@ import {
   isActiveState,
   isTerminalState,
   jobSteps,
+  nrStackOf,
   resizesFrames,
   stepsSuffix,
 } from "../src/server/api-types.ts";
@@ -36,6 +38,7 @@ describe("defaults", () => {
     localTone: DEFAULT_NR_SETTINGS.localTone,
     localStructure: DEFAULT_NR_SETTINGS.localStructure,
     skinStructure: DEFAULT_NR_SETTINGS.skinStructure,
+    stack: DEFAULT_NR_STACK,
     warmupFrames: DEFAULT_WARMUP_FRAMES,
     factor: DEFAULT_SCALE_SETTINGS.factor,
     width: DEFAULT_SCALE_SETTINGS.width,
@@ -89,6 +92,12 @@ describe("steps", () => {
     expect(stepsSuffix(["nr"], true)).toBe("nr");
     expect(stepsSuffix([], true)).toBe("resize");
     expect(stepsSuffix([], false)).toBe("copy");
+  });
+
+  test("a Neural Rendering step without a stack runs once", () => {
+    expect(nrStackOf({ settings: DEFAULT_NR_SETTINGS })).toBe(DEFAULT_NR_STACK);
+    expect(nrStackOf({ settings: DEFAULT_NR_SETTINGS, stack: 3 })).toBe(3);
+    expect(nrStackOf(undefined)).toBe(DEFAULT_NR_STACK);
   });
 
   test("a job resizes its frames only with a factor or size resize and no Super Resolution", () => {

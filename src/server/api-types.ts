@@ -76,6 +76,12 @@ export const DEFAULT_NR_SETTINGS: NrSettings = {
   uiCorrection: false,
 };
 
+/** How many times Neural Rendering runs on each frame when a job does not say (NeuralRenderingStep.stack). */
+export const DEFAULT_NR_STACK = 1;
+
+/** GPU memory each stacked Neural Rendering pass adds at 3840x2160, in GB: one more feature (RTX 5090, four measured 2026-10-23). */
+export const NR_PASS_GPU_MEMORY_4K_GB = 1.1;
+
 /** An image job's passes over its still before the kept one, so the temporal state of SR and NR settles (JobRequest.warmupFrames). */
 export const DEFAULT_WARMUP_FRAMES = 4;
 
@@ -204,6 +210,8 @@ export const SETTING_RANGES = {
   localTone: { min: 0, max: 2, integer: false },
   localStructure: { min: 0, max: 2, integer: false },
   skinStructure: { min: -1, max: 2, integer: false },
+  // Chosen cap on stacked NR passes, not a runtime limit: each is one more feature (NR_PASS_GPU_MEMORY_4K_GB at 4K).
+  stack: { min: 1, max: 4, integer: true },
   // Chosen cap on extra still-image passes, not a runtime limit.
   warmupFrames: { min: 0, max: 64, integer: true },
   // Chosen bounds for the decode resize; an sr job also starts at SR_FACTOR_MIN.
@@ -239,8 +247,24 @@ export interface SuperResolutionStep {
 /** The Neural Rendering step: DLSS Neural Rendering (feature 18) enhances each frame at its size. */
 export interface NeuralRenderingStep {
   settings: NrSettings;
+  /**
+   * How many times Neural Rendering runs on each frame, each pass on the previous pass's output, within
+   * SETTING_RANGES.stack; omitted = DEFAULT_NR_STACK. The installed runtime's strength stops at
+   * NR_INTENSITY_EFFECTIVE_MAX, so stacking is how a stronger look is made.
+   */
+  stack?: number;
   /** Absolute folder of a DLSS Neural Rendering version from GET /api/catalog; omit to load the bundled DLL. */
   dllDir?: string;
+}
+
+/** How many Neural Rendering passes `step` runs on each frame: its stack, or DEFAULT_NR_STACK when it gives none. */
+export function nrStackOf(step: NeuralRenderingStep | undefined): number {
+  return step?.stack ?? DEFAULT_NR_STACK;
+}
+
+/** Neural Rendering's name in output file names and engine names: "nr", or "nrx3" when it is stacked 3 times. */
+export function nrStackLabel(stack: number): string {
+  return stack > 1 ? `nrx${stack}` : "nr";
 }
 
 /**
@@ -408,6 +432,8 @@ export type MediaInfo =
 export interface SettingsDefaults {
   superResolution: SuperResolutionStep;
   neuralRendering: NrSettings;
+  /** NeuralRenderingStep.stack: how many times Neural Rendering runs on each frame. */
+  nrStack: number;
   frameGen: FrameGenStep;
   resize: ScaleSettings;
   encode: EncodeSettings;
@@ -419,6 +445,7 @@ export function settingsDefaults(): SettingsDefaults {
   return {
     superResolution: structuredClone(DEFAULT_SR_STEP),
     neuralRendering: { ...DEFAULT_NR_SETTINGS },
+    nrStack: DEFAULT_NR_STACK,
     frameGen: { ...DEFAULT_FRAME_GEN_STEP },
     resize: { ...DEFAULT_SCALE_SETTINGS },
     encode: { ...DEFAULT_ENCODE_SETTINGS },

@@ -88,6 +88,7 @@ describe("withServerDefaults", () => {
     const defaults: SettingsDefaults = {
       superResolution: { scale: { ...DEFAULT_SCALE_SETTINGS, mode: "factor", factor: 2 }, motion: "flow" },
       neuralRendering: { ...DEFAULT_NR_SETTINGS, style: 1 },
+      nrStack: 2,
       frameGen: { multiplier: 3, engine: "cascade" },
       resize: { ...DEFAULT_SCALE_SETTINGS, mode: "size", width: 1280, height: 720 },
       encode: { ...DEFAULT_ENCODE_SETTINGS, quality: 25 },
