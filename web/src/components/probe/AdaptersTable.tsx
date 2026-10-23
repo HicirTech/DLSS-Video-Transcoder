@@ -13,8 +13,10 @@ interface AdaptersTableProps {
 function CudaCell({ adapter, cuda }: { adapter: ProbeAdapter; cuda: ProbeCuda }) {
   if (cuda.error !== null) {
     return (
-      <Tooltip title={cuda.error}>
-        <Mono dim>n/a</Mono>
+      <Tooltip title={cuda.error} describeChild>
+        <span tabIndex={0} style={{ cursor: "help", textDecoration: "underline dotted" }}>
+          <Mono dim>n/a</Mono>
+        </span>
       </Tooltip>
     );
   }
