@@ -104,38 +104,36 @@ function heapProperties(type: number): NativeStruct {
   return new NativeStruct(20).u32(0, type).u32(4, 0).u32(8, 0).u32(12, 1).u32(16, 1);
 }
 
+/** What a resource is: a buffer carries its byte size as its width, with height 1 and no format, as D3D12 describes one. */
+interface ResourceShape {
+  kind: "buffer" | "texture2d";
+  width: number;
+  height: number;
+  format: number;
+  sizeInBytes: number;
+}
+
+function bufferShape(sizeInBytes: number): ResourceShape {
+  return { kind: "buffer", width: sizeInBytes, height: 1, format: DXGI_FORMAT_UNKNOWN, sizeInBytes };
+}
+
 // D3D12_RESOURCE_DESC (d3d12.h, x64, 56 bytes): Dimension u32 @0; Alignment u64 @8;
 // Width u64 @16; Height u32 @24; DepthOrArraySize u16 @28; MipLevels u16 @30;
 // Format u32 @32; SampleDesc{Count @36, Quality @40}; Layout u32 @44; Flags u32 @48.
 // A buffer must be ROW_MAJOR with Height/Depth/MipLevels 1 and format UNKNOWN.
-function bufferDescription(sizeInBytes: number, flags: number): NativeStruct {
+function resourceDescription(shape: ResourceShape, flags: number): NativeStruct {
+  const buffer = shape.kind === "buffer";
   const desc = new NativeStruct(56);
-  desc.u32(0, D3D12_RESOURCE_DIMENSION_BUFFER);
+  desc.u32(0, buffer ? D3D12_RESOURCE_DIMENSION_BUFFER : D3D12_RESOURCE_DIMENSION_TEXTURE2D);
   desc.u64(8, 0);
-  desc.u64(16, sizeInBytes);
-  desc.u32(24, 1);
+  desc.u64(16, shape.width);
+  desc.u32(24, shape.height);
   desc.u16(28, 1);
   desc.u16(30, 1);
-  desc.u32(32, DXGI_FORMAT_UNKNOWN);
+  desc.u32(32, shape.format);
   desc.u32(36, 1);
   desc.u32(40, 0);
-  desc.u32(44, D3D12_TEXTURE_LAYOUT_ROW_MAJOR);
-  desc.u32(48, flags);
-  return desc;
-}
-
-function texture2dDescription(width: number, height: number, format: number, flags: number): NativeStruct {
-  const desc = new NativeStruct(56);
-  desc.u32(0, D3D12_RESOURCE_DIMENSION_TEXTURE2D);
-  desc.u64(8, 0);
-  desc.u64(16, width);
-  desc.u32(24, height);
-  desc.u16(28, 1);
-  desc.u16(30, 1);
-  desc.u32(32, format);
-  desc.u32(36, 1);
-  desc.u32(40, 0);
-  desc.u32(44, D3D12_TEXTURE_LAYOUT_UNKNOWN);
+  desc.u32(44, buffer ? D3D12_TEXTURE_LAYOUT_ROW_MAJOR : D3D12_TEXTURE_LAYOUT_UNKNOWN);
   desc.u32(48, flags);
   return desc;
 }
@@ -150,21 +148,22 @@ export interface TextureOptions {
 }
 
 export class D3D12Resource extends ComObject {
+  readonly kind: ResourceShape["kind"];
+  readonly width: number;
+  readonly height: number;
+  readonly format: number;
+  readonly sizeInBytes: number;
   /** Resource state as last recorded by this process; barriers are derived from it. */
   state: number;
 
-  constructor(
-    ptr: number,
-    label: string,
-    readonly kind: "buffer" | "texture2d",
-    readonly width: number,
-    readonly height: number,
-    readonly format: number,
-    readonly sizeInBytes: number,
-    initialState: number,
-  ) {
-    super(ptr, label);
-    this.state = initialState;
+  constructor(ptr: number, options: ResourceShape & { label: string; initialState: number }) {
+    super(ptr, options.label);
+    this.kind = options.kind;
+    this.width = options.width;
+    this.height = options.height;
+    this.format = options.format;
+    this.sizeInBytes = options.sizeInBytes;
+    this.state = options.initialState;
   }
 
   /** Map subresource 0 and return the CPU address. A null `readRange` means "may read everything"; `{begin:0,end:0}` promises the CPU will not read. */
@@ -426,22 +425,30 @@ export class D3D12Device extends ComObject {
     return this.call(37, { args: [], returns: FFIType.i32 }) as number;
   }
 
-  private createCommitted(heapType: number, desc: NativeStruct, initialState: number, label: string, heapFlags = 0): number {
-    const heap = heapProperties(heapType);
+  /** The error to report for `what` when the device has been removed, or null while it is present. */
+  removedError(what: string): Error | null {
+    const reason = this.deviceRemovedReason();
+    if (!isFailure(reason)) return null;
+    return new Error(`${what}: the D3D12 device was removed (${hex32(reason)}${describeHresult(reason)}). Restart the job; if it repeats, update or reset the NVIDIA driver.`);
+  }
+
+  private createCommitted(options: { heapType: number; heapFlags?: number; shape: ResourceShape; resourceFlags: number; initialState: number; label: string }): D3D12Resource {
+    const heap = heapProperties(options.heapType);
+    const desc = resourceDescription(options.shape, options.resourceFlags);
     const out = new OutPointer();
     this.callHr(
       27,
       { args: [FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
-      `CreateCommittedResource(${label})`,
+      `CreateCommittedResource(${options.label})`,
       heap.bytes,
-      heapFlags,
+      options.heapFlags ?? 0,
       desc.bytes,
-      initialState,
+      options.initialState,
       null,
       IID_ID3D12Resource,
       out.bytes,
     );
-    return out.value;
+    return new D3D12Resource(out.value, { ...options.shape, label: options.label, initialState: options.initialState });
   }
 
   /**
@@ -449,8 +456,14 @@ export class D3D12Device extends ComObject {
    * can mint an NT handle for CUDA to import as external memory. Starts in COMMON.
    */
   createSharedBuffer(sizeInBytes: number, label = `shared buffer ${sizeInBytes}B`): D3D12Resource {
-    const ptr = this.createCommitted(D3D12_HEAP_TYPE_DEFAULT, bufferDescription(sizeInBytes, D3D12_RESOURCE_FLAG_NONE), D3D12_RESOURCE_STATE_COMMON, label, D3D12_HEAP_FLAG_SHARED);
-    return new D3D12Resource(ptr, label, "buffer", sizeInBytes, 1, DXGI_FORMAT_UNKNOWN, sizeInBytes, D3D12_RESOURCE_STATE_COMMON);
+    return this.createCommitted({
+      heapType: D3D12_HEAP_TYPE_DEFAULT,
+      heapFlags: D3D12_HEAP_FLAG_SHARED,
+      shape: bufferShape(sizeInBytes),
+      resourceFlags: D3D12_RESOURCE_FLAG_NONE,
+      initialState: D3D12_RESOURCE_STATE_COMMON,
+      label,
+    });
   }
 
   /**
@@ -459,28 +472,33 @@ export class D3D12Device extends ComObject {
    * GPU copies (GpuContext.fillBuffers, GpuContext.readbackMany). Starts in COMMON.
    */
   createUnorderedAccessBuffer(sizeInBytes: number, label = `UAV buffer ${sizeInBytes}B`): D3D12Resource {
-    const ptr = this.createCommitted(D3D12_HEAP_TYPE_DEFAULT, bufferDescription(sizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS), D3D12_RESOURCE_STATE_COMMON, label);
-    return new D3D12Resource(ptr, label, "buffer", sizeInBytes, 1, DXGI_FORMAT_UNKNOWN, sizeInBytes, D3D12_RESOURCE_STATE_COMMON);
+    return this.createCommitted({
+      heapType: D3D12_HEAP_TYPE_DEFAULT,
+      shape: bufferShape(sizeInBytes),
+      resourceFlags: D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+      initialState: D3D12_RESOURCE_STATE_COMMON,
+      label,
+    });
   }
 
   createTexture2D(options: TextureOptions): D3D12Resource {
-    const flags = options.allowUnorderedAccess ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_NONE;
-    const state = options.initialState ?? D3D12_RESOURCE_STATE_COMMON;
-    const label = options.label ?? `texture ${options.width}x${options.height} ${formatName(options.format)}`;
-    const ptr = this.createCommitted(D3D12_HEAP_TYPE_DEFAULT, texture2dDescription(options.width, options.height, options.format, flags), state, label);
-    const size = options.width * options.height * bytesPerPixel(options.format);
-    return new D3D12Resource(ptr, label, "texture2d", options.width, options.height, options.format, size, state);
+    return this.createCommitted({
+      heapType: D3D12_HEAP_TYPE_DEFAULT,
+      shape: { kind: "texture2d", width: options.width, height: options.height, format: options.format, sizeInBytes: options.width * options.height * bytesPerPixel(options.format) },
+      resourceFlags: options.allowUnorderedAccess ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_NONE,
+      initialState: options.initialState ?? D3D12_RESOURCE_STATE_COMMON,
+      label: options.label ?? `texture ${options.width}x${options.height} ${formatName(options.format)}`,
+    });
   }
 
   createBuffer(sizeInBytes: number, heapType: number, label = `buffer ${sizeInBytes}B`): D3D12Resource {
-    const state =
+    const initialState =
       heapType === D3D12_HEAP_TYPE_UPLOAD
         ? D3D12_RESOURCE_STATE_GENERIC_READ
         : heapType === D3D12_HEAP_TYPE_READBACK
           ? D3D12_RESOURCE_STATE_COPY_DEST
           : D3D12_RESOURCE_STATE_COMMON;
-    const ptr = this.createCommitted(heapType, bufferDescription(sizeInBytes, D3D12_RESOURCE_FLAG_NONE), state, label);
-    return new D3D12Resource(ptr, label, "buffer", sizeInBytes, 1, DXGI_FORMAT_UNKNOWN, sizeInBytes, state);
+    return this.createCommitted({ heapType, shape: bufferShape(sizeInBytes), resourceFlags: D3D12_RESOURCE_FLAG_NONE, initialState, label });
   }
 }
 
