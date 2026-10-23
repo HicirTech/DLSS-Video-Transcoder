@@ -222,9 +222,9 @@ export interface NvencEncoderOptions {
   height: number;
   fpsNum: number;
   fpsDen: number;
-  codec?: NvencSdkCodec; // default h264
-  /** Constant-quality target, lower = better; held inside SETTING_RANGES.quality. Default 20. */
-  cq?: number;
+  codec: NvencSdkCodec;
+  /** Constant-quality target, lower = better; held inside SETTING_RANGES.quality. */
+  cq: number;
   /** CUDA device to encode on: the renderer's, resolved by LUID (GpuSession.cudaOrdinal), never a guess. */
   ordinal: number;
   /**
@@ -382,11 +382,9 @@ export class NvencEncoder {
   ) {}
 
   static open(opts: NvencEncoderOptions): NvencEncoder {
-    const width = opts.width;
-    const height = opts.height;
-    const codec: NvencSdkCodec = opts.codec ?? "h264";
-    const cq = clampToRange("quality", opts.cq ?? 20);
-    const codecGuid = CODEC_GUID[codec];
+    const { width, height } = opts;
+    const cq = clampToRange("quality", opts.cq);
+    const codecGuid = CODEC_GUID[opts.codec];
     const presetGuid = PRESET_GUID[NVENC_PRESET];
     // An external pool dictates its own pitch; an owned buffer is tightly packed.
     const pitch = opts.inputs?.[0]?.pitch ?? width * 4;
