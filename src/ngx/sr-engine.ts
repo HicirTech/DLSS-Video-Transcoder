@@ -21,8 +21,8 @@ class SrEngine implements Engine {
 
   constructor(
     session: GpuSession,
-    readonly width: number,
-    readonly height: number,
+    width: number,
+    height: number,
     options: SrEngineOptions,
   ) {
     this.outputWidth = options.outputWidth;
