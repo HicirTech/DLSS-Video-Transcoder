@@ -17,13 +17,16 @@ const LogPre = styled("pre")(({ theme }) => ({
   border: `1px solid ${theme.palette.divider}`,
 }));
 
+/** How far above the bottom, in px, the view still counts as at the tail: slack for a scroll position that stops just short. */
+const FOLLOW_TAIL_PX = 12;
+
 interface LogPanelProps {
   lines: string[];
   maxHeight?: number;
   emptyText?: string;
 }
 
-/** Monospace log view that keeps following new lines until the user scrolls up. */
+/** Monospace log view that follows new lines while scrolled within FOLLOW_TAIL_PX of the bottom. */
 export function LogPanel({ lines, maxHeight = 240, emptyText = "(no log lines yet)" }: LogPanelProps) {
   const ref = useRef<HTMLPreElement>(null);
   const follow = useRef(true);
@@ -36,7 +39,7 @@ export function LogPanel({ lines, maxHeight = 240, emptyText = "(no log lines ye
   const onScroll = (): void => {
     const element = ref.current;
     if (!element) return;
-    follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 12;
+    follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < FOLLOW_TAIL_PX;
   };
 
   return (
