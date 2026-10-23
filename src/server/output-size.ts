@@ -3,7 +3,7 @@
  * DLSS Super Resolution and the NVENC encoders put on it. It imports no Node module, so the web can bundle the
  * same rule the pipeline and the NGX layer apply.
  */
-import { DLSS_SR_MAX_OUTPUT_SIDE, type EncodeSettings, isNvencCodec, NVENC_MAX_SIDE, SR_FACTOR_MIN, type ScaleSettings } from "./api-types.ts";
+import { DLSS_SR_MAX_OUTPUT_SIDE, type EncodeSettings, isNvencCodec, NVENC_CODECS, NVENC_MAX_SIDE, type NvencCodec, SR_FACTOR_MIN, type ScaleSettings } from "./api-types.ts";
 
 /** Nearest even value, at least 2: 4:2:0 chroma subsampling cannot encode an odd dimension. */
 export function evenSize(value: number): number {
@@ -53,6 +53,11 @@ export function srSideProblem(size: { width: number; height: number }): string |
 export function nvencLimitExceeded(codec: EncodeSettings["codec"], size: { width: number; height: number }): number | null {
   const limit = isNvencCodec(codec) ? NVENC_MAX_SIDE[codec] : undefined;
   return limit !== undefined && Math.max(size.width, size.height) > limit ? limit : null;
+}
+
+/** The NVENC encoders that take `size` (NVENC_MAX_SIDE), in NVENC_CODECS order. */
+export function nvencCodecsWithin(size: { width: number; height: number }): NvencCodec[] {
+  return NVENC_CODECS.filter((codec) => nvencLimitExceeded(codec, size) === null);
 }
 
 /** What output size a step can write, beyond the API's own ranges (SETTING_RANGES). */

@@ -6,7 +6,7 @@
  * lives in nvenc.ts and is a different set.
  */
 import { type EncodeSettings, isNvencCodec, NVENC_CODECS, type NvencCodec } from "../server/api-types.ts";
-import { nvencLimitExceeded } from "../server/output-size.ts";
+import { nvencCodecsWithin, nvencLimitExceeded } from "../server/output-size.ts";
 import type { NvencSdkCodec } from "./nvenc.ts";
 
 export type Codec = EncodeSettings["codec"];
@@ -101,7 +101,7 @@ export function resolveEncodeCodec(codec: Codec, ffmpeg: string, gpu: number, si
   const cpu = cpuSiblingCodec(codec);
   const limit = nvencLimitExceeded(codec, size);
   if (limit !== null) {
-    const onGpu = NVENC_CODECS.filter((other) => nvencLimitExceeded(other, size) === null);
+    const onGpu = nvencCodecsWithin(size);
     const instead = onGpu.length ? `; ${onGpu.join(" or ")} would keep it on the GPU` : "";
     return { codec: cpu, note: `${codec} encodes at most ${limit} pixels per side and this output is ${size.width}x${size.height}: encoding with ${cpu} (CPU) instead, which is slower${instead}` };
   }
