@@ -1,4 +1,4 @@
-import { Alert, Box, Button, LinearProgress, Stack, Typography } from "@mui/material";
+import { Alert, AlertTitle, Box, Button, LinearProgress, Stack, Typography } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import type { ProbeReport } from "../../../src/server/api-types";
@@ -16,10 +16,13 @@ import { VerdictCard } from "./probe/VerdictCard";
 interface ProbePanelProps {
   probe: ProbeReport | null;
   probing: boolean;
+  /** Why the last probe failed, or null when it succeeded or none has run. */
+  probeError: string | null;
   onProbe: () => void;
 }
 
-export function ProbePanel({ probe, probing, onProbe }: ProbePanelProps) {
+/** The Probe tab: runs the capability probe and lays out its report. */
+export function ProbePanel({ probe, probing, probeError, onProbe }: ProbePanelProps) {
   return (
     <Stack spacing={2.5}>
       <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
@@ -40,8 +43,15 @@ export function ProbePanel({ probe, probing, onProbe }: ProbePanelProps) {
       </Box>
       {probing ? <LinearProgress /> : null}
 
-      {!probe && !probing ? (
-        <Alert severity="info" variant="outlined">
+      {probeError && !probing ? (
+        <Alert severity="error" variant="outlined">
+          <AlertTitle>The last probe failed{probe ? "; the report below is from an earlier run" : ""}</AlertTitle>
+          {probeError}
+        </Alert>
+      ) : null}
+
+      {!probe && !probing && !probeError ? (
+        <Alert severity="info" variant="outlined" role="status">
           No probe has run yet in this session. Run it to check DLSS neural rendering support; the status chip in the
           title bar will update with the result.
         </Alert>
