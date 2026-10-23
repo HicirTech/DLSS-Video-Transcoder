@@ -9,6 +9,7 @@ import index from "../../web/index.html";
 import { buildRuntimeCatalog } from "../ngx/runtime-catalog.ts";
 import { runtimeReport } from "../ngx/runtime-inventory.ts";
 import { APP_DATA_DIR, RUNTIME_DIR } from "../paths.ts";
+import { inputAsOutputProblem } from "../pipeline/output-path.ts";
 import { toolsReport } from "../pipeline/tools.ts";
 import {
   DEFAULT_ENCODE_SETTINGS,
@@ -108,6 +109,8 @@ const server = Bun.serve({
           const roots = [APP_DATA_DIR, RUNTIME_DIR, dirname(resolve(request.input))];
           if (!isAbsolute(request.output) || !roots.some((r) => isWithin(request.output!, r)))
             return fail("The output path must be absolute and inside the app-data folder or the input's own directory.");
+          const inputProblem = inputAsOutputProblem(request.input, request.output);
+          if (inputProblem) return fail(inputProblem);
         }
         // A DLL directory drives a native LoadLibrary, so it must be one the server itself
         // advertises through GET /api/catalog, for the feature of the step that loads it.
