@@ -97,8 +97,8 @@ export function importD3D12Fence(sharedHandle: number): bigint {
   return out.value;
 }
 
-/** Make the CUDA stream wait until the shared D3D12 fence reaches `value`. */
-export function waitExternalSemaphore(extSem: bigint, value: bigint, stream = 0n): void {
+/** Make the legacy default stream wait until the shared D3D12 fence reaches `value`. */
+export function waitExternalSemaphore(extSem: bigint, value: bigint): void {
   const semArray = new Uint8Array(8);
   new DataView(semArray.buffer).setBigUint64(0, extSem, true);
   // CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS (x64, 144 bytes): params.fence.value u64 @0; ... flags u32 @72.
