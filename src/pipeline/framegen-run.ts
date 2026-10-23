@@ -251,32 +251,32 @@ class OverlappedRun {
 
 
 /** Plain in-order fallback for frames too large for the credit window (still uses the guide threads, one step at a time). */
-export async function runSequential(p: RunParams): Promise<RunResult> {
+export async function runSequential(params: RunParams): Promise<RunResult> {
   let decoded = 0;
   let guideSeq = 0;
   /** One source frame through every stage into the writer; false at the end of the stream. */
   const step = async (): Promise<boolean> => {
-    const rgba = await p.reader.next(p.frameBytes);
+    const rgba = await params.reader.next(params.frameBytes);
     if (!rgba) return false;
-    let items: TimedFrame[] = [{ rgba, timestamp: ratDiv(rational(decoded), p.sourceRate), segment: 0, provenance: "Source", sourceIndex: decoded }];
-    for (const stage of p.stages) {
+    let items: TimedFrame[] = [sourceFrame(rgba, decoded, params.sourceRate)];
+    for (const stage of params.stages) {
       const next: TimedFrame[] = [];
       for (const item of items) next.push(...(await stage.evaluate(await stage.pack(await stage.prepare(item, ++guideSeq), ++guideSeq))));
       items = next;
     }
-    for (const item of items) await p.writer.push(item);
+    for (const item of items) await params.writer.push(item);
     return true;
   };
   for (;;) {
-    throwIfAborted(p.signal);
+    throwIfAborted(params.signal);
     // Raced as well as checked: a wedged DLSS-G host would block a step forever.
-    if (!(await raceAbort(p.signal, step()))) break;
+    if (!(await raceAbort(params.signal, step()))) break;
     decoded++;
-    p.onProcessed(decoded);
-    p.check();
+    params.onProcessed(decoded);
+    params.check();
   }
-  p.writer.endAt(decoded, p.sourceRate);
-  await p.writer.finish();
+  params.writer.endAt(decoded, params.sourceRate);
+  await params.writer.finish();
   // null, not 0: this runner holds frames without a credit ledger, so its peak
   // is unmeasured rather than zero. Reporting 0 put a number nobody measured
   // into the job result as though it had been.
