@@ -1,7 +1,6 @@
 /**
  * POST /api/upload: the request body is the file's bytes and ?name= its name. The body streams straight to a
- * new file in the uploads folder, so an upload of any size takes constant memory (5 GiB peaked at 45 MiB on
- * Bun 1.4.2, where parsing the same upload as multipart form data needed twice its size and failed at 5 GiB).
+ * new file in the uploads folder so memory stays constant at any size; Bun's multipart parsing buffers the whole body.
  */
 import { extname, join } from "node:path";
 import { removePartialOutput } from "../pipeline/partial-output.ts";
