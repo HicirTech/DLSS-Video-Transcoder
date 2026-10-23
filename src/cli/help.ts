@@ -2,9 +2,7 @@
 import { ADAPTER_OPT, COMMANDS, RUNTIME_OPT, type CommandSpec } from "./commands.ts";
 import { EXIT_FAILED, EXIT_USAGE, usageError } from "./usage-error.ts";
 
-function pad(text: string, width: number): string {
-  return text.length >= width ? text : text + " ".repeat(width - text.length);
-}
+const COMMON_OPTION_WIDTH = 20;
 
 function printOverview(): void {
   const lines: string[] = [];
@@ -15,14 +13,14 @@ function printOverview(): void {
   lines.push("");
   lines.push("commands:");
   const width = Math.max(...COMMANDS.map((c) => c.name.length));
-  for (const c of COMMANDS) lines.push(`  ${pad(c.name, width)}  ${c.summary}`);
+  for (const c of COMMANDS) lines.push(`  ${c.name.padEnd(width)}  ${c.summary}`);
   lines.push("");
   // Only the commands whose own help lists these accept them; anything else is a
   // usage error, so do not promise them everywhere.
   lines.push("common options (each command's help lists the ones it accepts):");
-  lines.push(`  ${pad(ADAPTER_OPT.flag, 20)} ${ADAPTER_OPT.desc} (default ${ADAPTER_OPT.def})`);
-  lines.push(`  ${pad(RUNTIME_OPT.flag, 20)} ${RUNTIME_OPT.desc} (default ${RUNTIME_OPT.def})`);
-  lines.push(`  ${pad("--help, -h", 20)} show help for the CLI or the given command`);
+  lines.push(`  ${ADAPTER_OPT.flag.padEnd(COMMON_OPTION_WIDTH)} ${ADAPTER_OPT.desc} (default ${ADAPTER_OPT.def})`);
+  lines.push(`  ${RUNTIME_OPT.flag.padEnd(COMMON_OPTION_WIDTH)} ${RUNTIME_OPT.desc} (default ${RUNTIME_OPT.def})`);
+  lines.push(`  ${"--help, -h".padEnd(COMMON_OPTION_WIDTH)} show help for the CLI or the given command`);
   lines.push("");
   lines.push("exit status:");
   lines.push("  0  the command succeeded (probe: neural rendering is ready)");
@@ -39,15 +37,15 @@ function printCommandHelp(spec: CommandSpec): void {
   if (spec.args?.length) {
     lines.push("");
     lines.push("arguments:");
-    const w = Math.max(...spec.args.map((a) => a.name.length));
-    for (const a of spec.args) lines.push(`  ${pad(a.name, w)}  ${a.desc}`);
+    const nameWidth = Math.max(...spec.args.map((a) => a.name.length));
+    for (const a of spec.args) lines.push(`  ${a.name.padEnd(nameWidth)}  ${a.desc}`);
   }
   if (spec.options.length) {
     lines.push("");
     lines.push("options:");
-    const w = Math.max(...spec.options.map((o) => o.flag.length));
+    const flagWidth = Math.max(...spec.options.map((o) => o.flag.length));
     for (const o of spec.options) {
-      lines.push(`  ${pad(o.flag, w)}  ${o.desc}${o.def !== undefined ? `  (default ${o.def})` : ""}`);
+      lines.push(`  ${o.flag.padEnd(flagWidth)}  ${o.desc}${o.def !== undefined ? `  (default ${o.def})` : ""}`);
     }
   }
   if (spec.notes?.length) {
