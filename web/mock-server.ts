@@ -12,7 +12,7 @@ import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, isActiveState, settingsDe
 import { MAX_REQUEST_BODY_BYTES, uploadFileName } from "../src/server/upload";
 import { asJobRequest, validateJobRequest } from "../src/server/validate";
 import { MOCK_PROBE, MOCK_TOOLS, mockCatalog, mockMediaInfo, mockUpload } from "./src/mock/fixtures";
-import { MockJobEngine } from "./src/mock/job-engine";
+import { MockJobEngine, timestamp } from "./src/mock/job-engine";
 import { mockPreviewSvg } from "./src/mock/preview-svg";
 import { createSeedJobs } from "./src/mock/seed-jobs";
 
@@ -30,10 +30,6 @@ function failure(status: number, message: string): Response {
   return json({ error: message }, status);
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 const server = Bun.serve({
   port: PORT,
   hostname: "127.0.0.1",
@@ -42,8 +38,8 @@ const server = Bun.serve({
   routes: {
     "/": index,
     "/api/probe": async () => {
-      await sleep(1500);
-      return json({ ...MOCK_PROBE, generatedAt: new Date().toISOString() });
+      await Bun.sleep(1500);
+      return json({ ...MOCK_PROBE, generatedAt: timestamp() });
     },
     "/api/runtime": () => json(MOCK_PROBE.runtime),
     "/api/catalog": () => json(mockCatalog()),
@@ -104,7 +100,7 @@ const server = Bun.serve({
   websocket: {
     open(ws) {
       ws.subscribe(JOBS_TOPIC);
-      const hello: WsEvent = { type: "hello", serverTime: new Date().toISOString() };
+      const hello: WsEvent = { type: "hello", serverTime: timestamp() };
       ws.send(JSON.stringify(hello));
     },
     message() {
