@@ -55,7 +55,7 @@ export function FrameGenEditor({ value, onChange }: FrameGenEditorProps) {
               labelId={fpsLabelId}
               label="Output frame rate"
               value={value.targetFps}
-              onChange={(event) => update({ targetFps: event.target.value as FrameGenFps })}
+              onChange={(event) => update({ targetFps: event.target.value })}
             >
               {FRAME_GEN_FPS_CHOICES.map((fps) => (
                 <MenuItem key={fps} value={fps}>
