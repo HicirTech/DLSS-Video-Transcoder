@@ -41,7 +41,7 @@ describe("errors", () => {
       [0, 0],
     ];
     for (const [colorType, bitDepth] of cases) {
-      expect(() => decodePng(png(ihdr(1, 1, bitDepth, colorType), idat(concat([[0, 0, 0, 0, 0]])), IEND))).toThrow(
+      expect(() => decodePng(png(ihdr({ width: 1, height: 1, bitDepth, colorType }), idat(concat([[0, 0, 0, 0, 0]])), IEND))).toThrow(
         new RegExp(`unsupported colour type ${colorType} / bit depth ${bitDepth}`),
       );
     }
@@ -55,36 +55,59 @@ describe("errors", () => {
   });
 
   test("bad IHDR contents", () => {
-    expect(() => decodePng(png(ihdr(0, 1, 8, 6), IEND))).toThrow(/dimensions/);
-    expect(() => decodePng(png(ihdr(1, 0, 8, 6), IEND))).toThrow(/dimensions/);
-    expect(() => decodePng(png(chunk("IHDR", [0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 1, 0, 0]), IEND))).toThrow(/compression method/);
-    expect(() => decodePng(png(chunk("IHDR", [0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 1, 0]), IEND))).toThrow(/filter method/);
-    expect(() => decodePng(png(chunk("IHDR", [0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 2]), IEND))).toThrow(/interlace method/);
+    expect(() => decodePng(png(ihdr({ width: 0, height: 1, bitDepth: 8, colorType: 6 }), IEND))).toThrow(/dimensions/);
+    expect(() => decodePng(png(ihdr({ width: 1, height: 0, bitDepth: 8, colorType: 6 }), IEND))).toThrow(/dimensions/);
+    const rgba1x1 = { width: 1, height: 1, bitDepth: 8, colorType: 6 };
+    expect(() => decodePng(png(ihdr({ ...rgba1x1, compressionMethod: 1 }), IEND))).toThrow(/compression method/);
+    expect(() => decodePng(png(ihdr({ ...rgba1x1, filterMethod: 1 }), IEND))).toThrow(/filter method/);
+    expect(() => decodePng(png(ihdr({ ...rgba1x1, interlaceMethod: 2 }), IEND))).toThrow(/interlace method/);
     expect(() => decodePng(png(chunk("IHDR", [0, 0, 0, 1, 0, 0, 0, 1, 8, 6]), IEND))).toThrow(/13 bytes/);
     expect(() => decodePng(png(IEND))).toThrow(/first chunk must be IHDR/);
   });
 
   test("indexed image without PLTE", () => {
-    expect(() => decodePng(png(ihdr(1, 1, 8, 3), idat(concat([[0, 0]])), IEND))).toThrow(/PLTE/);
-    expect(() => decodePng(png(ihdr(1, 1, 8, 3), chunk("PLTE", [1, 2]), idat(concat([[0, 0]])), IEND))).toThrow(/PLTE/);
+    expect(() => decodePng(png(ihdr({ width: 1, height: 1, bitDepth: 8, colorType: 3 }), idat(concat([[0, 0]])), IEND))).toThrow(/PLTE/);
+    expect(() => decodePng(png(ihdr({ width: 1, height: 1, bitDepth: 8, colorType: 3 }), chunk("PLTE", [1, 2]), idat(concat([[0, 0]])), IEND))).toThrow(/PLTE/);
+  });
+
+  test("a PLTE with more entries than the bit depth can address", () => {
+    const threeEntries = chunk("PLTE", [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(() => decodePng(png(ihdr({ width: 1, height: 1, bitDepth: 1, colorType: 3 }), threeEntries, idat(concat([[0, 0]])), IEND))).toThrow(
+      /PLTE has 3 entries, more than the 2 a 1-bit image can use/,
+    );
+  });
+
+  test("duplicate critical chunks", () => {
+    // Each first chunk is valid for its colour type, so only the duplicate check can refuse the file.
+    const rgba = ihdr({ width: 1, height: 1, bitDepth: 8, colorType: 6 });
+    expect(() => decodePng(png(rgba, rgba, idat(concat([[0, 1, 2, 3, 4]])), IEND))).toThrow(/duplicate IHDR chunk/);
+    const indexed = ihdr({ width: 1, height: 1, bitDepth: 8, colorType: 3 });
+    expect(() => decodePng(png(indexed, chunk("PLTE", [1, 2, 3]), chunk("PLTE", [1, 2, 3]), idat(concat([[0, 0]])), IEND))).toThrow(/duplicate PLTE chunk/);
+    const grey = ihdr({ width: 1, height: 1, bitDepth: 8, colorType: 0 });
+    expect(() => decodePng(png(grey, chunk("tRNS", [0, 0]), chunk("tRNS", [0, 0]), idat(concat([[0, 1]])), IEND))).toThrow(/duplicate tRNS chunk/);
+  });
+
+  test("a chunk length past 2^31-1 is refused by name before the file is found short", () => {
+    const header = Uint8Array.from([0x80, 0, 0, 0, 0x49, 0x44, 0x41, 0x54]); // length 2^31, type IDAT
+    expect(() => decodePng(png(ihdr({ width: 1, height: 1, bitDepth: 8, colorType: 6 }), header))).toThrow(/chunk "IDAT" declares an invalid length 2147483648/);
   });
 
   test("tRNS problems", () => {
-    expect(() => decodePng(png(ihdr(1, 1, 8, 6), chunk("tRNS", [0, 0]), idat(concat([[0, 1, 2, 3, 4]])), IEND))).toThrow(/tRNS/);
-    expect(() => decodePng(png(ihdr(1, 1, 8, 0), chunk("tRNS", [0]), idat(concat([[0, 1]])), IEND))).toThrow(/tRNS/);
-    expect(() => decodePng(png(ihdr(1, 1, 8, 3), chunk("PLTE", [1, 2, 3]), chunk("tRNS", [0, 0]), idat(concat([[0, 0]])), IEND))).toThrow(/tRNS/);
+    expect(() => decodePng(png(ihdr({ width: 1, height: 1, bitDepth: 8, colorType: 6 }), chunk("tRNS", [0, 0]), idat(concat([[0, 1, 2, 3, 4]])), IEND))).toThrow(/tRNS/);
+    expect(() => decodePng(png(ihdr({ width: 1, height: 1, bitDepth: 8, colorType: 0 }), chunk("tRNS", [0]), idat(concat([[0, 1]])), IEND))).toThrow(/tRNS/);
+    expect(() => decodePng(png(ihdr({ width: 1, height: 1, bitDepth: 8, colorType: 3 }), chunk("PLTE", [1, 2, 3]), chunk("tRNS", [0, 0]), idat(concat([[0, 0]])), IEND))).toThrow(/tRNS/);
   });
 
   test("IDAT data too short for the image", () => {
-    expect(() => decodePng(png(ihdr(4, 4, 8, 6), idat(new Uint8Array(2 * 17)), IEND))).toThrow(/too short/);
-    expect(() => decodePng(png(ihdr(4, 4, 8, 6, 1), idat(new Uint8Array(10)), IEND))).toThrow(/too short/);
+    expect(() => decodePng(png(ihdr({ width: 4, height: 4, bitDepth: 8, colorType: 6 }), idat(new Uint8Array(2 * 17)), IEND))).toThrow(/too short/);
+    expect(() => decodePng(png(ihdr({ width: 4, height: 4, bitDepth: 8, colorType: 6, interlaceMethod: 1 }), idat(new Uint8Array(10)), IEND))).toThrow(/too short/);
   });
 
   test("a header claiming a gigantic image is refused before anything is allocated", () => {
     // 60000x60000 RGBA needs ~14.4 GB of filtered scanlines, past what zlib will
     // produce, so it must fail on the declared geometry rather than by inflating
     // or allocating first.
-    expect(() => decodePng(png(ihdr(60000, 60000, 8, 6), idat(new Uint8Array(64)), IEND))).toThrow(/too large to decode/);
+    expect(() => decodePng(png(ihdr({ width: 60000, height: 60000, bitDepth: 8, colorType: 6 }), idat(new Uint8Array(64)), IEND))).toThrow(/too large to decode/);
   });
 
   test("IDAT that expands past the declared geometry is refused (decompression bomb)", () => {
@@ -94,34 +117,34 @@ describe("errors", () => {
     const bomb = idat(new Uint8Array(holds(1024, 2048)));
 
     // A 1x1 image holds 5 bytes, so this must be refused rather than inflated.
-    expect(() => decodePng(png(ihdr(1, 1, 8, 6), bomb, IEND))).toThrow(/expands past what a 1x1 image can hold/);
+    expect(() => decodePng(png(ihdr({ width: 1, height: 1, bitDepth: 8, colorType: 6 }), bomb, IEND))).toThrow(/expands past what a 1x1 image can hold/);
     // The bound is exact: one row short is still refused...
-    expect(() => decodePng(png(ihdr(1024, 2047, 8, 6), bomb, IEND))).toThrow(/expands past what a 1024x2047 image can hold/);
+    expect(() => decodePng(png(ihdr({ width: 1024, height: 2047, bitDepth: 8, colorType: 6 }), bomb, IEND))).toThrow(/expands past what a 1024x2047 image can hold/);
     // ...and the geometry that holds exactly this payload decodes.
-    expect(() => decodePng(png(ihdr(1024, 2048, 8, 6), bomb, IEND))).not.toThrow();
+    expect(() => decodePng(png(ihdr({ width: 1024, height: 2048, bitDepth: 8, colorType: 6 }), bomb, IEND))).not.toThrow();
   });
 
   test("no IDAT at all", () => {
-    expect(() => decodePng(png(ihdr(1, 1, 8, 6), IEND))).toThrow(/IDAT/);
+    expect(() => decodePng(png(ihdr({ width: 1, height: 1, bitDepth: 8, colorType: 6 }), IEND))).toThrow(/IDAT/);
   });
 
   test("invalid filter type byte", () => {
-    expect(() => decodePng(png(ihdr(1, 2, 8, 6), idat(concat([[0, 1, 2, 3, 4, 5, 1, 2, 3, 4]])), IEND))).toThrow(/filter type 5 on scanline 1$/);
+    expect(() => decodePng(png(ihdr({ width: 1, height: 2, bitDepth: 8, colorType: 6 }), idat(concat([[0, 1, 2, 3, 4, 5, 1, 2, 3, 4]])), IEND))).toThrow(/filter type 5 on scanline 1$/);
   });
 
   test("an invalid filter type byte in an interlaced image names its Adam7 pass", () => {
     // 8x8 RGBA: pass 1 is one filter byte and one 4-byte pixel, so pass 2's first filter byte is byte 5.
     const data = buildImageData({ width: 8, height: 8, bitDepth: 8, channels: 4, interlaced: true, samples: () => [1, 2, 3, 4] });
     data[5] = 5;
-    expect(() => decodePng(png(ihdr(8, 8, 8, 6, 1), idat(data), IEND))).toThrow(/filter type 5 on scanline 0 of Adam7 pass 2$/);
+    expect(() => decodePng(png(ihdr({ width: 8, height: 8, bitDepth: 8, colorType: 6, interlaceMethod: 1 }), idat(data), IEND))).toThrow(/filter type 5 on scanline 0 of Adam7 pass 2$/);
   });
 
   test("corrupt zlib stream", () => {
-    expect(() => decodePng(png(ihdr(1, 1, 8, 6), chunk("IDAT", [1, 2, 3, 4, 5, 6]), IEND))).toThrow(/inflate/);
+    expect(() => decodePng(png(ihdr({ width: 1, height: 1, bitDepth: 8, colorType: 6 }), chunk("IDAT", [1, 2, 3, 4, 5, 6]), IEND))).toThrow(/inflate/);
   });
 
   test("unknown critical chunk", () => {
-    expect(() => decodePng(png(ihdr(1, 1, 8, 6), chunk("ABCD", [1]), idat(concat([[0, 1, 2, 3, 4]])), IEND))).toThrow(/critical chunk "ABCD"/);
+    expect(() => decodePng(png(ihdr({ width: 1, height: 1, bitDepth: 8, colorType: 6 }), chunk("ABCD", [1]), idat(concat([[0, 1, 2, 3, 4]])), IEND))).toThrow(/critical chunk "ABCD"/);
   });
 
   test("corrupt chunk type bytes", () => {
