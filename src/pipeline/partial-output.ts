@@ -38,8 +38,8 @@ export function framesWrittenOf(error: unknown): number {
  * stream) — measured on the bundled build (runtime/ffmpeg/bin 9.0.1) for the mux
  * argv and the rawvideo argv. A run that wrote no frame has therefore not
  * touched a file that was already there — and the default output name
- * (`<input>.<engine>.<container>`, or `<input>.dlssg.mp4` for frame
- * generation) is exactly what a previous good run of the same job wrote.
+ * (`<input>.<steps>.<container>`, e.g. clip.sr-nr-fg.mp4) is exactly what a
+ * previous good run of the same job wrote.
  */
 function failedRunOwnsOutput(framesWritten: number, outputExisted: boolean): boolean {
   return framesWritten > 0 || !outputExisted;
