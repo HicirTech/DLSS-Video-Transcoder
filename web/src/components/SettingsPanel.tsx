@@ -22,6 +22,10 @@ interface SettingsPanelProps {
 /** Sentinel for the automatic choice in the GPU select; the stored value for it is null. */
 const AUTO_GPU = "auto";
 
+/**
+ * The Settings tab: the GPU Super Resolution and Neural Rendering run on, an image job's warm-up passes, and the
+ * settings this browser keeps, with reset and the server's defaults.
+ */
 export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
   const gpuLabelId = useId();
   const { settings, update, reset, applyServerDefaults } = useSettings();

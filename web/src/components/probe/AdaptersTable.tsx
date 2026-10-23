@@ -29,6 +29,7 @@ function CudaCell({ adapter, cuda }: { adapter: ProbeAdapter; cuda: ProbeCuda })
   );
 }
 
+/** The display adapters the probe found, the automatic choice marked, each with its CUDA device. */
 export function AdaptersTable({ adapters, selected, cuda }: AdaptersTableProps) {
   return (
     <TableContainer component={Paper} variant="outlined">

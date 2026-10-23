@@ -1,3 +1,7 @@
+/**
+ * The settings store: StoredSettings kept in localStorage between sessions (an older build's copy is read once), and
+ * the context provider and hook the forms read and change them through.
+ */
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { SettingsDefaults } from "../../../src/server/api-types";
 import { defaultSettings, loadSavedSettings, type StoredSettings, withServerDefaults } from "../stored-settings";

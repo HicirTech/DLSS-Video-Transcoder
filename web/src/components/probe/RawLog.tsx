@@ -3,6 +3,7 @@ import { Box, Button, Collapse } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { LogPanel } from "../LogPanel";
 
+/** The probe's raw log, collapsed until asked for. */
 export function RawLog({ lines }: { lines: string[] }) {
   const [open, setOpen] = useState(false);
   return (
