@@ -1,11 +1,13 @@
 /**
  * How a stage's guide and packer workers start and end (src/pipeline/framegen-stage.ts): a failed open ends its own
- * thread, as the caller is handed no worker, and a release asks the guide to free its NVOFA session before ending it.
- * Stand-in workers answer.
+ * thread, as the caller is handed no worker, a release asks the guide to free its NVOFA session before ending it, and
+ * a guide reply is taken only for the request it answers. Stand-in workers answer.
  */
 import { describe, expect, test } from "bun:test";
 import type { DlssgSession } from "../src/pipeline/dlssg.ts";
-import { openGuideWorker, releaseStageParts } from "../src/pipeline/framegen-stage.ts";
+import { Stage, openGuideWorker, releaseStageParts } from "../src/pipeline/framegen-stage.ts";
+import type { TimedFrame } from "../src/pipeline/nearest-timestamp-writer.ts";
+import { rational } from "../src/pipeline/rational.ts";
 import { FakeWorker, RefusingWorker } from "./fake-worker.ts";
 
 const GUIDE_OPEN = { type: "open", width: 1280, height: 720, detectSourceCuts: true, packInline: false } as const;
@@ -41,6 +43,38 @@ describe("openGuideWorker", () => {
     worker.reply({ type: "opened", flow: "nvof", flowReason: null });
     expect(await opening).toEqual({ worker: worker.asWorker(), flow: "nvof", flowReason: null });
     expect(worker.terminated).toBe(false);
+  });
+
+  test("a packer that opens is handed over without a flow, since it estimates none", async () => {
+    const worker = new FakeWorker();
+    const opening = openGuideWorker(PACKER_OPEN, () => worker.asWorker());
+    worker.reply({ type: "opened" });
+    expect(await opening).toEqual({ worker: worker.asWorker() });
+  });
+});
+
+describe("Stage", () => {
+  const FRAME: TimedFrame = { rgba: new Uint8Array(4), timestamp: rational(0), segment: 0, provenance: "Source", sourceIndex: 0 };
+  /** A stage on a stand-in guide; the session is never reached by prepare(). */
+  const stageOn = (guide: FakeWorker): Stage =>
+    new Stage({ session: {} as DlssgSession, guide: guide.asWorker(), packer: null, generatedCount: 1, zeros: new Uint16Array(0), guideFlow: { flow: "cpu", flowReason: null } });
+  const prepared = (id: number) => ({ type: "prepared", id, reset: true, segment: 0, previousTsNum: null, previousTsDen: null, small: null, half: null, sceneCuts: 0 });
+
+  test("a guide reply is matched to the request it answers", async () => {
+    const guide = new FakeWorker();
+    const preparing = stageOn(guide).prepare(FRAME, 7);
+    expect(guide.sentOfType("prepare")).toEqual([{ type: "prepare", id: 7, rgba: FRAME.rgba, segment: 0, tsNum: 0n, tsDen: 1n }]);
+    guide.reply(prepared(7));
+    expect((await preparing).reset).toBe(true);
+  });
+
+  test("a guide reply to another request fails the stage instead of being taken for the pending one", async () => {
+    const guide = new FakeWorker();
+    const stage = stageOn(guide);
+    const preparing = stage.prepare(FRAME, 7);
+    guide.reply(prepared(8));
+    await expect(preparing).rejects.toThrow("frame-generation guide worker answered request 8 while 7 was pending");
+    await expect(stage.prepare(FRAME, 9)).rejects.toThrow("answered request 8 while 7 was pending");
   });
 });
 
