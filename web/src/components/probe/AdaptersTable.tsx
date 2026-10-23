@@ -1,7 +1,7 @@
 import { Chip, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip } from "@mui/material";
 import type { ProbeAdapter, ProbeCuda } from "../../../../src/server/api-types";
 import { formatHex, formatMB } from "../../format";
-import { Mono } from "../Section";
+import { Mono } from "../Mono";
 
 interface AdaptersTableProps {
   adapters: ProbeAdapter[];

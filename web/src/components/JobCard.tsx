@@ -4,12 +4,12 @@ import CancelIcon from "@mui/icons-material/Cancel";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ImageIcon from "@mui/icons-material/Image";
 import MovieIcon from "@mui/icons-material/Movie";
-import type { JobState, JobStatus } from "../../../src/server/api-types";
+import type { JobStatus } from "../../../src/server/api-types";
 import { baseName, formatDuration, formatTime, isJobActive, jobElapsedMs } from "../format";
 import { STEP_TITLES } from "../job-plan";
 import { LogPanel } from "./LogPanel";
-import { Mono } from "./Section";
-import { StateChip } from "./StatusChips";
+import { Mono } from "./Mono";
+import { JOB_STATE_COLORS, StateChip } from "./StatusChips";
 
 interface JobCardProps {
   job: JobStatus;
@@ -18,16 +18,6 @@ interface JobCardProps {
   onCancel?: (id: string) => void;
   cancelling?: boolean;
 }
-
-type ProgressColor = "primary" | "success" | "error" | "warning" | "inherit";
-
-const PROGRESS_COLORS: Record<JobState, ProgressColor> = {
-  queued: "inherit",
-  running: "primary",
-  done: "success",
-  failed: "error",
-  cancelled: "warning",
-};
 
 /** One job: header with state and actions, progress bar, counters, error and a collapsible following log. */
 export function JobCard({ job, now, onCancel, cancelling = false }: JobCardProps) {
@@ -69,7 +59,8 @@ export function JobCard({ job, now, onCancel, cancelling = false }: JobCardProps
       <LinearProgress
         variant={indeterminate ? "indeterminate" : "determinate"}
         value={percent}
-        color={PROGRESS_COLORS[job.state]}
+        color={JOB_STATE_COLORS[job.state].bar}
+        aria-label={`Progress of ${baseName(job.input)}`}
         sx={{ my: 1, height: 6, borderRadius: 3 }}
       />
 

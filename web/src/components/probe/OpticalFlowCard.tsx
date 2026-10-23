@@ -1,6 +1,7 @@
 import { Chip, Paper, Typography } from "@mui/material";
-import { opticalFlowGridFits, type ProbeCuda, type ProbeOpticalFlow } from "../../../../src/server/api-types";
-import { KeyValueList, Mono } from "../Section";
+import { AUTO_GPU_CHOICE, FRAME_GEN_GPU_CHOICE, opticalFlowGridFits, type ProbeCuda, type ProbeOpticalFlow } from "../../../../src/server/api-types";
+import { KeyValueList } from "../KeyValueList";
+import { Mono } from "../Mono";
 
 interface OpticalFlowCardProps {
   cuda: ProbeCuda;
