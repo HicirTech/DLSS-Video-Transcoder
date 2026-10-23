@@ -265,6 +265,120 @@ export interface NvencEncoderOptions {
   inputs?: { devPtr: bigint; pitch: number }[];
 }
 
+/** An NVENC call's status checked against one encode session, naming the call in the error. */
+type CheckStatus = (status: unknown, what: string) => void;
+
+/**
+ * The preset's NV_ENC_CONFIG, tweaked to strictly one frame in and one frame out at constant quality `cq`. Returns the
+ * whole NV_ENC_PRESET_CONFIG, which the caller keeps alive: nvEncInitializeEncoder reads the config inside it.
+ */
+function presetConfigFor(enc: bigint, check: CheckStatus, { codecGuid, presetGuid, cq }: { codecGuid: Uint8Array; presetGuid: Uint8Array; cq: number }): Uint8Array {
+  // NV_ENC_PRESET_CONFIG (5128B): version@0, then the NV_ENC_CONFIG the
+  // driver fills at +8, which we tweak below and hand back to init.
+  const presetConfig = new Uint8Array(5128);
+  const presetView = new DataView(presetConfig.buffer);
+  presetView.setUint32(0, STRUCT_VER.PRESET_CONFIG, true);
+  presetView.setUint32(8, STRUCT_VER.CONFIG, true); // presetCfg.version
+  // The GUIDs go by value; a 16-byte struct passed by value is a hidden pointer on Win64, so they bind as ptr.
+  const getPreset = fn(FN.getEncodePresetConfigEx, { args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.ptr], returns: FFIType.i32 });
+  check(getPreset(enc, codecGuid, presetGuid, TUNING_HIGH_QUALITY, presetConfig), "nvEncGetEncodePresetConfigEx");
+
+  // Force strictly one-in-one-out, which the class contract depends on.
+  // Offsets are into the NV_ENC_CONFIG at presetConfig+8.
+  presetView.setInt32(8 + 24, 1, true); // NV_ENC_CONFIG.frameIntervalP = 1 (IPP, no B)
+  const RC_BITFIELD = 8 + 40 + 36; // config + rcParams(+40) + its bitfield word(+36)
+  let bits = presetView.getUint32(RC_BITFIELD, true);
+  bits &= ~(1 << 5); // clear enableLookahead
+  bits |= 1 << 9; // set zeroReorderDelay
+  presetView.setUint32(RC_BITFIELD, bits, true);
+  // targetQuality is a u8 at rcParams+88 (after version, rcMode, constQP,
+  // avg/max/vbv*, bitfield, min/max/initialQP, temporallayerIdxMask,
+  // temporalLayerQP[8]). The preset picks the rate-control mode; this only
+  // steers the CQ target within it.
+  presetView.setUint8(8 + 40 + 88, cq);
+  return presetConfig;
+}
+
+/** What nvEncInitializeEncoder is told: the codec and preset, the frame size and rate, and the tweaked preset config. */
+interface EncoderSettings {
+  codecGuid: Uint8Array;
+  presetGuid: Uint8Array;
+  width: number;
+  height: number;
+  fpsNum: number;
+  fpsDen: number;
+  presetConfig: Uint8Array;
+}
+
+function initializeEncoder(enc: bigint, check: CheckStatus, settings: EncoderSettings): void {
+  // NV_ENC_INITIALIZE_PARAMS (1800B); offsets below name its fields.
+  const init = new Uint8Array(1800);
+  const initView = new DataView(init.buffer);
+  initView.setUint32(0, STRUCT_VER.INITIALIZE_PARAMS, true);
+  init.set(settings.codecGuid, 4); // encodeGUID
+  init.set(settings.presetGuid, 20); // presetGUID
+  initView.setUint32(36, settings.width, true); // encodeWidth
+  initView.setUint32(40, settings.height, true); // encodeHeight
+  initView.setUint32(44, settings.width, true); // darWidth
+  initView.setUint32(48, settings.height, true); // darHeight
+  initView.setUint32(52, settings.fpsNum, true); // frameRateNum
+  initView.setUint32(56, settings.fpsDen, true); // frameRateDen
+  initView.setUint32(60, 0, true); // enableEncodeAsync = 0: blocking encodePicture, no event handles
+  initView.setUint32(64, 1, true); // enablePTD = 1: driver decides picture type
+  initView.setBigUint64(88, BigInt(ptr(settings.presetConfig) + 8), true); // encodeConfig -> the tweaked NV_ENC_CONFIG
+  initView.setUint32(136, TUNING_HIGH_QUALITY, true); // tuningInfo
+  check(fn(FN.initializeEncoder, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(enc, init), "nvEncInitializeEncoder");
+}
+
+/** nvEncCreateBitstreamBuffer; returns the buffer's handle. */
+function createBitstreamBuffer(enc: bigint, check: CheckStatus): bigint {
+  // NV_ENC_CREATE_BITSTREAM_BUFFER: the handle lands at +16.
+  const createBitstreamParams = new Uint8Array(776);
+  const view = new DataView(createBitstreamParams.buffer);
+  view.setUint32(0, STRUCT_VER.CREATE_BITSTREAM_BUFFER, true);
+  check(fn(FN.createBitstreamBuffer, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(enc, createBitstreamParams), "nvEncCreateBitstreamBuffer");
+  return view.getBigUint64(16, true);
+}
+
+/** Registers CUDA device pointer `devPtr` as an ABGR input image of `pitch` bytes per row; returns the registered resource. */
+function registerInput(enc: bigint, check: CheckStatus, { devPtr, width, height, pitch }: { devPtr: bigint; width: number; height: number; pitch: number }): bigint {
+  const reg = new Uint8Array(1536);
+  const registerView = new DataView(reg.buffer);
+  registerView.setUint32(0, STRUCT_VER.REGISTER_RESOURCE, true);
+  registerView.setUint32(4, INPUT_RESOURCE_TYPE_CUDADEVICEPTR, true);
+  registerView.setUint32(8, width, true);
+  registerView.setUint32(12, height, true);
+  registerView.setUint32(16, pitch, true);
+  registerView.setBigUint64(24, devPtr, true); // resourceToRegister = CUdeviceptr
+  registerView.setUint32(40, BUFFER_FORMAT_ABGR, true);
+  registerView.setUint32(44, BUFFER_USAGE_INPUT_IMAGE, true);
+  check(fn(FN.registerResource, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(enc, reg), "nvEncRegisterResource");
+  return registerView.getBigUint64(32, true); // registeredResource, written by the driver
+}
+
+/** What an encode session holds; a zero handle or an empty list is a part it never got. */
+interface EncoderParts {
+  enc: bigint;
+  registeredList: bigint[];
+  bitstream: bigint;
+  /** The CUDA input buffer the encoder allocated itself, or 0n for an external pool, which its owner frees. */
+  ownedDevice: bigint;
+}
+
+/** Releases a session's parts, newest first; each step is best effort so one failure does not leak the rest. */
+function releaseEncoderParts({ enc, registeredList, bitstream, ownedDevice }: EncoderParts): void {
+  for (const registered of registeredList) {
+    try { fn(FN.unregisterResource, { args: [FFIType.u64, FFIType.u64], returns: FFIType.i32 })(enc, registered); } catch { /* best effort */ }
+  }
+  if (bitstream !== 0n) {
+    try { fn(FN.destroyBitstreamBuffer, { args: [FFIType.u64, FFIType.u64], returns: FFIType.i32 })(enc, bitstream); } catch { /* best effort */ }
+  }
+  if (ownedDevice !== 0n) {
+    try { cudaFree(ownedDevice); } catch { /* best effort */ }
+  }
+  try { fn(FN.destroyEncoder, { args: [FFIType.u64], returns: FFIType.i32 })(enc); } catch { /* best effort */ }
+}
+
 /**
  * A live NVENC encoder producing an Annex-B elementary stream, one RGBA frame in
  * and one frame's bytes out. B-frames and lookahead are disabled in open(), so
@@ -278,7 +392,6 @@ export class NvencEncoder {
     private readonly enc: bigint,
     readonly width: number,
     readonly height: number,
-    readonly codec: NvencSdkCodec,
     private readonly device: bigint, // owned CUDA input buffer (0n when using external pool)
     private readonly pitch: number, // bytes per row of each input buffer
     private readonly ownsDevice: boolean, // false when inputs are external (shared) pointers
@@ -290,9 +403,6 @@ export class NvencEncoder {
       unlockBitstream: OwnedCallable;
       mapInput: OwnedCallable;
       unmapInput: OwnedCallable;
-      unregister: OwnedCallable;
-      destroyBitstream: OwnedCallable;
-      destroyEncoder: OwnedCallable;
       lastError: OwnedCallable;
     },
     /** Kept alive because nvEncInitializeEncoder read encodeConfig from it. */
@@ -317,92 +427,33 @@ export class NvencEncoder {
     const lastError = fn(FN.getLastErrorString, { args: [FFIType.u64], returns: FFIType.ptr });
     const check = (st: unknown, what: string): void => ckenc(st, what, enc, lastError);
 
-    // Out here so the failure path can reach it: registration can throw after
-    // the allocation succeeded, and destroyEncoder does not own this pointer.
+    // Out here so the failure path can release them: any step below can throw
+    // after an earlier one succeeded, and destroyEncoder does not own the CUDA buffer.
     let device = 0n;
+    let bitstream = 0n;
+    const registeredList: bigint[] = [];
 
     try {
-      // NV_ENC_PRESET_CONFIG (5128B): version@0, then the NV_ENC_CONFIG the
-      // driver fills at +8, which we tweak below and hand back to init.
-      const presetConfig = new Uint8Array(5128);
-      const pdv = new DataView(presetConfig.buffer);
-      pdv.setUint32(0, STRUCT_VER.PRESET_CONFIG, true);
-      pdv.setUint32(8, STRUCT_VER.CONFIG, true); // presetCfg.version
-      const getPreset = fn(FN.getEncodePresetConfigEx, { args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.ptr], returns: FFIType.i32 });
-      check(getPreset(enc, codecGuid, presetGuid, TUNING_HIGH_QUALITY, presetConfig), "nvEncGetEncodePresetConfigEx");
-
-      // Force strictly one-in-one-out, which the class contract depends on.
-      // Offsets are into the NV_ENC_CONFIG at presetConfig+8.
-      pdv.setInt32(8 + 24, 1, true); // NV_ENC_CONFIG.frameIntervalP = 1 (IPP, no B)
-      const RC_BITFIELD = 8 + 40 + 36; // config + rcParams(+40) + its bitfield word(+36)
-      let bits = pdv.getUint32(RC_BITFIELD, true);
-      bits &= ~(1 << 5); // clear enableLookahead
-      bits |= 1 << 9; // set zeroReorderDelay
-      pdv.setUint32(RC_BITFIELD, bits, true);
-      // targetQuality is a u8 at rcParams+88 (after version, rcMode, constQP,
-      // avg/max/vbv*, bitfield, min/max/initialQP, temporallayerIdxMask,
-      // temporalLayerQP[8]). The preset picks the rate-control mode; this only
-      // steers the CQ target within it.
-      pdv.setUint8(8 + 40 + 88, cq);
-
-      // NV_ENC_INITIALIZE_PARAMS (1800B); offsets below name its fields.
-      const init = new Uint8Array(1800);
-      const idv = new DataView(init.buffer);
-      idv.setUint32(0, STRUCT_VER.INITIALIZE_PARAMS, true);
-      init.set(codecGuid, 4); // encodeGUID
-      init.set(presetGuid, 20); // presetGUID
-      idv.setUint32(36, width, true); // encodeWidth
-      idv.setUint32(40, height, true); // encodeHeight
-      idv.setUint32(44, width, true); // darWidth
-      idv.setUint32(48, height, true); // darHeight
-      idv.setUint32(52, opts.fpsNum, true); // frameRateNum
-      idv.setUint32(56, opts.fpsDen, true); // frameRateDen
-      idv.setUint32(60, 0, true); // enableEncodeAsync = 0: blocking encodePicture, no event handles
-      idv.setUint32(64, 1, true); // enablePTD = 1: driver decides picture type
-      idv.setBigUint64(88, BigInt(ptr(presetConfig) + 8), true); // encodeConfig -> the tweaked NV_ENC_CONFIG
-      idv.setUint32(136, TUNING_HIGH_QUALITY, true); // tuningInfo
-      check(fn(FN.initializeEncoder, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(enc, init), "nvEncInitializeEncoder");
-
-      // NV_ENC_CREATE_BITSTREAM_BUFFER: the handle lands at +16.
-      const cbb = new Uint8Array(776);
-      new DataView(cbb.buffer).setUint32(0, STRUCT_VER.CREATE_BITSTREAM_BUFFER, true);
-      check(fn(FN.createBitstreamBuffer, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 })(enc, cbb), "nvEncCreateBitstreamBuffer");
-      const bitstream = new DataView(cbb.buffer).getBigUint64(16, true);
+      const presetConfig = presetConfigFor(enc, check, { codecGuid, presetGuid, cq });
+      initializeEncoder(enc, check, { codecGuid, presetGuid, width, height, fpsNum: opts.fpsNum, fpsDen: opts.fpsDen, presetConfig });
+      bitstream = createBitstreamBuffer(enc, check);
 
       // Either one CUDA buffer this encoder owns, or the caller's shared pool;
       // every pointer is registered as an ABGR input resource either way.
       if (!opts.inputs) device = cudaMalloc(pitch * height);
-      const devPtrs = opts.inputs ? opts.inputs.map((x) => x.devPtr) : [device];
-      const registerFn = fn(FN.registerResource, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 });
-      const registeredList = devPtrs.map((dp) => {
-        const reg = new Uint8Array(1536);
-        const rdv = new DataView(reg.buffer);
-        rdv.setUint32(0, STRUCT_VER.REGISTER_RESOURCE, true);
-        rdv.setUint32(4, INPUT_RESOURCE_TYPE_CUDADEVICEPTR, true);
-        rdv.setUint32(8, width, true);
-        rdv.setUint32(12, height, true);
-        rdv.setUint32(16, pitch, true);
-        rdv.setBigUint64(24, dp, true); // resourceToRegister = CUdeviceptr
-        rdv.setUint32(40, BUFFER_FORMAT_ABGR, true);
-        rdv.setUint32(44, BUFFER_USAGE_INPUT_IMAGE, true);
-        check(registerFn(enc, reg), "nvEncRegisterResource");
-        return rdv.getBigUint64(32, true); // registeredResource, written by the driver
-      });
+      const devPtrs = opts.inputs ? opts.inputs.map((input) => input.devPtr) : [device];
+      for (const devPtr of devPtrs) registeredList.push(registerInput(enc, check, { devPtr, width, height, pitch }));
 
-      return new NvencEncoder(enc, width, height, codec, device, pitch, ownsDevice, registeredList, bitstream, {
+      return new NvencEncoder(enc, width, height, device, pitch, ownsDevice, registeredList, bitstream, {
         encodePicture: fn(FN.encodePicture, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 }),
         lockBitstream: fn(FN.lockBitstream, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 }),
         unlockBitstream: fn(FN.unlockBitstream, { args: [FFIType.u64, FFIType.u64], returns: FFIType.i32 }),
         mapInput: fn(FN.mapInputResource, { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 }),
         unmapInput: fn(FN.unmapInputResource, { args: [FFIType.u64, FFIType.u64], returns: FFIType.i32 }),
-        unregister: fn(FN.unregisterResource, { args: [FFIType.u64, FFIType.u64], returns: FFIType.i32 }),
-        destroyBitstream: fn(FN.destroyBitstreamBuffer, { args: [FFIType.u64, FFIType.u64], returns: FFIType.i32 }),
-        destroyEncoder: fn(FN.destroyEncoder, { args: [FFIType.u64], returns: FFIType.i32 }),
         lastError,
       }, presetConfig);
     } catch (error) {
-      try { fn(FN.destroyEncoder, { args: [FFIType.u64], returns: FFIType.i32 })(enc); } catch { /* best effort */ }
-      if (ownsDevice && device !== 0n) { try { cudaFree(device); } catch { /* best effort */ } }
+      releaseEncoderParts({ enc, registeredList, bitstream, ownedDevice: device });
       throw error;
     }
   }
@@ -495,10 +546,7 @@ export class NvencEncoder {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    for (const r of this.registeredList) { try { this.api.unregister(this.enc, r); } catch { /* best effort */ } }
-    try { this.api.destroyBitstream(this.enc, this.bitstream); } catch { /* best effort */ }
-    if (this.ownsDevice) { try { cudaFree(this.device); } catch { /* best effort */ } }
-    try { this.api.destroyEncoder(this.enc); } catch { /* best effort */ }
+    releaseEncoderParts({ enc: this.enc, registeredList: this.registeredList, bitstream: this.bitstream, ownedDevice: this.device });
   }
 
   private check(st: unknown, what: string): void {
