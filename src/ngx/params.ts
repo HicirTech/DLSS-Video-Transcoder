@@ -219,55 +219,27 @@ export const NgxParam = {
 } as const;
 
 /**
- * DLSS 5 Neural Rendering (feature 18) parameter names. These are not in any
- * public header; they were established by the community from shipping
- * integrations. Types follow the observed usage: integers for switches and
- * hints, floats for strengths, D3D12 resources for images.
+ * DLSS 5 Neural Rendering (feature 18) parameter names, which no public header has: the ones the RenoDX DLSS 5 add-on
+ * sets (https://github.com/clshortfuse/renodx; licence in runtime/dlssnr/LICENSE-RenoDX.txt). Types follow that use:
+ * integers for switches and hints, floats for strengths, D3D12 resources for images.
  */
 export const NrParam = {
   Enabled: "DLSSNR.Enabled",
   Width: "DLSSNR.Width",
   Height: "DLSSNR.Height",
-  InputWidth: "DLSSNR.InputWidth",
-  InputHeight: "DLSSNR.InputHeight",
-  OutputWidth: "DLSSNR.OutputWidth",
-  OutputHeight: "DLSSNR.OutputHeight",
-  Upscaling: "DLSSNR.Upscaling",
-  Scale: "DLSSNR.Scale",
-  ScalingRatio: "DLSSNR.ScalingRatio",
   HintRenderPreset: "DLSSNR.Hint.Render.Preset",
   Intensity: "DLSSNR.Intensity",
   Style: "DLSSNR.Style",
   LocalStructureStrength: "DLSSNR.LocalStructureStrength",
   LocalToneStrength: "DLSSNR.LocalToneStrength",
   SkinStructureStrength: "DLSSNR.SkinStructureStrength",
-  GlobalToneStrength: "DLSSNR.GlobalToneStrength",
   UseAutoMask: "DLSSNR.UseAutoMask",
   UICorrection: "DLSSNR.UICorrection",
   Color: "DLSSNR.Color",
-  Depth: "DLSSNR.Depth",
-  MVec: "DLSSNR.MVec",
   Output: "DLSSNR.Output",
   Reset: "DLSSNR.Reset",
-  DepthInverted: "DLSSNR.DepthInverted",
   MVecScaleX: "DLSSNR.MVecScaleX",
   MVecScaleY: "DLSSNR.MVecScaleY",
-  ColorSubrectBaseX: "DLSSNR.ColorSubrectBaseX",
-  ColorSubrectBaseY: "DLSSNR.ColorSubrectBaseY",
-  ColorSubrectWidth: "DLSSNR.ColorSubrectWidth",
-  ColorSubrectHeight: "DLSSNR.ColorSubrectHeight",
-  DepthSubrectBaseX: "DLSSNR.DepthSubrectBaseX",
-  DepthSubrectBaseY: "DLSSNR.DepthSubrectBaseY",
-  DepthSubrectWidth: "DLSSNR.DepthSubrectWidth",
-  DepthSubrectHeight: "DLSSNR.DepthSubrectHeight",
-  MVecSubrectBaseX: "DLSSNR.MVecSubrectBaseX",
-  MVecSubrectBaseY: "DLSSNR.MVecSubrectBaseY",
-  MVecSubrectWidth: "DLSSNR.MVecSubrectWidth",
-  MVecSubrectHeight: "DLSSNR.MVecSubrectHeight",
-  OutputSubrectBaseX: "DLSSNR.OutputSubrectBaseX",
-  OutputSubrectBaseY: "DLSSNR.OutputSubrectBaseY",
-  OutputSubrectWidth: "DLSSNR.OutputSubrectWidth",
-  OutputSubrectHeight: "DLSSNR.OutputSubrectHeight",
   /** Capability names are guesses modelled on the DLSS ones; the probe reports whichever answer. */
   Available: "DLSSNR.Available",
   NeedsUpdatedDriver: "DLSSNR.NeedsUpdatedDriver",
