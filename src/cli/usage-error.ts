@@ -2,7 +2,7 @@
 
 /** Exit status of a run that failed; `probe` also ends with it when neural rendering is not ready. */
 export const EXIT_FAILED = 1;
-/** Exit status of a command line that is wrong: an unknown command or option, a value an option does not accept, a missing argument. */
+/** Exit status of a command line that is wrong: an unknown command or option, an argument the command does not take, a value an option does not accept, a missing argument. */
 export const EXIT_USAGE = 2;
 
 /** A wrong command line. The entry point prints it, followed by `command`'s help page when that is set, and exits with EXIT_USAGE. */

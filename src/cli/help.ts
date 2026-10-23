@@ -25,7 +25,7 @@ function printOverview(): void {
   lines.push("exit status:");
   lines.push("  0  the command succeeded (probe: neural rendering is ready)");
   lines.push(`  ${EXIT_FAILED}  the run failed (probe: neural rendering is not ready)`);
-  lines.push(`  ${EXIT_USAGE}  the command line is wrong: an unknown command or option, a value an option does not accept, or a missing argument`);
+  lines.push(`  ${EXIT_USAGE}  the command line is wrong: an unknown command or option, an argument the command does not take, a value an option does not accept, or a missing argument`);
   console.log(lines.join("\n"));
 }
 
