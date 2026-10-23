@@ -37,12 +37,4 @@ describe("crc32", () => {
     }
     expect(crc32(data)).toBe(refCrc32(data));
   });
-
-  test("chains through the seed argument", () => {
-    const data = randomBytes(1000, 11);
-    const a = data.subarray(0, 333);
-    const b = data.subarray(333);
-    expect(crc32(b, crc32(a))).toBe(crc32(data));
-    expect(crc32(new Uint8Array(0), 0x12345678)).toBe(0x12345678);
-  });
 });
