@@ -161,10 +161,10 @@ test("the unwinder finds each loaded stub and unwinds it to its caller's return 
   }
 });
 
-test("the shim is named nvngx.dll inside its folder, whether or not the folder ends in a separator", () => {
+test("the shim is named nvngx.dll inside its folder, the folder joined and normalised", () => {
   expect(shimPath("C:\\app\\runtime\\caller")).toBe("C:\\app\\runtime\\caller\\nvngx.dll");
   expect(shimPath("C:\\app\\runtime\\caller\\")).toBe("C:\\app\\runtime\\caller\\nvngx.dll");
-  expect(shimPath("C:/app/runtime/caller/")).toBe("C:/app/runtime/caller\\nvngx.dll");
+  expect(shimPath("C:/app/runtime/caller/")).toBe("C:\\app\\runtime\\caller\\nvngx.dll");
 });
 
 test("writeForwarderSync replaces a shim whose bytes differ and leaves an identical one alone", () => {
