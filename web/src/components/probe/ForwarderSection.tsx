@@ -4,6 +4,7 @@ import { KeyValueList } from "../KeyValueList";
 import { Mono } from "../Mono";
 import { BoolChip, SupportChip } from "../StatusChips";
 
+/** The NGX bridge DLL: where it is, whether it was generated and loaded, and its self-test. */
 export function ForwarderSection({ forwarder }: { forwarder: ProbeReport["forwarder"] }) {
   return (
     <Paper variant="outlined" sx={{ p: 1.5 }}>

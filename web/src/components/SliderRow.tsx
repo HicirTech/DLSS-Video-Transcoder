@@ -25,8 +25,8 @@ const SLIDER_STEP = 0.05;
 
 /**
  * MUI centres the thumb and every mark label on its value, so at either end of the rail half of each would hang
- * past the row, over a card's border. The rail is inset by 12px: the thumb's 10px radius plus room for its
- * focus ring (8px, 14px while dragging) inside a card's own 12px of padding.
+ * past the row, over a card's border. The rail is inset by 12px: the small thumb's 6px radius (the theme makes
+ * every Slider small) plus room for its focus ring (8px, 14px while dragging) inside a card's own 12px of padding.
  */
 const RAIL_INSET = 1.5;
 

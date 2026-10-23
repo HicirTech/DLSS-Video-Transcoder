@@ -22,6 +22,10 @@ interface ScaleSettingsEditorProps {
   onChange: (next: ScaleSettings) => void;
 }
 
+/**
+ * A step's output size: keep the source size, multiply it by a factor, or set an exact width × height, with the
+ * fields held to what that step can write (limits).
+ */
 export function ScaleSettingsEditor({ label, value, limits, noneLabel, onChange }: ScaleSettingsEditorProps) {
   const modeLabelId = useId();
   const noteId = useId();

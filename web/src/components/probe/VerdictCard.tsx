@@ -1,6 +1,7 @@
 import { Alert, AlertTitle, Box } from "@mui/material";
 import type { ProbeReport } from "../../../../src/server/api-types";
 
+/** Whether DLSS neural rendering is ready, with the probe's reasons. */
 export function VerdictCard({ verdict }: { verdict: ProbeReport["verdict"] }) {
   const ready = verdict.neuralRenderingReady;
   return (

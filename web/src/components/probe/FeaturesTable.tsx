@@ -5,6 +5,7 @@ import { formatHex } from "../../format";
 import { Mono } from "../Mono";
 import { SupportChip } from "../StatusChips";
 
+/** The NGX features the driver reports and whether each is supported. */
 export function FeaturesTable({ features }: { features: ProbeFeature[] }) {
   return (
     <TableContainer component={Paper} variant="outlined">
