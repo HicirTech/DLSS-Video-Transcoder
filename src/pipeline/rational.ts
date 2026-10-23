@@ -26,15 +26,15 @@ function gcd(a: bigint, b: bigint): bigint {
 
 /** Normalizing constructor — every Rational in this module is reduced with den > 0. */
 export function rational(num: bigint | number, den: bigint | number = 1n): Rational {
-  let n = BigInt(num);
-  let d = BigInt(den);
-  if (d === 0n) throw new Error("rational: denominator must not be zero");
-  if (d < 0n) {
-    n = -n;
-    d = -d;
+  let numerator = BigInt(num);
+  let denominator = BigInt(den);
+  if (denominator === 0n) throw new Error("rational: denominator must not be zero");
+  if (denominator < 0n) {
+    numerator = -numerator;
+    denominator = -denominator;
   }
-  const g = gcd(n, d);
-  return { num: n / g, den: d / g };
+  const divisor = gcd(numerator, denominator);
+  return { num: numerator / divisor, den: denominator / divisor };
 }
 
 /**
@@ -43,20 +43,20 @@ export function rational(num: bigint | number, den: bigint | number = 1n): Ratio
  * came in as text survives the round trip bit-exact.
  */
 export function parseRational(text: string): Rational {
-  const s = text.trim();
-  if (s.includes("/")) {
-    const [n, d] = s.split("/");
-    return rational(BigInt(n!.trim()), BigInt(d!.trim()));
+  const trimmed = text.trim();
+  if (trimmed.includes("/")) {
+    const [numeratorText, denominatorText] = trimmed.split("/");
+    return rational(BigInt(numeratorText!.trim()), BigInt(denominatorText!.trim()));
   }
-  if (s.includes(".")) {
-    const neg = s.startsWith("-");
-    const body = neg ? s.slice(1) : s;
+  if (trimmed.includes(".")) {
+    const neg = trimmed.startsWith("-");
+    const body = neg ? trimmed.slice(1) : trimmed;
     const [whole, frac = ""] = body.split(".");
     const den = 10n ** BigInt(frac.length);
     const num = BigInt(whole || "0") * den + BigInt(frac || "0");
     return rational(neg ? -num : num, den);
   }
-  return rational(BigInt(s), 1n);
+  return rational(BigInt(trimmed), 1n);
 }
 
 /**
