@@ -263,9 +263,7 @@ export class DlssgFeature {
     let handle = 0;
     let resources: IntervalResources | null = null;
     try {
-      if (NgxParameters.detectLayout(params) === "unknown") {
-        throw new Error("DLSS Frame Generation: the NGX parameter object answers in neither known vtable layout, so no parameter can be set or read. Update the NVIDIA driver.");
-      }
+      NgxParameters.requireLayout(params, "DLSS Frame Generation");
       const capabilities = readCapabilities(core);
       const refused = capabilityRefusal(capabilities, options.maxGenerated);
       if (refused) throw new DlssgUnavailableError(refused.reason, capabilities, refused.detail);
