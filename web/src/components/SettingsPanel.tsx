@@ -5,7 +5,7 @@ import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import { AUTO_GPU_CHOICE, DEFAULT_WARMUP_FRAMES, FRAME_GEN_GPU_CHOICE, type ProbeReport, SETTING_RANGES } from "../../../src/server/api-types";
 import { api } from "../api";
 import { errorMessage } from "../errors";
-import { STORAGE_KEY, useSettings, withServerDefaults } from "../hooks/useSettings";
+import { STORAGE_KEY, useSettings } from "../hooks/useSettings";
 import { useToast } from "../hooks/useToast";
 import { LogPanel } from "./LogPanel";
 import { NumberField } from "./NumberField";
@@ -23,7 +23,7 @@ const AUTO_GPU = "auto";
 
 export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
   const gpuLabelId = useId();
-  const { settings, update, reset, replaceAll } = useSettings();
+  const { settings, update, reset, applyServerDefaults } = useSettings();
   const toast = useToast();
   const [loading, setLoading] = useState(false);
   // Only adapters a job would accept are offered; the probe judged that by the rule jobs apply.
@@ -34,7 +34,7 @@ export function SettingsPanel({ probe, probing, onProbe }: SettingsPanelProps) {
     setLoading(true);
     try {
       // The server has no GPU preference or step switches of its own; the stored ones are kept.
-      replaceAll(withServerDefaults(settings, await api.settingsDefaults()));
+      applyServerDefaults(await api.settingsDefaults());
       toast.showSuccess("Loaded the server's default settings");
     } catch (err) {
       toast.showError(`Could not load server defaults: ${errorMessage(err)}`);
