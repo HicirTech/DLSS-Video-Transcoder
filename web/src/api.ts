@@ -141,6 +141,7 @@ function createHttpClient(): ApiClient {
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
+const RECONNECT_JITTER_MS = 250;
 
 /** Same-origin /ws socket that reconnects with exponential backoff (1 s to 15 s, with jitter). */
 function createWebSocketSource(): JobEventSource {
@@ -155,7 +156,7 @@ function createWebSocketSource(): JobEventSource {
 
       const scheduleReconnect = (): void => {
         if (stopped) return;
-        const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempts) + Math.random() * 250;
+        const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempts) + Math.random() * RECONNECT_JITTER_MS;
         attempts += 1;
         timer = setTimeout(open, delay);
       };
