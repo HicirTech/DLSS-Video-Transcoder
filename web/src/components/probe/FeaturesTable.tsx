@@ -1,10 +1,9 @@
 import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
+import { NgxFeature } from "../../../../src/ngx/feature-ids";
 import type { ProbeFeature } from "../../../../src/server/api-types";
 import { formatHex } from "../../format";
 import { Mono } from "../Section";
 import { SupportChip } from "../StatusChips";
-
-const NEURAL_RENDERING_FEATURE_ID = 18;
 
 export function FeaturesTable({ features }: { features: ProbeFeature[] }) {
   return (
@@ -23,7 +22,7 @@ export function FeaturesTable({ features }: { features: ProbeFeature[] }) {
         </TableHead>
         <TableBody>
           {features.map((feature) => {
-            const highlight = feature.id === NEURAL_RENDERING_FEATURE_ID;
+            const highlight = feature.id === NgxFeature.NeuralRendering;
             return (
               <TableRow key={feature.id} selected={highlight}>
                 <TableCell>{feature.id}</TableCell>

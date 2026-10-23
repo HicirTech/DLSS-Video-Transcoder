@@ -1,8 +1,36 @@
 /**
- * NGX result codes, feature ids and support bit flags, from the public
- * nvsdk_ngx_defs.h in NVIDIA's DLSS SDK, and the values every NGX init here passes.
+ * NGX result codes and support bit flags, from the public nvsdk_ngx_defs.h in NVIDIA's DLSS SDK, and the values
+ * every NGX init here passes.
  */
 import { hex32 } from "../native/memory.ts";
+import type { SupportLevel } from "../server/api-types.ts";
+import { NgxFeature } from "./feature-ids.ts";
+
+export { NgxFeature } from "./feature-ids.ts";
+
+/** NVSDK_NGX_Result values (nvsdk_ngx_defs.h). */
+export const NgxResult = {
+  Success: 0x1,
+  Fail: 0xbad00000,
+  FeatureNotSupported: 0xbad00001,
+  PlatformError: 0xbad00002,
+  FeatureAlreadyExists: 0xbad00003,
+  FeatureNotFound: 0xbad00004,
+  InvalidParameter: 0xbad00005,
+  ScratchBufferTooSmall: 0xbad00006,
+  NotInitialized: 0xbad00007,
+  UnsupportedInputFormat: 0xbad00008,
+  RWFlagMissing: 0xbad00009,
+  MissingInput: 0xbad0000a,
+  UnableToInitializeFeature: 0xbad0000b,
+  OutOfDate: 0xbad0000c,
+  OutOfGPUMemory: 0xbad0000d,
+  UnsupportedFormat: 0xbad0000e,
+  UnableToWriteToAppDataPath: 0xbad0000f,
+  UnsupportedParameter: 0xbad00010,
+  Denied: 0xbad00011,
+  NotImplemented: 0xbad00012,
+} as const;
 
 export const NGX_SUCCESS = 0x1;
 
@@ -67,21 +95,6 @@ function hint(result: number): string {
 export function ngxCheck(result: number, what: string): void {
   if (!ngxOk(result)) throw new NgxError(result, what);
 }
-
-export const NgxFeature = {
-  SuperSampling: 1,
-  InPainting: 2,
-  ImageSuperResolution: 3,
-  SlowMotion: 4,
-  VideoSuperResolution: 5,
-  ImageSignalProcessing: 9,
-  DeepResolve: 10,
-  FrameGeneration: 11,
-  DeepDVC: 12,
-  RayReconstruction: 13,
-  /** DLSS 5 Neural Rendering. Reserved18 in the public header. */
-  NeuralRendering: 18,
-} as const;
 
 export function featureName(id: number): string {
   for (const [name, value] of Object.entries(NgxFeature)) if (value === id) return name;
