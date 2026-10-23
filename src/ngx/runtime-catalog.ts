@@ -101,13 +101,24 @@ function pickVersion(info: VersionInfo, folderHint: string | null): string {
   return UNKNOWN_VERSION;
 }
 
+/**
+ * Each DLL's version, kept while its size and modification time stay the same: the server builds the catalog on its
+ * main thread for every GET /api/catalog and every job naming a DLL folder, and a full read of nvngx_dlssnr.dll
+ * alone is 158 MB.
+ */
+const versionCache = new Map<string, { size: number; mtimeMs: number; version: string }>();
+
 /** Returns null rather than throwing: one unreadable DLL must not empty the catalog. */
 function describeDll(path: string, dir: string, source: VersionSource, folderHint: string | null): VersionEntry | null {
   try {
     const stat = statSync(path);
     if (!stat.isFile()) return null;
-    const info = parseVersionInfo(new Uint8Array(readFileSync(path)));
-    const version = pickVersion(info, folderHint);
+    const cached = versionCache.get(path);
+    const version =
+      cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs
+        ? cached.version
+        : pickVersion(parseVersionInfo(new Uint8Array(readFileSync(path))), folderHint);
+    versionCache.set(path, { size: stat.size, mtimeMs: stat.mtimeMs, version });
     return { version, path, dir, source, sizeMB: toSizeMB(stat.size), sortKey: packVersionKey(version).toString() };
   } catch {
     return null;
