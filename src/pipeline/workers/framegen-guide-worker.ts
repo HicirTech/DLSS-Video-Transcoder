@@ -22,26 +22,24 @@ import { packFlowResizedR16G16 } from "../flow-resize.ts";
 import { FRAMEGEN_CUDA_DEVICE } from "../framegen-device.ts";
 import { tryCreateNvofBackend } from "../nvof.ts";
 
-interface OpenMsg {
+/** Open the guide role: one stage's flow estimator and history. */
+export interface GuideOpen {
   type: "open";
   width: number;
   height: number;
   /** Only the first stage discovers scene cuts; later stages inherit them as segment changes. */
   detectSourceCuts: boolean;
-  /** Pack on this thread instead of handing the grid flow to a packer thread. */
-  packInline?: boolean;
+  /** Pack on this thread instead of handing the grid flow to a packer thread; openStages (framegen.ts) decides which stage gets one. */
+  packInline: boolean;
 }
-interface OpenPackerMsg {
+/** Open the packer role for one stage's frame size. */
+export interface PackerOpen {
   type: "open-packer";
   width: number;
   height: number;
 }
-interface PackMsg {
-  type: "pack";
-  id: number;
-  small: ArrayBuffer;
-}
-interface PrepareMsg {
+/** Analyse one frame (Uint8Array over a SharedArrayBuffer, so posting it copies nothing). */
+export interface GuidePrepare {
   type: "prepare";
   id: number;
   rgba: Uint8Array;
@@ -49,9 +47,31 @@ interface PrepareMsg {
   tsNum: bigint;
   tsDen: bigint;
 }
-type InMsg = OpenMsg | OpenPackerMsg | PrepareMsg | PackMsg | { type: "close" };
+/** Upsample and pack one grid flow, transferred in. */
+export interface GuidePack {
+  type: "pack";
+  id: number;
+  small: ArrayBuffer;
+}
+type GuideIn = GuideOpen | PackerOpen | GuidePrepare | GuidePack | { type: "close" };
+
+/** How a guide estimates flow: on NVOFA, or on the CPU matcher with the reason NVOFA did not start. */
+export interface GuideFlow {
+  flow: "nvof" | "cpu";
+  flowReason: string | null;
+}
+/** What the worker answers: "opened" (a guide's says how it estimates flow), one reply per request with its id, "closed", or "error". */
+export type GuideOut =
+  | ({ type: "opened" } & GuideFlow)
+  | { type: "opened" }
+  | { type: "prepared"; id: number; reset: boolean; segment: number; previousTsNum: bigint | null; previousTsDen: bigint | null; small: ArrayBuffer | null; half: ArrayBuffer | null; sceneCuts: number }
+  | { type: "packed"; id: number; half: ArrayBuffer }
+  | { type: "closed" }
+  | { type: "error"; message: string };
 
 declare const self: Worker;
+
+const post = (message: GuideOut, transfer: Transferable[] = []): void => self.postMessage(message, transfer);
 
 let estimator: MotionEstimator | null = null;
 let detectSourceCuts = false;
@@ -60,20 +80,20 @@ let sceneCuts = 0;
 let packInline = false;
 let packer: { width: number; height: number; flowW: number; flowH: number } | null = null;
 
-self.onmessage = (event: MessageEvent<InMsg>) => {
+self.onmessage = (event: MessageEvent<GuideIn>) => {
   const m = event.data;
   try {
     if (m.type === "open") {
       const nvof = tryCreateNvofBackend(m.width, m.height, FRAMEGEN_CUDA_DEVICE);
       estimator = createMotionEstimator(m.width, m.height, nvof.backend ? { backend: nvof.backend } : {});
       detectSourceCuts = m.detectSourceCuts;
-      packInline = m.packInline ?? false;
-      self.postMessage({ type: "opened", flow: nvof.backend ? "nvof" : "cpu", flowReason: nvof.reason });
+      packInline = m.packInline;
+      post({ type: "opened", flow: nvof.backend ? "nvof" : "cpu", flowReason: nvof.reason });
     } else if (m.type === "open-packer") {
       // The same grid the estimators compute flow on (flowGridSize default long side).
       const { flowW, flowH } = flowGridSize(m.width, m.height);
       packer = { width: m.width, height: m.height, flowW, flowH };
-      self.postMessage({ type: "opened", flow: "pack" });
+      post({ type: "opened" });
     } else if (m.type === "prepare") {
       if (!estimator) throw new Error("frame-generation guide worker used before open");
       let segment = m.segment;
@@ -93,13 +113,13 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
       const reset = previous === null || forceReset || guide.reset;
       const before = previous;
       previous = { segment, tsNum: m.tsNum, tsDen: m.tsDen };
-      // Copy the grid flow: transferring it must not detach a buffer the backend reuses.
-      const small = guide.small ? guide.small.slice() : null;
-      const half = guide.half;
+      // Sent back transferred, not copied. Copy the grid flow first: transferring it must not detach a buffer the backend reuses.
+      const small = guide.small ? (guide.small.slice().buffer as ArrayBuffer) : null;
+      const half = guide.half ? (guide.half.buffer as ArrayBuffer) : null;
       const transfer: ArrayBuffer[] = [];
-      if (small) transfer.push(small.buffer as ArrayBuffer);
-      if (half) transfer.push(half.buffer as ArrayBuffer);
-      self.postMessage(
+      if (small) transfer.push(small);
+      if (half) transfer.push(half);
+      post(
         {
           type: "prepared",
           id: m.id,
@@ -107,8 +127,8 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
           segment,
           previousTsNum: before ? before.tsNum : null,
           previousTsDen: before ? before.tsDen : null,
-          small: small ? small.buffer : null,
-          half: half ? half.buffer : null,
+          small,
+          half,
           sceneCuts,
         },
         transfer,
@@ -116,13 +136,13 @@ self.onmessage = (event: MessageEvent<InMsg>) => {
     } else if (m.type === "pack") {
       if (!packer) throw new Error("frame-generation packer used before open");
       const packed = packFlowResizedR16G16(new Float32Array(m.small), packer.flowW, packer.flowH, packer.width, packer.height);
-      self.postMessage({ type: "packed", id: m.id, half: packed.buffer }, [packed.buffer as ArrayBuffer]);
+      post({ type: "packed", id: m.id, half: packed.buffer as ArrayBuffer }, [packed.buffer as ArrayBuffer]);
     } else if (m.type === "close") {
       estimator?.close();
       estimator = null;
-      self.postMessage({ type: "closed" });
+      post({ type: "closed" });
     }
   } catch (error) {
-    self.postMessage({ type: "error", message: (error as Error).message ?? String(error) });
+    post({ type: "error", message: (error as Error).message ?? String(error) });
   }
 };
