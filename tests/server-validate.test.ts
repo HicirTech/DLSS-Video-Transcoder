@@ -1,6 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { join, resolve, sep } from "node:path";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, DEFAULT_SR_STEP, JOB_KINDS, MOTION_KINDS, SETTING_RANGES } from "../src/server/api-types.ts";
+import {
+  DEFAULT_ENCODE_SETTINGS,
+  DEFAULT_FRAME_GEN_STEP,
+  DEFAULT_NR_SETTINGS,
+  DEFAULT_SCALE_SETTINGS,
+  DEFAULT_SR_STEP,
+  DEFAULT_WARMUP_FRAMES,
+  JOB_KINDS,
+  MOTION_KINDS,
+  SETTING_RANGES,
+} from "../src/server/api-types.ts";
 import { validateJobRequest } from "../src/server/validate.ts";
 
 const ROOT = resolve(sep === "\\" ? "C:\\app\\logs" : "/app/logs");
@@ -59,19 +69,26 @@ describe("validateJobRequest", () => {
     expect(validateJobRequest(request({ scale: { ...DEFAULT_SCALE_SETTINGS }, settings: { ...DEFAULT_NR_SETTINGS } }))).toMatch(/^scale, settings are no longer part of a job/);
   });
 
-  test("rejects out-of-range numbers and reports the real range", () => {
-    const cases: Array<[string, Record<string, unknown>, RegExp]> = [
-      ["intensity high", { neuralRendering: nr({ intensity: 2.5 }) }, /neuralRendering\.settings\.intensity must be between 0 and 2 \(got 2\.5\)/],
-      ["intensity NaN", { neuralRendering: nr({ intensity: Number.NaN }) }, /neuralRendering\.settings\.intensity must be a finite number between 0 and 2/],
-      ["skinStructure low", { neuralRendering: nr({ skinStructure: -2 }) }, /neuralRendering\.settings\.skinStructure must be between -1 and 2/],
-      ["SR factor high", { superResolution: sr({ scale: { ...DEFAULT_SR_STEP.scale, factor: 9 } }) }, /superResolution\.scale\.factor must be between 0\.25 and 8/],
-      ["resize width high", { superResolution: undefined, resize: { ...DEFAULT_SCALE_SETTINGS, width: 20000 } }, /resize\.width must be between 16 and 16384/],
-      ["quality high", { encode: { ...DEFAULT_ENCODE_SETTINGS, quality: 60 } }, /encode\.quality must be between 0 and 51/],
+  test("accepts each numeric limit and rejects one step past it, reporting the real range", () => {
+    const cases: Array<[keyof typeof SETTING_RANGES, string, (value: number) => Record<string, unknown>, "min" | "max"]> = [
+      ["intensity", "neuralRendering.settings.intensity", (value) => ({ neuralRendering: nr({ intensity: value }) }), "max"],
+      ["skinStructure", "neuralRendering.settings.skinStructure", (value) => ({ neuralRendering: nr({ skinStructure: value }) }), "min"],
+      ["factor", "superResolution.scale.factor", (value) => ({ superResolution: sr({ scale: { ...DEFAULT_SR_STEP.scale, factor: value } }) }), "max"],
+      // On a resize, not Super Resolution, which holds a side to DLSS_SR_MAX_OUTPUT_SIDE.
+      ["width", "resize.width", (value) => ({ superResolution: undefined, resize: { ...DEFAULT_SCALE_SETTINGS, width: value } }), "max"],
+      ["quality", "encode.quality", (value) => ({ encode: { ...DEFAULT_ENCODE_SETTINGS, quality: value } }), "max"],
     ];
-    for (const [name, override, pattern] of cases) {
-      const message = validateJobRequest(request(override));
-      expect(message, name).toMatch(pattern);
+    for (const [field, path, build, side] of cases) {
+      const { min, max } = SETTING_RANGES[field];
+      const limit = side === "max" ? max : min;
+      const outside = side === "max" ? max + 1 : min - 1;
+      expect(validateJobRequest(request(build(limit))), `${field} at ${limit}`).toBeNull();
+      expect(validateJobRequest(request(build(outside))), `${field} at ${outside}`).toBe(`${path} must be between ${min} and ${max} (got ${outside}).`);
     }
+    const intensity = SETTING_RANGES.intensity;
+    expect(validateJobRequest(request({ neuralRendering: nr({ intensity: Number.NaN }) }))).toBe(
+      `neuralRendering.settings.intensity must be a finite number between ${intensity.min} and ${intensity.max}.`,
+    );
   });
 
   test("rejects values outside the enums", () => {
@@ -195,9 +212,10 @@ describe("validateJobRequest", () => {
 
   test("the defaults the server advertises are themselves valid", () => {
     // A default the API would reject would make GET /api/settings/defaults a trap.
-    expect(validateJobRequest(request({ superResolution: { ...DEFAULT_SR_STEP }, encode: { ...DEFAULT_ENCODE_SETTINGS } }))).toBeNull();
-    for (const [field, range] of Object.entries(SETTING_RANGES)) {
-      expect(range.min, `${field} range`).toBeLessThan(range.max);
-    }
+    expect(validateJobRequest(request({ superResolution: { ...DEFAULT_SR_STEP }, encode: { ...DEFAULT_ENCODE_SETTINGS }, frameGen: { ...DEFAULT_FRAME_GEN_STEP } }))).toBeNull();
+    expect(validateJobRequest(request({ superResolution: undefined, resize: { ...DEFAULT_SCALE_SETTINGS } }))).toBeNull();
+    expect(
+      validateJobRequest({ kind: "image", input: join(ROOT, "in.png"), superResolution: { ...DEFAULT_SR_STEP }, neuralRendering: nr(), warmupFrames: DEFAULT_WARMUP_FRAMES }),
+    ).toBeNull();
   });
 });

@@ -122,17 +122,19 @@ describe("job states", () => {
 });
 
 describe("clampToRange", () => {
+  const { quality, skinStructure, factor } = SETTING_RANGES;
+
   test("holds a value inside the range of its setting", () => {
-    expect(clampToRange("quality", -3)).toBe(0);
-    expect(clampToRange("quality", 99)).toBe(51);
+    expect(clampToRange("quality", quality.min - 1)).toBe(quality.min);
+    expect(clampToRange("quality", quality.max + 1)).toBe(quality.max);
     expect(clampToRange("quality", 18)).toBe(18);
-    expect(clampToRange("skinStructure", -5)).toBe(-1);
-    expect(clampToRange("factor", 100)).toBe(8);
+    expect(clampToRange("skinStructure", skinStructure.min - 1)).toBe(skinStructure.min);
+    expect(clampToRange("factor", factor.max + 1)).toBe(factor.max);
   });
 
   test("rounds a whole-number setting first and leaves a fractional one alone", () => {
     expect(clampToRange("quality", 20.6)).toBe(21);
-    expect(clampToRange("quality", 51.4)).toBe(51);
+    expect(clampToRange("quality", quality.max + 0.4)).toBe(quality.max);
     expect(clampToRange("factor", 1.375)).toBe(1.375);
   });
 });

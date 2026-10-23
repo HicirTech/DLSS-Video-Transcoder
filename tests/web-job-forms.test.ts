@@ -40,16 +40,28 @@ describe("videoRequest", () => {
   });
 
   test("frame generation writes its container whatever is stored, and sends the one rate field in use", () => {
-    const stored = settingsWith({ videoSteps: { sr: false, nr: false, fg: true }, encode: { ...defaultSettings().encode, container: "mkv" } });
+    // Not the defaults, so the request can only carry them by sending what is stored.
+    const stored = settingsWith({
+      videoSteps: { sr: false, nr: false, fg: true },
+      encode: { ...defaultSettings().encode, container: "mkv" },
+      frameGen: { ...defaultSettings().frameGen, targetFps: "120", engine: "cascade" },
+    });
     expect(videoRequest(FORM, stored).encode?.container).toBe(FRAME_GEN_CONTAINER);
     expect(videoRequest(FORM, { ...stored, videoSteps: { sr: false, nr: true, fg: false } }).encode?.container).toBe("mkv");
-    expect(videoRequest(FORM, stored).frameGen).toEqual({ targetFps: "60", engine: "auto" });
+    expect(videoRequest(FORM, stored).frameGen).toEqual({ targetFps: "120", engine: "cascade" });
     const byMultiplier = { ...stored, frameGen: { ...stored.frameGen, rateBy: "multiplier" as const, multiplier: 3 } };
-    expect(videoRequest(FORM, byMultiplier).frameGen).toEqual({ multiplier: 3, engine: "auto" });
+    expect(videoRequest(FORM, byMultiplier).frameGen).toEqual({ multiplier: 3, engine: "cascade" });
   });
 
-  test("a version folder rides along with its own step only, and an output path only when given", () => {
-    const request = videoRequest({ ...FORM, output: " C:\\out\\x.mp4 ", dllDirs: { sr: "C:\\dlss\\310", nr: "", fg: "C:\\dlssg\\310" } }, settingsWith({ videoSteps: { sr: true, nr: true, fg: false } }));
+  test("a step's stored settings and version folder ride along with its own step only, and an output path only when given", () => {
+    const stored = settingsWith({
+      videoSteps: { sr: true, nr: true, fg: false },
+      superResolution: { ...defaultSettings().superResolution, motion: "flow" },
+      neuralRendering: { ...defaultSettings().neuralRendering, style: 2 },
+    });
+    const request = videoRequest({ ...FORM, output: " C:\\out\\x.mp4 ", dllDirs: { sr: "C:\\dlss\\310", nr: "", fg: "C:\\dlssg\\310" } }, stored);
+    expect(request.superResolution?.motion).toBe("flow");
+    expect(request.neuralRendering?.settings.style).toBe(2);
     expect(request.superResolution?.dllDir).toBe("C:\\dlss\\310");
     expect(request.neuralRendering).not.toHaveProperty("dllDir");
     expect(request.frameGen).toBeUndefined();
