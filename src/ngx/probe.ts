@@ -1,6 +1,7 @@
 /**
- * Hardware / driver / runtime probe. Every step is guarded so a failure in one
- * layer still yields a report that says exactly where things stopped.
+ * Hardware / driver / runtime probe. Each GPU and NGX step is guarded so a failure
+ * there still yields a report that says exactly where things stopped; a filesystem
+ * error (app-data folder, runtime folder, driver store) rejects instead.
  *
  * Set NR_TRACE=1 to print each native call to stderr before it happens; a
  * crash inside NVIDIA code then leaves the last trace line as the culprit.
@@ -441,14 +442,8 @@ function judgeReadiness({ report, reasons }: ProbeContext, { cudaOrdinal }: Prob
 }
 
 function releaseGpu({ factory, adapters, device }: ProbeGpu): void {
-  // Never Shutdown1 here. On this driver core it releases the D3D12 device
-  // itself and leaves D3D12 unable to make another on the same adapter: the next
-  // D3D12CreateDevice in the process faults inside D3D12Core (measured — a
-  // second runProbe, or a job after a probe, died there, which is what the
-  // server does per /api/probe request; issue #75). sr.ts and nr-render.ts
-  // leave NGX to process exit for the same reason, so the probe does too and
-  // releases only what it owns. Measured: three consecutive probes in one
-  // process then each get a fresh device.
+  // No Shutdown1 (see NgxCore, issue #75): the server probes once per /api/probe
+  // request, so the adapter must stay able to create a device. Release only what we own.
   device?.release();
   for (const adapter of adapters) adapter.release();
   factory?.release();
