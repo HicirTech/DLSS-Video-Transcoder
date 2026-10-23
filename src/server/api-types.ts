@@ -492,6 +492,11 @@ export interface ProbeOpticalFlow {
   pipelineGrid: { minSide: number; maxLongSide: number };
 }
 
+/** Whether the grid the pipeline feeds NVOFA lies inside the engine's input range on both axes. */
+export function opticalFlowGridFits(limits: OpticalFlowLimits, grid: ProbeOpticalFlow["pipelineGrid"]): boolean {
+  return limits.widthMin <= grid.minSide && limits.heightMin <= grid.minSide && limits.widthMax >= grid.maxLongSide && limits.heightMax >= grid.maxLongSide;
+}
+
 /**
  * How usable a feature is, from its NGX support bits: "outdated" when a newer driver or OS would make it work,
  * "blocked" when this GPU or driver cannot run it (or the query failed), "unknown" when nothing says either way.
