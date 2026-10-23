@@ -204,7 +204,7 @@ function answerFrame(generator: IntervalGenerator, input: DlssgIntervalInput, rg
   }
 }
 
-/** Replies to frames until stdin ends at a message boundary (exit code 0), or until a reply fails (1). */
+/** Replies to frames until stdin ends (exit code 0; a trailing partial message is dropped), or until a reply fails (1). */
 function answerFrames(stdout: ProtocolStdout, setup: DlssgSetup, generator: IntervalGenerator, frames: SharedFrames): number {
   for (;;) {
     const headerBytes = readStdin(FRAME_HEADER_BYTES);
@@ -246,8 +246,8 @@ function closeGenerator(generator: IntervalGenerator): void {
 
 /**
  * Serves one session on stdin and the claimed stdout, with the frames in the shared memory called
- * `sharedMemoryName`, and returns the process exit code: 0 when stdin ended at a message boundary, 1
- * after a refused setup or a failed reply.
+ * `sharedMemoryName`, and returns the process exit code: 0 when stdin ended (a trailing partial message
+ * is dropped), 1 after a refused setup or a failed reply.
  */
 export function serveDlssg(stdout: ProtocolStdout, sharedMemoryName: string, openGenerator: (setup: DlssgSetup) => GeneratorOpening): number {
   const setupBytes = readStdin(SETUP_BYTES);

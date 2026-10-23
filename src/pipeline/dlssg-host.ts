@@ -15,7 +15,7 @@ import { openGpu, type GpuSession } from "./gpu.ts";
 
 const FRAME_GENERATION = featureByKey("fg");
 const USAGE =
-  "usage: bun src/pipeline/dlssg-host.ts --probe|--serve [--runtime <absolute folder holding dlssg/ and caller/, default runtime/>] [--dll-dir <absolute folder whose nvngx_dlssg.dll loads instead of the one in dlssg/>] [--shared <name of the shared frame memory the parent created; required by --serve, refused by --probe>]";
+  "usage: bun src/pipeline/dlssg-host.ts --probe|--serve [--runtime <absolute folder holding dlssg/ and caller/, default $NR_RUNTIME_DIR, else <repo>/runtime>] [--dll-dir <absolute folder whose nvngx_dlssg.dll loads instead of the one in dlssg/>] [--shared <name of the shared frame memory the parent created; required by --serve, refused by --probe>]";
 
 /** The `--name value` pairs of `args`, or null when an argument is not such a pair, is not in `allowed`, or repeats. */
 function optionValues(args: readonly string[], allowed: readonly string[]): Map<string, string> | null {
@@ -40,9 +40,9 @@ function parseArguments(args: readonly string[]): { launch: DlssgLaunch; runtime
   // so a relative path would resolve against a folder the parent never meant.
   if (!isAbsolute(runtimeRoot)) return `--runtime must be an absolute path, got "${runtimeRoot}". ${USAGE}`;
   if (dllDir !== undefined && !isAbsolute(dllDir)) return `--dll-dir must be an absolute path, got "${dllDir}". ${USAGE}`;
-  // The same layout sr.ts, nr-render.ts and probe.ts use: the feature's own folder, or the version
-  // folder chosen instead of it, is its NGX search path, and the caller shim sits beside the
-  // runtime folder, never inside it (DlssgFeature refuses that).
+  // The same layout sr.ts, nr-render.ts and probe.ts use: the feature's own folder (runtimeRoot/dlssg),
+  // or the version folder chosen instead of it, is its NGX search path, and the caller shim goes to
+  // runtimeRoot/caller, outside that search path (DlssgFeature refuses the two being one folder).
   const runtime = { runtimeDir: dllDir ?? featureDir(runtimeRoot, "fg"), callerDir: callerDir(runtimeRoot) };
   if (mode === "--probe") return { launch: { mode }, runtime };
   const sharedMemoryName = options.get("--shared");
