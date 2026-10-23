@@ -10,7 +10,7 @@ import { DlssgFeature, DlssgUnavailableError, capabilityRefusal, type DlssgRunti
 import { featureByKey } from "../ngx/runtime-catalog.ts";
 import { callerDir, featureDir, RUNTIME_DIR } from "../paths.ts";
 import { HostStatus, encodeProbeLine, type DlssgLaunch, type DlssgProbeLine, type DlssgSetup } from "./dlssg-protocol.ts";
-import { claimStdout, logToStderr, serveDlssg, type GeneratorOpening } from "./dlssg-serve.ts";
+import { claimStdout, logToStderr, refusedSetup, serveDlssg, type GeneratorOpening } from "./dlssg-serve.ts";
 import { openGpu, type GpuSession } from "./gpu.ts";
 
 const FRAME_GENERATION = featureByKey("fg");
@@ -99,7 +99,7 @@ function openFeature(setup: DlssgSetup, runtime: DlssgRuntimeOptions): Generator
   try {
     session = openGpu();
   } catch (error) {
-    return { outcome: "refused", status: HostStatus.setupFailed, reason: (error as Error).message };
+    return refusedSetup(HostStatus.setupFailed, error);
   }
   try {
     const feature = DlssgFeature.open(session, { ...runtime, width: setup.width, height: setup.height, maxGenerated: setup.generatedCount });
@@ -117,7 +117,7 @@ function openFeature(setup: DlssgSetup, runtime: DlssgRuntimeOptions): Generator
     return { outcome: "opened", generator };
   } catch (error) {
     session.close();
-    return { outcome: "refused", status: refusalStatus(error), reason: (error as Error).message };
+    return refusedSetup(refusalStatus(error), error);
   }
 }
 

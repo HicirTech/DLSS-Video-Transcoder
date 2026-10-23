@@ -32,7 +32,14 @@ interface IntervalGenerator {
   close(): void;
 }
 
-export type GeneratorOpening = { outcome: "opened"; generator: IntervalGenerator } | { outcome: "refused"; status: number; reason: string };
+/** A setup the host turned down, with the status the parent receives and the reason that goes to stderr. */
+export interface SetupRefusal {
+  outcome: "refused";
+  status: number;
+  reason: string;
+}
+
+export type GeneratorOpening = { outcome: "opened"; generator: IntervalGenerator } | SetupRefusal;
 
 /** The session's shared memory, with its slots laid out once: the views are the real frame to read and the places for each generated frame. */
 interface SharedFrames {
@@ -42,7 +49,7 @@ interface SharedFrames {
   readonly generated: readonly Uint8Array[];
 }
 
-type SetupOpening = { outcome: "opened"; setup: DlssgSetup; generator: IntervalGenerator; frames: SharedFrames } | { outcome: "refused"; status: number; reason: string };
+type SetupOpening = { outcome: "opened"; setup: DlssgSetup; generator: IntervalGenerator; frames: SharedFrames } | SetupRefusal;
 
 /** An FGO2 reply and the frames that go in the output slot before it is sent; a failed reply also says why, for stderr. */
 interface FrameAnswer {
@@ -134,7 +141,7 @@ function openSharedFrames(layout: SharedFrameLayout, name: string): SharedFrames
   return { memory, rgba: viewRange(bytes, layout.rgba), motion: viewRange(bytes, layout.motion), generated: layout.generated.map((range) => viewRange(bytes, range)) };
 }
 
-function refusedSetup(status: number, error: unknown): SetupOpening {
+export function refusedSetup(status: number, error: unknown): SetupRefusal {
   return { outcome: "refused", status, reason: (error as Error).message };
 }
 
@@ -158,7 +165,7 @@ function openFromSetup(setupBytes: Uint8Array, sharedMemoryName: string, openGen
   try {
     opening = openGenerator(setup);
   } catch (error) {
-    opening = { outcome: "refused", status: HostStatus.setupFailed, reason: (error as Error).message };
+    opening = refusedSetup(HostStatus.setupFailed, error);
   }
   if (opening.outcome === "refused") {
     frames.memory.close();
