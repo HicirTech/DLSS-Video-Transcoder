@@ -450,6 +450,12 @@ export interface ProbeOpticalFlow {
   pipelineGrid: { minSide: number; maxLongSide: number };
 }
 
+/**
+ * How usable a feature is, from its NGX support bits: "outdated" when a newer driver or OS would make it work,
+ * "blocked" when this GPU or driver cannot run it (or the query failed), "unknown" when nothing says either way.
+ */
+export type SupportLevel = "supported" | "outdated" | "blocked" | "unknown";
+
 export interface ProbeFeature {
   /** NGX feature id (1 = DLSS SR, 11 = frame generation, 13 = ray reconstruction, 18 = neural rendering). */
   id: number;
