@@ -15,10 +15,12 @@ afterEach(() => {
 
 test("FFMPEG_PATH and FFPROBE_PATH pin the tools, and requireFfmpegTools hands both back", () => {
   // Any existing file stands in: findTool only checks that the pinned path exists.
+  // Two different files, so a swapped or shared lookup shows.
   process.env.FFMPEG_PATH = process.execPath;
-  process.env.FFPROBE_PATH = process.execPath;
+  process.env.FFPROBE_PATH = import.meta.path;
   expect(findTool("ffmpeg")).toBe(process.execPath);
-  expect(requireFfmpegTools("video jobs")).toEqual({ ffmpeg: process.execPath, ffprobe: process.execPath });
+  expect(findTool("ffprobe")).toBe(import.meta.path);
+  expect(requireFfmpegTools("video jobs")).toEqual({ ffmpeg: process.execPath, ffprobe: import.meta.path });
 });
 
 test("an FFMPEG_PATH that points nowhere is refused with its value and the way out, not skipped for another ffmpeg", () => {
