@@ -1,18 +1,7 @@
 /**
- * Emits the caller-validation shim as an x64 PE DLL built byte by byte in
- * TypeScript, so the build needs no C compiler.
- *
- * NVIDIA's neural-rendering runtime checks which module called into the NGX core
- * and returns PlatformError (0xBAD00002) for callers it does not recognise; a
- * module on disk literally named `nvngx.dll` is accepted. The host parks the NGX
- * core's function addresses in this DLL's slots and calls its stubs, and because
- * each stub uses a real `call` rather than a tail `jmp`, the return address on
- * the stack points back into this image — so the caller check sees `nvngx.dll`.
- *
- * The emitted code is position independent (RIP-relative slot access, exports as
- * RVAs, no imports, no absolute addresses), so an empty relocation table is
- * enough to satisfy ASLR. The call stubs carry x64 unwind data (.pdata), so a
- * stack walk or exception dispatch that passes through one reaches its caller.
+ * Builds the nvngx.dll caller-validation shim, an x64 PE DLL emitted byte by byte so the build needs no C compiler.
+ * NGX returns PlatformError (0xBAD00002) unless its caller is a module named nvngx.dll, so each stub makes a real call
+ * into the NGX target parked in its slot and the return address on the stack stays inside this image.
  */
 import { IMAGE_DOS_SIGNATURE, IMAGE_NT_OPTIONAL_HDR64_MAGIC, IMAGE_NT_SIGNATURE } from "../native/pe.ts";
 
@@ -108,7 +97,10 @@ function unwindInfo(frame: CallThunkFrame): number[] {
   return bytes;
 }
 
-/** The .pdata section: the RUNTIME_FUNCTION table first (what the exception directory names), then each UNWIND_INFO. */
+/**
+ * The .pdata section, so a stack walk or exception dispatch that passes through a stub reaches its caller: the
+ * RUNTIME_FUNCTION table first (what the exception directory names), then each UNWIND_INFO.
+ */
 function buildPdata(frames: CallThunkFrame[], pdataRva: number): { bytes: Uint8Array; tableBytes: number } {
   const sorted = [...frames].sort((a, b) => a.beginRva - b.beginRva);
   const tableBytes = sorted.length * RUNTIME_FUNCTION_BYTES;
@@ -185,12 +177,13 @@ class TextBuilder {
   }
 
   /**
-   * A stub that reserves shadow space and calls the target held in `slot`. The
-   * four register arguments (rcx/rdx/r8/r9) forward for free; `stackArgs` further
-   * arguments ride the stack (Init_Ext has one, Init_ProjectID three) and are
-   * copied from the caller's frame into the inner call's argument slots. Copying
-   * more than a call actually passes is harmless: the extra copies land in shadow
-   * space the callee never reads.
+   * A stub that reserves shadow space and calls the target held in `slot`, with a real `call` rather than a tail
+   * `jmp` so the return address the caller check reads stays inside this image. The four register arguments
+   * (rcx/rdx/r8/r9) forward for free; `stackArgs` further arguments ride the stack (Init_Ext has one,
+   * Init_ProjectID three) and are copied from the caller's frame into the inner call's argument slots. Copying
+   * more than a call actually passes is harmless: the extra copies fill the inner call's argument 5-7 slots above
+   * the 0x20 shadow space, which this frame reserves and a callee with fewer parameters never reads, and the source
+   * reads stay inside the caller's already-committed stack.
    */
   emitCallThunk(slot: number, stackArgs = 0): number {
     const at = this.rva;
