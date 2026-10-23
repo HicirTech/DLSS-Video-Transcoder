@@ -51,7 +51,7 @@ import { type RunParams, runOverlapped, runSequential } from "./framegen-run.ts"
 import { defaultOutputPath, inputAsOutputProblem } from "./output-path.ts";
 import { removePartialOutput } from "./partial-output.ts";
 import { ProcessedFrames } from "./processed-frames.ts";
-import { Stage, openGuideWorker } from "./framegen-stage.ts";
+import { Stage, openGuideWorker, releaseStageParts } from "./framegen-stage.ts";
 import { verifyOutputVideo } from "./framegen-verify.ts";
 import {
   FRAMEGEN_CUDA_DEVICE,
@@ -65,7 +65,6 @@ import {
 import { type Rational, parseRational, ratDiv, ratMul, ratToNumber, rational } from "./rational.ts";
 import { requireFfmpegTools } from "./tools.ts";
 import { type VideoInfo, probeVideo } from "./video-probe.ts";
-import { ABORT_TIMEOUT_MS } from "./worker-abort.ts";
 
 export interface FrameGenOptions {
   input: string;
@@ -463,8 +462,11 @@ async function openStages({ options, progress, width, height, plan }: FrameGenJo
     const [sessionResult, guideResult, packerResult] = results;
     if (sessionResult.status === "rejected" || guideResult.status === "rejected" || packerResult.status === "rejected") {
       // Release whatever came up so a partial failure leaks nothing.
-      if (sessionResult.status === "fulfilled") await sessionResult.value.close(ABORT_TIMEOUT_MS);
-      for (const r of [guideResult, packerResult]) if (r.status === "fulfilled" && r.value) try { r.value.worker.terminate(); } catch {}
+      await releaseStageParts({
+        session: sessionResult.status === "fulfilled" ? sessionResult.value : null,
+        guide: guideResult.status === "fulfilled" ? guideResult.value.worker : null,
+        packer: packerResult.status === "fulfilled" && packerResult.value ? packerResult.value.worker : null,
+      });
       throw results.find((r): r is PromiseRejectedResult => r.status === "rejected")!.reason;
     }
     const stage = new Stage(sessionResult.value, guideResult.value.worker, packerResult.value ? packerResult.value.worker : null, generatedCount, zeros);
