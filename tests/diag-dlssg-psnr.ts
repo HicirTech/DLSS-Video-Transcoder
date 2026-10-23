@@ -112,11 +112,9 @@ try {
       counts.mismatchedIntervals++;
     } else {
       counts.generatedIntervals++;
-      generated.forEach((image, position) => {
-        const againstEach = dropped.map((real) => psnr(image, real));
-        scores.push(againstEach[position]!);
-        if (Math.max(...againstEach) === againstEach[position]) counts.bestMatchInPlace++;
-      });
+      const interval = scoreInterval(generated, dropped);
+      scores.push(...interval.scores);
+      counts.bestMatchInPlace += interval.bestMatchInPlace;
     }
     dropped = [];
   }
