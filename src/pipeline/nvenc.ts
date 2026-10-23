@@ -43,6 +43,8 @@ const STRUCT_VER = {
   MAP_INPUT_RESOURCE: STRUCT_VERSION(4),
   CREATE_BITSTREAM_BUFFER: STRUCT_VERSION(1),
 } as const;
+/** sizeof(NV_ENC_PIC_PARAMS) in nvEncodeAPI.h (Video Codec SDK 13.1.15). */
+const PIC_PARAMS_BYTES = 3360;
 
 // -- GUIDs (16-byte little-endian; guid() matches the SDK's raw layout) -------
 const CODEC_H264 = guid("{6BC82762-4E63-4CA4-AA85-1E50F321F6BF}");
@@ -462,21 +464,21 @@ export class NvencEncoder {
 
     let encoded = false;
     try {
-      // NV_ENC_PIC_PARAMS (3360B); offsets below name its fields.
-      const pic = new Uint8Array(3360);
-      const cdv = new DataView(pic.buffer);
-      cdv.setUint32(0, STRUCT_VER.PIC_PARAMS, true);
-      cdv.setUint32(4, this.width, true); // inputWidth
-      cdv.setUint32(8, this.height, true); // inputHeight
-      cdv.setUint32(12, this.pitch, true); // inputPitch
-      cdv.setUint32(20, this.frameIdx, true); // frameIdx
-      cdv.setBigUint64(24, BigInt(this.frameIdx), true); // inputTimeStamp
-      cdv.setBigUint64(40, mapped, true); // inputBuffer
-      cdv.setBigUint64(48, this.bitstream, true); // outputBitstream
-      cdv.setUint32(64, BUFFER_FORMAT_ABGR, true); // bufferFmt
-      cdv.setUint32(68, PIC_STRUCT_FRAME, true); // pictureStruct
+      // NV_ENC_PIC_PARAMS; offsets below name its fields.
+      const pic = new Uint8Array(PIC_PARAMS_BYTES);
+      const picView = new DataView(pic.buffer);
+      picView.setUint32(0, STRUCT_VER.PIC_PARAMS, true);
+      picView.setUint32(4, this.width, true); // inputWidth
+      picView.setUint32(8, this.height, true); // inputHeight
+      picView.setUint32(12, this.pitch, true); // inputPitch
+      picView.setUint32(20, this.frameIdx, true); // frameIdx
+      picView.setBigUint64(24, BigInt(this.frameIdx), true); // inputTimeStamp
+      picView.setBigUint64(40, mapped, true); // inputBuffer
+      picView.setBigUint64(48, this.bitstream, true); // outputBitstream
+      picView.setUint32(64, BUFFER_FORMAT_ABGR, true); // bufferFmt
+      picView.setUint32(68, PIC_STRUCT_FRAME, true); // pictureStruct
       const st = this.api.encodePicture(this.enc, pic) as number;
-      if (st === 17) throw new Error("NVENC returned NEED_MORE_INPUT unexpectedly (B-frames/lookahead should be disabled)");
+      if (st === NEED_MORE_INPUT) throw new Error("NVENC returned NEED_MORE_INPUT unexpectedly (B-frames/lookahead should be disabled)");
       this.check(st, "nvEncEncodePicture");
       this.frameIdx++;
       const bytes = this.lockAndRead();
