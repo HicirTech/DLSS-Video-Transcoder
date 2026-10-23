@@ -64,7 +64,7 @@ export async function srCommand(args: string[]): Promise<void> {
   }
   await Bun.write(output, encodePng(enhanced, { level: 6 }));
   // The mode name, not the PerfQuality index: the index is meaningless to a user
-  // and its order is counter-intuitive (0 is the fastest mode, not the best).
+  // and does not run in order of quality or speed (0 is MaxPerf, 3 UltraPerformance, 5 DLAA).
   console.log(`DLSS SR: ${image.width}x${image.height} -> ${target.width}x${target.height} (${perfQualityName(quality)} mode, preset ${presetKey}, ${warmupFrames + 1} passes) in ${(performance.now() - started).toFixed(1)} ms`);
   console.log(`wrote ${output}`);
   // The driver core's Shutdown1 is skipped; exit the process to reclaim NGX.
@@ -74,7 +74,7 @@ export async function srCommand(args: string[]): Promise<void> {
 /** `--preset` as a DlssRenderPreset key, or the default preset when absent. */
 export function presetKeyOption(args: string[]): keyof typeof DlssRenderPreset {
   // DlssRenderPreset keys are mixed case ("Default", not "DEFAULT"), so match
-  // case-insensitively; an unknown name is an error, not a silent fallback to L.
+  // case-insensitively; an unknown name is an error, not a silent fallback to DEFAULT_SR_PRESET.
   const presetInput = option(args, "--preset") ?? DEFAULT_SR_PRESET;
   const presetKey = (Object.keys(DlssRenderPreset) as (keyof typeof DlssRenderPreset)[]).find((k) => k.toLowerCase() === presetInput.toLowerCase());
   if (!presetKey) usageError(`unknown --preset '${presetInput}'. Valid: ${Object.keys(DlssRenderPreset).join(", ")}`);

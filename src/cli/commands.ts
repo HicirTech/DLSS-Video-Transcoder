@@ -223,8 +223,8 @@ export const COMMANDS = [
 export type CommandName = (typeof COMMANDS)[number]["name"];
 
 /**
- * "1.00=DLAA, 1.50=MaxQuality, 1.72=Balanced, 2.00=MaxPerf, 3.00=UltraPerformance": the --factor help
- * and the sr summary must name the same modes, so both read DLSS_RATIO.
+ * "1.00=DLAA, 1.50=MaxQuality, 1.72=Balanced, 2.00=MaxPerf, 3.00=UltraPerformance": the modes the sr --factor row
+ * names, read from DLSS_RATIO so the help lists exactly the modes the runtime accepts.
  */
 function srModeList(): string {
   return Object.entries(DLSS_RATIO)
