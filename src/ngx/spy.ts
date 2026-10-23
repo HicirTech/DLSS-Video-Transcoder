@@ -24,9 +24,9 @@ export class SpyParameter {
   private readonly vtable: NativeStruct;
   private readonly object: NativeStruct;
 
-  constructor(slots = 32) {
-    this.vtable = new NativeStruct(slots * 8);
-    for (let slot = 0; slot < slots; slot++) {
+  constructor() {
+    this.vtable = new NativeStruct(SPY_SLOT_COUNT * 8);
+    for (let slot = 0; slot < SPY_SLOT_COUNT; slot++) {
       const cb = new JSCallback(
         (_self: number, name: number, arg: bigint | number) => {
           let text = "";
