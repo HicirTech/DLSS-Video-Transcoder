@@ -229,19 +229,6 @@ function planeDepthPixels(options: DlssgFeatureOptions, constants: DlssgInterval
   return new Uint8Array(depth.buffer);
 }
 
-/**
- * Submits whatever is recorded, so none of it runs later on the session's list. False when the
- * GPU did not finish: what the recorded work uses must then stay allocated.
- */
-function drainList(session: GpuSession): boolean {
-  try {
-    session.gpu.submitAndWait();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export class DlssgFeature {
   private closed = false;
   /** Source frame of an interval that failed after some of its evaluates were recorded. */
@@ -295,7 +282,7 @@ export class DlssgFeature {
       return new DlssgFeature(session, core, params, handle, capabilities, options.maxGenerated, resources, constants, forwarder);
     } catch (error) {
       // After a GPU timeout the feature and the resources may still be in use, so they are left allocated.
-      if (drainList(session)) {
+      if (session.gpu.drain()) {
         if (resources) releaseIntervalResources(resources);
         if (handle !== 0) core.releaseFeature(handle);
       }
@@ -364,7 +351,7 @@ export class DlssgFeature {
       // The submitted list declares more indices than it evaluates, the shape intervalEvaluateCalls
       // rules out for resets because it corrupts the feature's history.
       if (evaluated > 0) this.brokenAtFrame = input.frameId;
-      drainList(this.session);
+      gpu.drain();
       throw error;
     }
   }
