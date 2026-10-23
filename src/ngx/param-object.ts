@@ -79,20 +79,8 @@ export class NgxParamObject {
     this.store.set(name, value);
     return this;
   }
-  setF64(name: string, value: number): this {
-    this.store.set(name, value);
-    return this;
-  }
-  setU64(name: string, value: number | bigint): this {
-    this.store.set(name, BigInt(value));
-    return this;
-  }
   /** Store a D3D12 resource / arbitrary pointer under `name`. */
   setResource(name: string, pointer: number): this {
-    this.store.set(name, asPtr(pointer));
-    return this;
-  }
-  setPointer(name: string, pointer: number): this {
     this.store.set(name, asPtr(pointer));
     return this;
   }
@@ -100,19 +88,7 @@ export class NgxParamObject {
   getU32(name: string): number | null {
     return this.store.has(name) ? Number(this.store.get(name)) >>> 0 : null;
   }
-  getI32(name: string): number | null {
-    return this.store.has(name) ? Number(this.store.get(name)) | 0 : null;
-  }
-  getF32(name: string): number | null {
-    return this.store.has(name) ? Number(this.store.get(name)) : null;
-  }
   getF64(name: string): number | null {
-    return this.store.has(name) ? Number(this.store.get(name)) : null;
-  }
-  getU64(name: string): bigint | null {
-    return this.store.has(name) ? BigInt(this.store.get(name)!) : null;
-  }
-  getPointer(name: string): number | null {
     return this.store.has(name) ? Number(this.store.get(name)) : null;
   }
 
