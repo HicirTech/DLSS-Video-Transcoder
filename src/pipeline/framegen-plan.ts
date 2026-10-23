@@ -90,7 +90,7 @@ export interface InterpolationRequest {
  * nativeMultiplierMax; 1 when the target is not above the source; null when the
  * ratio is not an exact supported integer (e.g. 30 -> 144).
  */
-export function exactNativeMultiplier(sourceRate: Rational, targetRate: Rational, nativeMultiplierMax: number): number | null {
+export function exactNativeMultiplier({ sourceRate, targetRate, nativeMultiplierMax }: Pick<InterpolationRequest, "sourceRate" | "targetRate" | "nativeMultiplierMax">): number | null {
   if (ratCmp(targetRate, sourceRate) <= 0) return 1;
   const ratio = ratDiv(targetRate, sourceRate);
   if (ratio.den !== 1n) return null;
@@ -120,37 +120,21 @@ export function isNativeMultiFramePlan(plan: InterpolationPlan): boolean {
   return plan.path === "Native DLSSG" && plan.generatedPerInterval >= 2;
 }
 
-export interface PlanOptions {
-  /** Source is constant-frame-rate (native DLSSG needs a deterministic CFR timeline). Default true. */
-  cfr?: boolean;
-  /**
-   * Hardware-accelerated GPU scheduling state. Multi-frame (>=3x) native DLSSG
-   * is refused by the runtime without HAGS, so "auto" only picks a native path
-   * above 2x when this is true (2x native works either way); "native" forces it
-   * regardless. Default true.
-   */
-  hagsEnabled?: boolean;
-}
-
 /**
- * Decide how to reach targetRate from sourceRate (reference scheduler.py
- * choose_interpolation_plan, plus the HAGS gate for "auto").
- *
  * The cascade is capped at 3 stages (8x grid) because each further stage
  * doubles the evaluations per source frame while only halving the residual
  * timing error, and interpolates from frames that were themselves interpolated.
  */
-export function chooseInterpolationPlan(
-  sourceRate: Rational,
-  targetRate: Rational,
-  engine: FrameGenEngine,
-  nativeMultiplierMax: number,
-  options: PlanOptions = {},
-): InterpolationPlan {
+const MAX_CASCADE_STAGES = 3;
+
+/**
+ * Decide how to reach targetRate from sourceRate (reference scheduler.py
+ * choose_interpolation_plan, plus the HAGS gate for "auto"). The source is
+ * always constant-rate here: the decoder resamples it to its nominal rate.
+ */
+export function chooseInterpolationPlan({ sourceRate, targetRate, engine, nativeMultiplierMax, hagsEnabled = true }: InterpolationRequest): InterpolationPlan {
   if (!FRAME_GEN_ENGINES.includes(engine)) throw new Error(`Unknown frame-generation engine ${JSON.stringify(engine)}. Choose one of: ${FRAME_GEN_ENGINES.join(", ")}.`);
   if (sourceRate.num <= 0n || targetRate.num <= 0n) throw new Error("Source and output FPS must be positive.");
-  const cfr = options.cfr ?? true;
-  const hags = options.hagsEnabled ?? true;
   const ratio = ratDiv(targetRate, sourceRate);
 
   if (ratCmp(targetRate, sourceRate) <= 0) {
@@ -166,18 +150,14 @@ export function chooseInterpolationPlan(
     };
   }
 
-  const nativeExact = exactNativeMultiplier(sourceRate, targetRate, nativeMultiplierMax);
-  if (engine === "native") {
-    if (!cfr) throw new Error("Native DLSSG requires constant-frame-rate input. Choose auto or cascade so the file can be placed on a deterministic CFR timeline.");
-    if (nativeExact === null) {
-      throw new Error(
-        `${formatRate(sourceRate)} -> ${formatRate(targetRate)} fps is not an exact native DLSSG grid supported by this runtime (native maximum ${nativeMultiplierMax}x). Choose auto or cascade.`,
-      );
-    }
+  const native = exactNativeMultiplier({ sourceRate, targetRate, nativeMultiplierMax });
+  if (engine === "native" && native === null) {
+    throw new Error(
+      `${formatRate(sourceRate)} -> ${formatRate(targetRate)} fps is not an exact native DLSSG grid supported by this runtime (native maximum ${nativeMultiplierMax}x). Choose auto or cascade.`,
+    );
   }
-  const native = cfr ? nativeExact : null;
   // 2x native works without HAGS; only multi-frame (m >= 3) is refused by the runtime when it is off.
-  const nativeAllowed = engine === "native" || (engine === "auto" && (hags || native === 2));
+  const nativeAllowed = engine === "native" || (engine === "auto" && (hagsEnabled || native === 2));
   if (native !== null && nativeAllowed) {
     return {
       path: "Native DLSSG",
@@ -191,7 +171,7 @@ export function chooseInterpolationPlan(
     };
   }
 
-  const stages = ratCmp(ratio, rational(2)) === 0 ? 1 : ratCmp(ratio, rational(4)) === 0 ? 2 : 3;
+  const stages = ratCmp(ratio, rational(2)) === 0 ? 1 : ratCmp(ratio, rational(4)) === 0 ? 2 : MAX_CASCADE_STAGES;
   const grid = 1 << stages;
   // Every output instant falls on a grid frame only when the ratio is the grid itself: 2x, 4x or 8x.
   const exactGrid = ratCmp(ratio, rational(grid)) === 0;
