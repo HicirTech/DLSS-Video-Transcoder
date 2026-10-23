@@ -6,9 +6,9 @@
  * its parent interface (IUnknown = 3 slots, ID3D12Object = 4, ...).
  */
 import { dlopen, FFIType } from "bun:ffi";
-import { ComObject, checkHresult, isFailure } from "./com.ts";
+import { ComObject, checkHresult, describeHresult, isFailure } from "./com.ts";
 import type { DxgiAdapter } from "./dxgi.ts";
-import { NativeStruct, OutPointer, align, guid } from "./memory.ts";
+import { NativeStruct, OutPointer, align, guid, hex32 } from "./memory.ts";
 import { Win32Event } from "./win32.ts";
 
 const d3d12 = dlopen("d3d12.dll", {
@@ -317,12 +317,12 @@ export class D3D12GraphicsCommandList extends ComObject {
     resource.state = newState;
     if (resource.kind === "buffer") this.transitionedBuffers.add(resource);
   }
+}
 
-  uavBarrier(resource: D3D12Resource): void {
-    const barrier = new NativeStruct(32);
-    barrier.u32(0, 2); // D3D12_RESOURCE_BARRIER_TYPE_UAV
-    barrier.pointer(8, resource.ptr);
-    this.call(26, { args: [FFIType.u32, FFIType.ptr], returns: FFIType.void }, 1, barrier.bytes);
+/** ID3D12Debug (d3d12sdklayers.h): EnableDebugLayer is the first slot after IUnknown's 3. */
+class D3D12Debug extends ComObject {
+  enableDebugLayer(): void {
+    this.call(3, { args: [], returns: FFIType.void });
   }
 }
 
@@ -339,14 +339,18 @@ export class D3D12Device extends ComObject {
     this.featureLevel = featureLevel;
   }
 
-  static enableDebugLayer(): boolean {
+  /** Turns the D3D12 debug layer on for the devices created after it; throws when the Graphics Tools are not installed. */
+  static enableDebugLayer(): void {
     const out = new OutPointer();
     const hr = d3d12.symbols.D3D12GetDebugInterface(IID_ID3D12Debug, out.bytes);
-    if (isFailure(hr) || out.value === 0) return false;
-    const debug = new ComObject(out.value, "ID3D12Debug");
-    (debug as unknown as { call: ComObject["call"] }).call.call(debug, 3, { args: [], returns: FFIType.void });
+    if (isFailure(hr) || out.value === 0) {
+      throw new Error(
+        `The D3D12 debug layer is not available: D3D12GetDebugInterface returned HRESULT ${hex32(hr)}${describeHresult(hr)}. Install Graphics Tools (Settings > System > Optional features), or leave out --debug-layer.`,
+      );
+    }
+    const debug = new D3D12Debug(out.value, "ID3D12Debug");
+    debug.enableDebugLayer();
     debug.release();
-    return true;
   }
 
   static create(adapter: DxgiAdapter | null, options: DeviceOptions = {}): D3D12Device {
