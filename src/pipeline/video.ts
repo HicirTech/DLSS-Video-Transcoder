@@ -131,6 +131,8 @@ interface VideoJob {
   cudaOrdinal: number;
   /** The encode settings with the codec resolved on this GPU. */
   encode: EncodeSettings;
+  /** Whether the source is opened as a second input so its audio is carried. */
+  wantAudio: boolean;
   completed: (size: { width: number; height: number }, counts: FrameCounts) => VideoJobResult;
 }
 
@@ -141,8 +143,6 @@ interface EnginePath {
   outHeight: number;
   /** Decode argv without the binary; both encode paths spawn it themselves. */
   decodeArgs: ReturnType<typeof decodeArgv>;
-  /** Whether the source is opened as a second input so its audio is copied. */
-  wantAudio: boolean;
   frameBytes: number;
   guide: (rgba: Uint8Array, index: number) => { reset: boolean; motion: Float32Array | null; sceneCut: boolean };
 }
@@ -196,12 +196,15 @@ async function prepareVideoJob(options: VideoJobOptions): Promise<VideoJob> {
   const resolvedCodec = resolveEncodeCodec(requestedEncode.codec, ffmpeg, cudaOrdinal, target);
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
   const encode: EncodeSettings = { ...requestedEncode, codec: resolvedCodec.codec };
-  return { options, progress, ffmpeg, info, target, output, outputExisted, upscaling, renderWidth, renderHeight, session, cudaOrdinal, encode, completed };
+  // Video is always input 0 (the pipe); audio, when carried, is input 1 (the source). The source is opened a
+  // second time only then, since otherwise the encoder would demux all of it again for nothing.
+  const wantAudio = info.hasAudio && encode.copyAudio;
+  return { options, progress, ffmpeg, info, target, output, outputExisted, upscaling, renderWidth, renderHeight, session, cudaOrdinal, encode, wantAudio, completed };
 }
 
 /** The GPU-resident async path for Neural Rendering alone (see processVideo), which closes the GPU session when it ends. */
 async function runGpuResidentNr(
-  { options, progress, ffmpeg, info, output, outputExisted, target, session, cudaOrdinal, encode, completed }: VideoJob,
+  { options, progress, ffmpeg, info, output, outputExisted, target, session, cudaOrdinal, encode, wantAudio, completed }: VideoJob,
   nrNative: { codec: NvencSdkCodec; demux: string },
   nrStep: NeuralRenderingStep,
 ): Promise<VideoJobResult> {
@@ -209,7 +212,6 @@ async function runGpuResidentNr(
     const { num, den } = rateParts(info.fpsText);
     const layout = linearLayout(target.width, target.height, DXGI_FORMAT_R8G8B8A8_UNORM);
     const decodeArgs = decodeArgv({ input: options.input, source: info, output: target, frameRate: info.fpsText });
-    const wantAudio = info.hasAudio && encode.copyAudio;
     const sinkArgs = muxCopyArgs({
       demux: nrNative.demux, frameRate: info.fpsText, audioSource: wantAudio ? options.input : null,
       container: encode.container, displayAspect: info.displayAspect, size: target, output,
@@ -259,8 +261,8 @@ function openEngineChain({ options, session, renderWidth, renderHeight, target }
 
 /** Decode, DLSS and NVENC each on their own thread, with ffmpeg only muxing the elementary stream. */
 async function runThreadedNvenc(
-  { options, progress, ffmpeg, info, output, cudaOrdinal, encode }: VideoJob,
-  { engine, outWidth, outHeight, decodeArgs, wantAudio, frameBytes, guide }: EnginePath,
+  { options, progress, ffmpeg, info, output, cudaOrdinal, encode, wantAudio }: VideoJob,
+  { engine, outWidth, outHeight, decodeArgs, frameBytes, guide }: EnginePath,
   nativeTarget: { codec: NvencSdkCodec; demux: string },
   counts: FrameCounts,
 ): Promise<void> {
@@ -288,8 +290,8 @@ const ENCODER_QUIT_WAIT_MS = 5000;
 
 /** Raw RGBA frames out to ffmpeg, which does the encode; the fallback for everything the NVENC paths cannot take. */
 async function runRawvideo(
-  { options, progress, ffmpeg, info, output, cudaOrdinal, encode }: VideoJob,
-  { engine, outWidth, outHeight, decodeArgs, wantAudio, frameBytes, guide }: EnginePath,
+  { options, progress, ffmpeg, info, output, cudaOrdinal, encode, wantAudio }: VideoJob,
+  { engine, outWidth, outHeight, decodeArgs, frameBytes, guide }: EnginePath,
   counts: FrameCounts,
 ): Promise<void> {
   // Fallback: raw RGBA out to ffmpeg, which does the encode.
@@ -359,12 +361,6 @@ async function runEngineJob(job: VideoJob): Promise<VideoJobResult> {
   // Decode argv without the binary; both encode paths below spawn it themselves.
   const decodeArgs = decodeArgv({ input: options.input, source: info, output: { width: renderWidth, height: renderHeight }, frameRate: info.fpsText });
 
-  // Only open the source as a second input when its audio is actually copied:
-  // otherwise the encoder demuxes and decodes the whole source a second time,
-  // which cost more per frame than the raw video pipe it was competing with.
-  // Video is always input 0 (the pipe); audio, when copied, is input 1 (source).
-  const wantAudio = info.hasAudio && encode.copyAudio;
-
   let frameGuide: FrameGuide;
   try {
     frameGuide = createFrameGuide(renderWidth, renderHeight, { flow: options.superResolution?.motion === "flow", cudaOrdinal, progress });
@@ -386,7 +382,7 @@ async function runEngineJob(job: VideoJob): Promise<VideoJobResult> {
   if (nvenc && !nvenc.available) progress(0, `encode: NVENC direct path unavailable (${nvenc.detail}); falling back to the single-thread rawvideo pipeline`);
   const useThreaded = nvenc?.available === true;
 
-  const path: EnginePath = { engine, outWidth, outHeight, decodeArgs, wantAudio, frameBytes, guide };
+  const path: EnginePath = { engine, outWidth, outHeight, decodeArgs, frameBytes, guide };
   const counts: FrameCounts = { frames: 0, sceneCuts: 0 };
   try {
     if (useThreaded && nativeTarget) await runThreadedNvenc(job, path, nativeTarget, counts);
