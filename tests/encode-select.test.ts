@@ -101,7 +101,7 @@ describe("encode-select", () => {
 
   test("an NVENC encoder's limit is its longest side, and a CPU codec has none", () => {
     for (const codec of FFMPEG_NVENC_ENCODERS) {
-      const side = NVENC_MAX_SIDE[codec]!;
+      const side = NVENC_MAX_SIDE[codec];
       expect(nvencLimitExceeded(codec, { width: side, height: side }), codec).toBeNull();
       expect(nvencLimitExceeded(codec, { width: side + 2, height: 2 }), codec).toBe(side);
       expect(nvencLimitExceeded(codec, { width: 2, height: side + 2 }), codec).toBe(side);
