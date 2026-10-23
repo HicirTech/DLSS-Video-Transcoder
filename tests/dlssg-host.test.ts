@@ -83,8 +83,8 @@ class HostConversation {
   }
 
   /** Sends the setup and reads the reply, or null when the host closed stdout without one. */
-  async setup(frameCount = 100, size = { width: WIDTH, height: HEIGHT }): Promise<DlssgSetupReply | null> {
-    await this.send(encodeSetup({ ...size, frameCount, generatedCount: GENERATED_COUNT }));
+  async setup(size = { width: WIDTH, height: HEIGHT }): Promise<DlssgSetupReply | null> {
+    await this.send(encodeSetup({ ...size, generatedCount: GENERATED_COUNT }));
     const reply = await this.stdout.next(SETUP_REPLY_BYTES);
     return reply ? decodeSetupReply(reply) : null;
   }
@@ -195,12 +195,12 @@ describe("dlssg-host serve loop", () => {
     expect(end.exitCode).toBe(0);
   }, TEST_TIMEOUT_MS);
 
-  test("serves until stdin ends, past the frame count the setup declared, then closes the generator and exits 0", async () => {
+  test("serves until stdin ends, then closes the generator and exits 0", async () => {
     const host = startHost();
-    await host.setup(1);
+    await host.setup();
     const replies = [];
     for (const frameId of [0, 1, 2]) replies.push(await host.frame({ frameId, reset: frameId === 0 }));
-    expect(replies).toHaveLength(3);
+    expect(replies.map((reply) => reply?.result.outcome)).toEqual(["empty", "generated", "generated"]);
     const end = await host.finish();
     expect(end.stderr).toContain("fake generator closed");
     expect(end.exitCode).toBe(0);
@@ -252,7 +252,7 @@ describe("dlssg-host serve loop", () => {
 
   test("a mapping smaller than the setup's frames need is refused before the generator opens", async () => {
     const host = startHost();
-    expect(await host.setup(100, { width: 64, height: 64 })).toEqual({ outcome: "refused", status: HostStatus.sharedMemoryFailed });
+    expect(await host.setup({ width: 64, height: 64 })).toEqual({ outcome: "refused", status: HostStatus.sharedMemoryFailed });
     const end = await host.finish();
     expect(end.stderr).toContain(`MapViewOfFile failed for shared memory "${host.mappingName}"`);
     expect(end.stderr).toContain("the mapping may be smaller than the 81920 bytes asked for");
@@ -262,7 +262,7 @@ describe("dlssg-host serve loop", () => {
 
   test("a setup that describes no frame is refused as a bad request", async () => {
     const host = startHost();
-    expect(await host.setup(100, { width: 0, height: HEIGHT })).toEqual({ outcome: "refused", status: HostStatus.badRequest });
+    expect(await host.setup({ width: 0, height: HEIGHT })).toEqual({ outcome: "refused", status: HostStatus.badRequest });
     const end = await host.finish();
     expect(end.stderr).toContain("Shared frame memory needs a whole width, height and generatedCount of at least 1");
     expect(end.stderr).not.toContain("noise from console.info at setup");

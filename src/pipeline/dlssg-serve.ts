@@ -1,6 +1,6 @@
 /**
- * The host side of the dlssg protocol (dlssg-protocol.ts): answer one FGS1 setup, then one FGO2 per
- * FGF2 frame until stdin ends, on a stdout that carries nothing but those replies. The frames are in
+ * The host side of the dlssg protocol (dlssg-protocol.ts): answer one FGS2 setup, then one FGO2 per
+ * FGF3 frame until stdin ends, on a stdout that carries nothing but those replies. The frames are in
  * the shared memory the parent created (dlssg-shared-layout.ts): each real frame is read in place and
  * the generated ones are written to the output slot before the reply. Generation is injected, so the
  * same loop runs over DlssgFeature and over a test's fake.
@@ -199,8 +199,6 @@ function answerFrame(generator: IntervalGenerator, input: DlssgIntervalInput, rg
 
 /** Replies to frames until stdin ends at a message boundary (exit code 0), or until a reply fails (1). */
 function answerFrames(stdout: ProtocolStdout, setup: DlssgSetup, generator: IntervalGenerator, frames: SharedFrames): number {
-  // setup.frameCount is not a limit: the host serves until stdin ends, so a source that decodes
-  // more frames than its container declared still gets every frame answered.
   for (;;) {
     const headerBytes = readStdin(FRAME_HEADER_BYTES);
     if (!headerBytes) return 0;
