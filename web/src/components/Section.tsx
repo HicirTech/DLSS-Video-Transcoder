@@ -1,4 +1,4 @@
-import { Box, Typography, type SxProps, type Theme } from "@mui/material";
+import { Box, Typography } from "@mui/material";
 import type { ReactNode } from "react";
 
 interface SectionProps {
@@ -6,13 +6,12 @@ interface SectionProps {
   /** Optional element rendered at the right end of the heading row. */
   action?: ReactNode;
   children: ReactNode;
-  sx?: SxProps<Theme>;
 }
 
-/** Small upper-case heading followed by its content; used to structure every tab. */
-export function Section({ title, action, children, sx }: SectionProps) {
+/** Small upper-case heading followed by its content. */
+export function Section({ title, action, children }: SectionProps) {
   return (
-    <Box sx={sx}>
+    <Box>
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
         <Typography
           variant="subtitle2"
