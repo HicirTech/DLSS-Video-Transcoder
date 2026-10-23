@@ -51,7 +51,10 @@ export class DlssNrSession {
   static open(session: GpuSession, opts: NrRenderOptions): DlssNrSession {
     const nr = featureByKey("nr");
     const dllDir = opts.dllDir ?? featureDir(opts.runtimeDir, "nr");
-    const dll = join(dllDir, featureByKey("nr").dllName);
+    const dll = join(dllDir, nr.dllName);
+    if (!existsSync(dll)) {
+      throw new Error(`${nr.name} needs ${nr.dllName} in ${dllDir}: place it there (README "Runtime folder"), or pick an installed version with --nr-version or neuralRendering.dllDir (the probe and GET /api/catalog list them).`);
+    }
 
     const core = NgxCore.load({ path: dll, folder: dllDir, source: "driverstore", modifiedAt: statSync(dll).mtime });
     startNgxCore(core, session.device.ptr, {
