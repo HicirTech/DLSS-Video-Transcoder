@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { Box, Slider, Typography } from "@mui/material";
+import { monoFontFamily } from "../theme";
 
 interface SliderMark {
   value: number;
@@ -55,7 +56,7 @@ export function SliderRow({ label, value, min, max, marks, disabled, format, hin
         <Typography id={labelId} variant="body2" color={disabled ? "text.disabled" : "text.primary"}>
           {label}
         </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "Consolas, monospace" }}>
+        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: monoFontFamily }}>
           {text}
         </Typography>
       </Box>

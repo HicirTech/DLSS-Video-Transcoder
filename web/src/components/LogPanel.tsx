@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { styled } from "@mui/material/styles";
+import { monoFontFamily } from "../theme";
 
 const LogPre = styled("pre")(({ theme }) => ({
   margin: 0,
@@ -7,7 +8,7 @@ const LogPre = styled("pre")(({ theme }) => ({
   overflow: "auto",
   fontSize: 12,
   lineHeight: 1.45,
-  fontFamily: "Consolas, 'Cascadia Mono', monospace",
+  fontFamily: monoFontFamily,
   whiteSpace: "pre-wrap",
   wordBreak: "break-all",
   color: theme.palette.text.secondary,
