@@ -55,7 +55,8 @@ export function printProbe(report: Awaited<ReturnType<typeof runProbe>>): void {
     const version = f.version ? `  v${f.version}` : "";
     lines.push(`  ${f.present ? "present" : "missing"}  ${f.name.padEnd(18)} ${f.role}${version}${f.sizeMB !== null ? `  ${f.sizeMB} MB` : ""}${f.exports ? `  ${f.exports.length} exports` : ""}`);
   }
-  lines.push(`Forwarder: ${report.forwarder.selfTest ?? "not built"}`);
+  const selfTest = report.forwarder.selfTest;
+  lines.push(`Forwarder: ${selfTest ? `${selfTest.ok ? "ok" : "FAILED"}: ${selfTest.detail}` : "not built"}`);
   lines.push("");
   lines.push(`Neural rendering ready: ${report.verdict.neuralRenderingReady ? "YES" : "NO"}`);
   for (const r of report.verdict.reasons) lines.push(`  - ${r}`);

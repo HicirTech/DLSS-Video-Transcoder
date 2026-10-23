@@ -495,7 +495,8 @@ export interface ProbeReport {
   capabilities: Record<string, number | string | null>;
   features: ProbeFeature[];
   runtime: { folder: string; files: RuntimeFile[] };
-  forwarder: { path: string | null; generated: boolean; loaded: boolean; selfTest: string | null };
+  /** selfTest is null until the shim was loaded and tested. */
+  forwarder: { path: string | null; generated: boolean; loaded: boolean; selfTest: { ok: boolean; detail: string } | null };
   verdict: { neuralRenderingReady: boolean; reasons: string[] };
   log: string[];
 }

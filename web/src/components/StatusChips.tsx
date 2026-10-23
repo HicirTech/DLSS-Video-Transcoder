@@ -1,5 +1,5 @@
 import { Chip, type ChipProps } from "@mui/material";
-import type { JobState } from "../../../src/server/api-types";
+import type { JobState, SupportLevel } from "../../../src/server/api-types";
 
 export type ChipColor = NonNullable<ChipProps["color"]>;
 
@@ -15,18 +15,17 @@ export function StateChip({ state }: { state: JobState }) {
   return <Chip label={state} color={STATE_COLORS[state]} variant={state === "queued" ? "outlined" : "filled"} />;
 }
 
-/** Maps a free-form NGX support verdict to a colour: green when usable, red for hard blockers, amber otherwise. */
-export function supportColor(support: string): ChipColor {
-  const text = support.trim().toLowerCase();
-  if (/^(supported|available|ok|ready)\b/.test(text) || text === "yes") return "success";
-  if (/unsupported|not supported|not implemented|not available|missing|fail|error|denied/.test(text)) return "error";
-  if (/too old|old|update|outdated|needs|unknown|partial|pending/.test(text)) return "warning";
-  return "default";
-}
+const SUPPORT_COLORS: Record<SupportLevel, ChipColor> = {
+  supported: "success",
+  outdated: "warning",
+  blocked: "error",
+  unknown: "default",
+};
 
-export function SupportChip({ support }: { support: string }) {
-  const color = supportColor(support);
-  return <Chip label={support} color={color} variant={color === "default" ? "outlined" : "filled"} />;
+/** A verdict in words, coloured by the level the server judged it at: green usable, amber fixable, red blocked. */
+export function SupportChip({ label, level }: { label: string; level: SupportLevel }) {
+  const color = SUPPORT_COLORS[level];
+  return <Chip label={label} color={color} variant={color === "default" ? "outlined" : "filled"} />;
 }
 
 export function PresenceChip({ present }: { present: boolean }) {

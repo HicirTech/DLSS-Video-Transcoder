@@ -3,7 +3,8 @@ import { dlopen, FFIType, ptr } from "bun:ffi";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildForwarderDll, FORWARDER_EXPORTS, stackAllocationUnwindCodes, writeForwarder, writeForwarderSync } from "../src/ngx/forwarder.ts";
+import { buildForwarderDll, FORWARDER_EXPORTS, stackAllocationUnwindCodes } from "../src/ngx/forwarder.ts";
+import { writeForwarder, writeForwarderSync } from "../src/ngx/forwarder-install.ts";
 import { loadForwarder, selfTestForwarder, shimPath, type ForwarderModule } from "../src/ngx/forwarder-runtime.ts";
 import { parsePe, type PeInfo } from "../src/native/pe.ts";
 
@@ -174,9 +175,9 @@ test("writeForwarderSync replaces a shim whose bytes differ and leaves an identi
     const stale = built.bytes.slice();
     stale[stale.length - 1] ^= 0xff;
     writeFileSync(path, stale);
-    expect(writeForwarderSync(path).wrote).toBe(true);
+    expect(writeForwarderSync(path).status).toBe("written");
     expect(Buffer.compare(readFileSync(path), built.bytes)).toBe(0);
-    expect(writeForwarderSync(path).wrote).toBe(false);
+    expect(writeForwarderSync(path).status).toBe("unchanged");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -201,13 +202,13 @@ for (const { name, write } of SHIM_WRITERS) {
       writeFileSync(path, loadable);
       loaded = loadForwarder(path);
 
-      expect((await write(path)).wrote).toBe(false);
+      expect((await write(path)).status).toBe("kept-loaded");
       expect(Buffer.compare(readFileSync(path), loadable)).toBe(0);
       expect(readdirSync(dir)).toEqual(["nvngx.dll"]);
 
       loaded.module.free();
       loaded = undefined;
-      expect((await write(path)).wrote).toBe(true);
+      expect((await write(path)).status).toBe("written");
       expect(Buffer.compare(readFileSync(path), built.bytes)).toBe(0);
       expect(readdirSync(dir)).toEqual(["nvngx.dll"]);
     } finally {

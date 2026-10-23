@@ -202,7 +202,7 @@ export const MOCK_PROBE: ProbeReport = {
     path: `${RUNTIME_FOLDER}\\ngx_forwarder.dll`,
     generated: true,
     loaded: true,
-    selfTest: "ok: 5/5 exports resolved, round-trip call returned 0x1 in 0.8 ms",
+    selfTest: { ok: true, detail: "5/5 exports resolved, round-trip call returned 0x1 in 0.8 ms" },
   },
   verdict: {
     neuralRenderingReady: false,
