@@ -57,7 +57,11 @@ export function InputPathField({ kind, value, disabled, onChange }: InputPathFie
         required
         error={Boolean(uploadError)}
         helperText={uploadError ?? help}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => {
+          // A typed path replaces the one the failed upload was to fill in, so its error no longer applies.
+          setUploadError(null);
+          onChange(event.target.value);
+        }}
         slotProps={{ htmlInput: { spellCheck: false } }}
       />
       <Button
