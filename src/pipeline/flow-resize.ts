@@ -32,8 +32,8 @@ export function packFlowResizedR16G16(flow: Float32Array, from: FieldSize, to: F
   const out = new Uint16Array(outW * outH * 2);
   const kx = outW / inW;
   const ky = outH / inH;
-  const sx = inW > 1 && outW > 1 ? (inW - 1) / (outW - 1) : 0;
-  const sy = inH > 1 && outH > 1 ? (inH - 1) / (outH - 1) : 0;
+  const sx = cornerAlignedStep(inW, outW);
+  const sy = cornerAlignedStep(inH, outH);
   // Column positions and weights repeat for every row. The weights stay float64,
   // exactly as resizeFlowBilinear computes them, to keep the results identical.
   const x0s = new Int32Array(outW);
@@ -117,8 +117,8 @@ export function resizeFlowBilinear(flow: Float32Array, from: FieldSize, to: Fiel
     out.set(flow);
     return out;
   }
-  const sx = inW > 1 && outW > 1 ? (inW - 1) / (outW - 1) : 0;
-  const sy = inH > 1 && outH > 1 ? (inH - 1) / (outH - 1) : 0;
+  const sx = cornerAlignedStep(inW, outW);
+  const sy = cornerAlignedStep(inH, outH);
   for (let oy = 0; oy < outH; oy++) {
     const fy = oy * sy;
     const y0 = Math.floor(fy);
