@@ -24,16 +24,11 @@ function buildCrcTables(): Uint32Array {
   return t;
 }
 
-/**
- * CRC-32 (IEEE 802.3, as used by PNG chunks) of `bytes`, as an unsigned 32-bit integer.
- *
- * `seed` is the CRC of the data that logically precedes `bytes`, so a stream can be checksummed in
- * pieces: `crc32(b, crc32(a)) === crc32(concat(a, b))`.
- */
-export function crc32(bytes: Uint8Array, seed = 0): number {
+/** CRC-32 (IEEE 802.3, as used by PNG chunks) of `bytes`, as an unsigned 32-bit integer. */
+export function crc32(bytes: Uint8Array): number {
   const t = CRC_TABLES;
   const n = bytes.length;
-  let c = ~seed;
+  let c = ~0;
   let i = 0;
   const end8 = n - (n & 7);
   for (; i < end8; i += 8) {
