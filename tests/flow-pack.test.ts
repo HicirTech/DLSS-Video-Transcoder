@@ -104,7 +104,7 @@ describe("packFlowResizedR16G16", () => {
     expect(packFlowResizedR16G16(flow, { width: 3, height: 2 }, { width: 3, height: 2 })).toEqual(encodeMotionR16G16(flow));
   });
 
-  test("allFinite", () => {
+  test("allFinite is true for finite samples and false once any sample is NaN or infinite", () => {
     expect(allFinite(new Float32Array([0, 1, -2.5]))).toBe(true);
     expect(allFinite(new Float32Array([0, Number.NaN]))).toBe(false);
     expect(allFinite(new Float32Array([Number.NEGATIVE_INFINITY]))).toBe(false);
@@ -153,12 +153,18 @@ describe("DisMotionEstimator.processPacked", () => {
   });
 
   test("forceReset yields no motion and reset=true on both paths", () => {
-    const a = createMotionEstimator(width, height, { backend: fakeBackend() });
-    a.processPacked(frameA);
-    const forced = a.processPacked(frameB, true);
+    const packedEstimator = createMotionEstimator(width, height, { backend: fakeBackend() });
+    packedEstimator.processPacked(frameA);
+    const forced = packedEstimator.processPacked(frameB, true);
     expect(forced.reset).toBe(true);
     expect(forced.half).toBeNull();
-    a.close();
+    const floatEstimator = createMotionEstimator(width, height, { backend: fakeBackend() });
+    floatEstimator.process(frameA);
+    const forcedFloat = floatEstimator.process(frameB, true);
+    expect(forcedFloat.reset).toBe(true);
+    expect(forcedFloat.motion).toBeNull();
+    packedEstimator.close();
+    floatEstimator.close();
   });
 
   test("non-finite grid samples fall back to the exact counting path", () => {

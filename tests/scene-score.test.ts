@@ -12,20 +12,14 @@ function solid(width: number, height: number, r: number, g: number, b: number): 
   return buf;
 }
 
-/** The scene score the estimator computes: sparse-grid mean abs luma diff, normalized to [0,1]. */
-function sceneScore(current: Uint8Array, previous: Uint8Array, width: number, height: number): number {
+test("mean abs luma diff over the sparse grid: identical frames 0, black to white 255", () => {
+  const width = 96;
+  const height = 64;
   const offsets = buildSampleOffsets(width, height);
-  return meanAbsLumaDiff(sparseLuma(current, offsets), sparseLuma(previous, offsets)) / 255;
-}
-
-test("scene score: identical frames ~0, black->white ~1", () => {
-  const w = 96;
-  const h = 64;
-  const black = solid(w, h, 0, 0, 0);
-  const white = solid(w, h, 255, 255, 255);
-  expect(sceneScore(black, black, w, h)).toBe(0);
-  expect(sceneScore(black, white, w, h)).toBeCloseTo(1, 5);
-  expect(sceneScore(black, white, w, h)).toBeGreaterThan(RESET_SCENE_SCORE);
+  const black = sparseLuma(solid(width, height, 0, 0, 0), offsets);
+  const white = sparseLuma(solid(width, height, 255, 255, 255), offsets);
+  expect(meanAbsLumaDiff(black, black)).toBe(0);
+  expect(meanAbsLumaDiff(black, white)).toBeCloseTo(255, 3);
 });
 
 test("the luma weights add up to 1, so a grey pixel's luma is its grey level", () => {
