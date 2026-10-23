@@ -63,7 +63,7 @@ export function AdaptersTable({ adapters, selected, cuda }: AdaptersTableProps) 
               </TableCell>
               <TableCell>
                 <Stack direction="row" spacing={0.5}>
-                  {adapter.index === selected ? <Chip label="selected" color="primary" /> : null}
+                  {adapter.index === selected ? <Chip label="automatic choice" color="primary" /> : null}
                   {adapter.isNvidia ? <Chip label="NVIDIA" color="success" variant="outlined" /> : null}
                   {adapter.software ? <Chip label="software renderer" color="warning" variant="outlined" /> : null}
                 </Stack>

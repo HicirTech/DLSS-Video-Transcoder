@@ -14,7 +14,7 @@ function statusChip(flow: ProbeOpticalFlow) {
   return <Chip label="not queried" variant="outlined" />;
 }
 
-/** CUDA device count and the hardware optical-flow engine (NVOFA) on the selected adapter's CUDA device. */
+/** CUDA device count and the hardware optical-flow engine (NVOFA) on the automatically chosen adapter's CUDA device. */
 export function OpticalFlowCard({ cuda, opticalFlow }: OpticalFlowCardProps) {
   const limits = opticalFlow.limits;
   const grid = opticalFlow.pipelineGrid;
@@ -24,8 +24,10 @@ export function OpticalFlowCard({ cuda, opticalFlow }: OpticalFlowCardProps) {
   return (
     <Paper variant="outlined" sx={{ p: 1.5 }}>
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-        Jobs run on the selected adapter&apos;s CUDA device: in-process NVENC encodes on it and the hardware optical-flow
-        engine (motion = flow) runs on it. Without the engine, video jobs with motion = flow use the CPU matcher instead.
+        Queried on {AUTO_GPU_CHOICE}, the automatic choice. Super Resolution and Neural Rendering jobs, with their
+        in-process NVENC encode and the hardware optical-flow engine (motion = flow), run on that GPU unless Settings names
+        another; for frame generation, {FRAME_GEN_GPU_CHOICE}. Without the engine, video jobs with motion = flow use the
+        CPU matcher instead.
       </Typography>
       <KeyValueList
         labelWidth={200}
@@ -51,8 +53,8 @@ export function OpticalFlowCard({ cuda, opticalFlow }: OpticalFlowCardProps) {
             ),
           },
           {
-            label: "Output grids",
-            value: opticalFlow.outGridSizes ? <Mono>{opticalFlow.outGridSizes.join(", ")}</Mono> : <Mono dim>unknown</Mono>,
+            label: "Output grid sizes the engine offers",
+            value: opticalFlow.outGridSizes ? <Mono>{opticalFlow.outGridSizes.join(", ")} px per flow vector</Mono> : <Mono dim>unknown</Mono>,
           },
           {
             label: "Grid the pipeline feeds it",
