@@ -1,12 +1,11 @@
 /** The `sr` command: DLSS Super Resolution on a single PNG, the only true upscaler. */
-import { isPng } from "../codec/png/chunks.ts";
 import { decodePng } from "../codec/png/decode.ts";
 import { encodePng } from "../codec/png/encode.ts";
 import type { RgbaImage } from "../codec/png/types.ts";
 import { DlssSrSession } from "../ngx/sr.ts";
 import { DEFAULT_SR_PRESET, DlssRenderPreset, perfQualityName, qualityForSizes } from "../ngx/results.ts";
 import { describeGpu, openGpu } from "../pipeline/gpu.ts";
-import { enhanceStill, runStillPasses } from "../pipeline/image.ts";
+import { enhanceStill, requirePng, runStillPasses } from "../pipeline/image.ts";
 import { defaultOutputPath } from "../pipeline/output-path.ts";
 import { DEFAULT_SCALE_SETTINGS } from "../server/api-types.ts";
 import { resolveTargetSize, srOutputProblem } from "../server/output-size.ts";
@@ -20,10 +19,7 @@ export async function srCommand(args: string[]): Promise<void> {
   const input = positional[0];
   if (!input) usageError("missing <input.png>", "sr");
   const bytes = new Uint8Array(await Bun.file(input).arrayBuffer());
-  if (!isPng(bytes)) {
-    console.error(`${input}: only PNG input is supported by the sr command`);
-    process.exit(1);
-  }
+  requirePng(input, bytes, "the sr command");
   const image = decodePng(bytes);
   const factor = numberOption(args, "--factor", SR_FACTOR_OPTION);
   const warmupFrames = numberOption(args, "--warmup", WARMUP_OPTION);

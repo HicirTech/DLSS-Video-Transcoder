@@ -1,11 +1,10 @@
 /** The `nr` command: DLSS Neural Rendering on a single PNG, at the same size. */
-import { isPng } from "../codec/png/chunks.ts";
 import { decodePng } from "../codec/png/decode.ts";
 import { encodePng } from "../codec/png/encode.ts";
 import type { RgbaImage } from "../codec/png/types.ts";
 import { DlssNrSession } from "../ngx/nr-render.ts";
 import { describeGpu, openGpu } from "../pipeline/gpu.ts";
-import { enhanceStill, runStillPasses } from "../pipeline/image.ts";
+import { enhanceStill, requirePng, runStillPasses } from "../pipeline/image.ts";
 import { defaultOutputPath } from "../pipeline/output-path.ts";
 import { adapterOption, numberOption, positionalArgs, runtimeDirOption } from "./args.ts";
 import { commandSpec, WARMUP_OPTION } from "./commands.ts";
@@ -17,10 +16,7 @@ export async function nrCommand(args: string[]): Promise<void> {
   const input = positional[0];
   if (!input) usageError("missing <input.png>", "nr");
   const bytes = new Uint8Array(await Bun.file(input).arrayBuffer());
-  if (!isPng(bytes)) {
-    console.error(`${input}: only PNG input is supported by the nr command`);
-    process.exit(1);
-  }
+  requirePng(input, bytes, "the nr command");
   const image = decodePng(bytes);
   const output = positional[1] ?? defaultOutputPath(input, "nr", ".png");
   const settings = nrSettingsOption(args);
