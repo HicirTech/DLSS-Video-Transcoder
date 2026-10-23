@@ -240,14 +240,14 @@ async function runGpuResidentNr(
 }
 
 function openEngineChain({ options, session, renderWidth, renderHeight, target }: VideoJob): Engine {
-  const sr = options.superResolution;
-  const nr = options.neuralRendering;
   try {
     return createEngineChain(session, {
       width: renderWidth,
       height: renderHeight,
-      sr: sr ? { outputWidth: target.width, outputHeight: target.height, dllDir: sr.dllDir } : undefined,
-      nr: nr ? { settings: nr.settings, dllDir: nr.dllDir } : undefined,
+      outputWidth: target.width,
+      outputHeight: target.height,
+      superResolution: options.superResolution,
+      neuralRendering: options.neuralRendering,
       runtimeDir: options.runtimeDir,
       appDataPath: options.appDataPath,
     });
