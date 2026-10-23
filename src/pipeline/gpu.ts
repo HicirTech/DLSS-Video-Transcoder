@@ -161,10 +161,20 @@ export function describeGpu(session: GpuSession): string {
 
 export function openGpu(options: GpuOptions = {}): GpuSession {
   const factory = DxgiFactory.create();
-  const adapters = factory.enumerate();
-  // Resolved once here rather than at every CUDA call: cuInit plus a LUID read
-  // per device, and the answer cannot change while the session is open.
-  const { candidates, cuda } = gpuCandidates(adapters);
+  let adapters: DxgiAdapter[] = [];
+  let candidates: GpuCandidate[];
+  let cuda: CudaDeviceMap;
+  try {
+    // enumerate releases its own partial list when it throws, so only what it returned is released here.
+    adapters = factory.enumerate();
+    // Resolved once here rather than at every CUDA call: cuInit plus a LUID read
+    // per device, and the answer cannot change while the session is open.
+    ({ candidates, cuda } = gpuCandidates(adapters));
+  } catch (error) {
+    for (const a of adapters) a.release();
+    factory.release();
+    throw error;
+  }
   // Every refusal below releases what was enumerated; nothing else is open yet.
   const refused = (message: string): Error => {
     for (const a of adapters) a.release();
