@@ -14,6 +14,7 @@ import {
   type JobRequest,
   jobSteps,
   type NeuralRenderingStep,
+  resizesFrames,
   type ScaleSettings,
   type StepKind,
   stepsSuffix,
@@ -330,7 +331,7 @@ async function planFrameGen(options: SettledFrameGenOptions): Promise<FrameGenJo
   const decodeWidth = sr ? info.width : width;
   const decodeHeight = sr ? info.height : height;
   const steps: StepKind[] = [...jobSteps({ superResolution: sr, neuralRendering: options.neuralRendering }), "fg"];
-  const resized = !sr && options.resize !== undefined && options.resize.mode !== "none";
+  const resized = resizesFrames(options);
   const frameBytes = width * height * 4;
   if (info.frames === null || info.frames <= 0)
     throw new Error("Could not determine the source frame count, which frame generation needs for its progress estimate. Re-mux the file (e.g. `ffmpeg -i in -c copy out.mp4`) so ffprobe can read it.");
