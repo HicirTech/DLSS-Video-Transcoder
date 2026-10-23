@@ -161,13 +161,19 @@ export class Stage {
 
   /** Bounded by ABORT_TIMEOUT_MS as a whole, the budget every pipeline's teardown fits (worker-abort.ts). */
   async close(): Promise<void> {
-    // The guide thread owns an NVOFA session on the process-wide CUDA primary
-    // context, so terminating the thread does not release it. Ask it to close,
-    // then terminate whatever is left. The packer thread holds no such session.
-    await releaseGuideThread(this.guide);
-    if (this.packer) try { this.packer.terminate(); } catch {}
-    await this.session.close(ABORT_TIMEOUT_MS - GUIDE_CLOSE_TIMEOUT_MS);
+    await releaseStageParts({ session: this.session, guide: this.guide, packer: this.packer });
   }
+}
+
+/**
+ * Releases what a stage holds, or what came up of one whose open failed partway, within ABORT_TIMEOUT_MS as a whole.
+ * The guide thread owns an NVOFA session on the process-wide CUDA primary context, so terminating the thread does not
+ * release it: the thread is asked to close first. The packer thread holds no such session.
+ */
+export async function releaseStageParts({ session, guide, packer }: { session: DlssgSession | null; guide: Worker | null; packer: Worker | null }): Promise<void> {
+  if (guide) await releaseGuideThread(guide);
+  if (packer) try { packer.terminate(); } catch {}
+  if (session) await session.close(ABORT_TIMEOUT_MS - GUIDE_CLOSE_TIMEOUT_MS);
 }
 
 /**
