@@ -186,9 +186,13 @@ describe("dlssg-host serve loop", () => {
     const host = startHost({ args: ["--disabled-at", "2"] });
     await host.setup();
     const replies = [];
-    for (const frameId of [0, 1, 2, 3]) replies.push(await host.frame({ frameId, reset: frameId === 0 }));
+    for (const frameId of [0, 1, 2]) replies.push(await host.frame({ frameId, reset: frameId === 0 }));
+    // The disabled interval left the output slots as frame 1 wrote them: no payload went out.
+    for (const [position, slot] of LAYOUT.generated.entries()) {
+      expect(viewRange(host.memory!.bytes, slot).every((value) => value === generatedByte(1, position + 1))).toBe(true);
+    }
+    replies.push(await host.frame({ frameId: 3, reset: false }));
     expect(replies.map((reply) => reply?.result.outcome)).toEqual(["empty", "generated", "disabled", "generated"]);
-    expect(replies[2]!.frames).toHaveLength(0);
     expectGenerated(replies[3], 3);
     const end = await host.finish();
     expect(end.strayStdoutBytes).toBe(0);
@@ -201,6 +205,7 @@ describe("dlssg-host serve loop", () => {
     const replies = [];
     for (const frameId of [0, 1, 2]) replies.push(await host.frame({ frameId, reset: frameId === 0 }));
     expect(replies.map((reply) => reply?.result.outcome)).toEqual(["empty", "generated", "generated"]);
+    expectGenerated(replies[2], 2);
     const end = await host.finish();
     expect(end.stderr).toContain("fake generator closed");
     expect(end.exitCode).toBe(0);
