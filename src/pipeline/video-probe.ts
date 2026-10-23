@@ -54,7 +54,8 @@ function probeArgv(ffprobe: string, input: string): string[] {
 
 /** What ffprobe's run says about the file: its VideoInfo, or an error carrying ffprobe's own message. */
 function probedInfo(run: { exitCode: number | null; stdout: string; stderr: string }, input: string): VideoInfo {
-  if (run.exitCode !== 0) throw new Error(`ffprobe could not read this file as video: ${run.stderr.trim()}`);
+  const detail = run.stderr.trim();
+  if (run.exitCode !== 0) throw new Error(`ffprobe could not read this file as video${detail ? ` (${detail})` : ""}. Check that the file opens in a player, or choose a different video file.`);
   return videoInfoFrom(JSON.parse(run.stdout) as ProbeJson, input);
 }
 
@@ -186,7 +187,7 @@ function displayAspectOf(text: string | undefined, width: number, height: number
 /** ffprobe's JSON as a VideoInfo. Separate from the spawn so it can be tested against odd streams. */
 export function videoInfoFrom(data: ProbeJson, input: string): VideoInfo {
   const video = data.streams?.find((s) => s.codec_type === "video");
-  if (!video || !video.width || !video.height) throw new Error(`${input}: no video stream found in this file.`);
+  if (!video || !video.width || !video.height) throw new Error(`${input}: no video stream found in this file. Choose a file that contains video (for example .mp4, .mkv or .mov).`);
   const measured = tryParseRate(video.avg_frame_rate) ?? tryParseRate(video.r_frame_rate);
   const fps = measured ? ratToNumber(measured) : FALLBACK_FPS;
   const duration = data.format?.duration ? Number(data.format.duration) : null;
