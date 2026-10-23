@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { FrameReader } from "../src/pipeline/frame-reader.ts";
-import { NearestTimestampWriter } from "../src/pipeline/framegen-plan.ts";
+import { NearestTimestampWriter } from "../src/pipeline/nearest-timestamp-writer.ts";
 import { type RunParams, runOverlapped, runSequential } from "../src/pipeline/framegen-run.ts";
 import type { AnalyzedFrame, PreparedFrame, Stage } from "../src/pipeline/framegen-stage.ts";
 import { rational } from "../src/pipeline/rational.ts";

@@ -7,8 +7,8 @@
  */
 import { raceAbort, throwIfAborted } from "./cancel.ts";
 import type { FrameSource } from "./frame-reader.ts";
-import type { NearestTimestampWriter, TimedFrame } from "./framegen-plan.ts";
 import type { AnalyzedFrame, PreparedFrame, Stage } from "./framegen-stage.ts";
+import type { NearestTimestampWriter, TimedFrame } from "./nearest-timestamp-writer.ts";
 import { type Rational, ratDiv, rational } from "./rational.ts";
 /** What a runner reports back. `peak` is the credit ledger's high-water mark in frame slots, or null from a runner that keeps no ledger. */
 export interface RunResult {

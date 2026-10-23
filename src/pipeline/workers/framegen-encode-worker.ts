@@ -11,7 +11,7 @@
  * order holds because every request is appended to a single promise chain.
  */
 import { ffmpegFailedMessage } from "../ffmpeg-failure.ts";
-import { FRAMEGEN_CUDA_DEVICE } from "../framegen-plan.ts";
+import { FRAMEGEN_CUDA_DEVICE } from "../framegen-device.ts";
 import { NvencEncoder, probeNvencCaps, type NvencSdkCodec } from "../nvenc.ts";
 import { type AbortedReply, type AbortRequest, answerAbort } from "../worker-abort.ts";
 

@@ -53,15 +53,15 @@ import { removePartialOutput } from "./partial-output.ts";
 import { ProcessedFrames } from "./processed-frames.ts";
 import { Stage, openGuideWorker, releaseStageParts } from "./framegen-stage.ts";
 import { verifyOutputVideo } from "./framegen-verify.ts";
+import { FRAMEGEN_CUDA_DEVICE } from "./framegen-device.ts";
 import {
-  FRAMEGEN_CUDA_DEVICE,
   type InterpolationPlan,
-  NearestTimestampWriter,
   chooseInterpolationPlan,
   formatRate,
   isNativeMultiFramePlan,
   resolveTargetRate,
 } from "./framegen-plan.ts";
+import { NearestTimestampWriter } from "./nearest-timestamp-writer.ts";
 import { type Rational, parseRational, ratDiv, ratMul, ratToNumber, rational } from "./rational.ts";
 import { requireFfmpegTools } from "./tools.ts";
 import { type VideoInfo, probeVideo } from "./video-probe.ts";
@@ -413,7 +413,7 @@ async function openEncodePipeline({ options, progress, ffmpeg, info, decodeWidth
   // Only re-open the source as a second input when its audio is carried;
   // otherwise ffmpeg needlessly demuxes/decodes the whole source again.
   const wantAudio = info.hasAudio && (options.copyAudio ?? DEFAULT_ENCODE_SETTINGS.copyAudio);
-  // Probed on the device the encode will use, FRAMEGEN_CUDA_DEVICE (framegen-plan.ts says why).
+  // Probed on the device the encode will use, FRAMEGEN_CUDA_DEVICE (framegen-device.ts says why).
   const resolvedCodec = resolveEncodeCodec(options.codec ?? DEFAULT_ENCODE_SETTINGS.codec, ffmpeg, FRAMEGEN_CUDA_DEVICE, { width, height });
   if (resolvedCodec.note) progress(0, resolvedCodec.note);
 

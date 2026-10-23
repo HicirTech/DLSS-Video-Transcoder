@@ -18,7 +18,7 @@ import { DlssgSession } from "../src/pipeline/dlssg.ts";
 import { HOST_PROCESS_NAME } from "../src/pipeline/dlssg-host-launch.ts";
 import { createMotionEstimator } from "../src/pipeline/flow.ts";
 import { FrameReader } from "../src/pipeline/frame-reader.ts";
-import { FRAMEGEN_CUDA_DEVICE } from "../src/pipeline/framegen-plan.ts";
+import { FRAMEGEN_CUDA_DEVICE } from "../src/pipeline/framegen-device.ts";
 import { tryCreateNvofBackend } from "../src/pipeline/nvof.ts";
 import { findTool } from "../src/pipeline/tools.ts";
 import { probeVideo } from "../src/pipeline/video-probe.ts";
