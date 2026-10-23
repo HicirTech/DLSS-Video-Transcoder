@@ -78,7 +78,7 @@ export function formatSize(size: FrameSize): string {
 }
 
 /** A scale setting in words, for while the source's size is unknown: "1.5× the source", "3840×2160", "the source size". */
-export function scaleText(scale: ScaleSettings): string {
+function scaleText(scale: ScaleSettings): string {
   switch (scale.mode) {
     case "factor":
       return `${scale.factor}× the source`;

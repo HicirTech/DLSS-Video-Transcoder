@@ -56,7 +56,7 @@ function isJobStatus(value: unknown): value is JobStatus {
 }
 
 /** Validates a raw WebSocket frame; unknown or malformed messages yield null. */
-export function parseWsEvent(raw: unknown): WsEvent | null {
+function parseWsEvent(raw: unknown): WsEvent | null {
   if (typeof raw !== "string") return null;
   let data: unknown;
   try {
