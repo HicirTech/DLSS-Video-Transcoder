@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import type { FlowBackend } from "../src/pipeline/flow-backend.ts";
 import { createMotionEstimator } from "../src/pipeline/flow.ts";
 import { flowGridSize, smallGray } from "../src/pipeline/flow-grid.ts";
 import { resizeFlowBilinear } from "../src/pipeline/flow-resize.ts";
@@ -114,6 +115,28 @@ test("estimator resets with null motion across a scene cut", () => {
   expect(cut.reset).toBe(true);
   expect(cut.motion).toBeNull();
   expect(cut.sceneScore).toBeGreaterThan(RESET_SCENE_SCORE);
+  est.close();
+});
+
+test("a backend is told when a calc starts a sequence: first, after a cut or forced reset, not after a duplicate", () => {
+  const starts: boolean[] = [];
+  const spy: FlowBackend = {
+    calc: (_current, _previous, w, h, sequenceStart) => {
+      starts.push(sequenceStart);
+      return new Float32Array(w * h * 2);
+    },
+  };
+  const est = createMotionEstimator(96, 64, { backend: spy });
+  est.process(textured(96, 64, 0)); // first frame: no calc
+  est.process(textured(96, 64, 2)); // calc 1, the first of the stream
+  est.process(textured(96, 64, 4)); // calc 2, consecutive
+  est.process(textured(96, 64, 4)); // duplicate: no calc, the sequence goes on
+  est.process(textured(96, 64, 6)); // calc 3
+  est.process(textured(96, 64, 8), true); // forced reset: no calc
+  est.process(textured(96, 64, 10)); // calc 4, after the reset
+  est.process(solid(96, 64, 0, 0, 0)); // scene cut: no calc
+  est.process(solid(96, 64, 4, 4, 4)); // calc 5, after the cut
+  expect(starts).toEqual([true, false, false, true, true]);
   est.close();
 });
 
