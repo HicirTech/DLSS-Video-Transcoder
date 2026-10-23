@@ -17,7 +17,7 @@ import { throwIfAborted } from "./cancel.ts";
 import type { Engine } from "./engine.ts";
 import { connectFrameFlow, type FrameCounts } from "./frame-flow.ts";
 import type { ProgressReporter } from "./frame-progress.ts";
-import { WorkerPairRun } from "./worker-pair-run.ts";
+import { WorkerPairRun, startWorkerPair } from "./worker-pair-run.ts";
 import type { EncodeFrame, EncodeOpen } from "./workers/encode-worker.ts";
 
 /** Max frames in flight across the whole pipeline: the decode worker's initial credit. */
@@ -49,16 +49,11 @@ export interface ThreadedEncodeParams {
 export function runThreadedEncode(p: ThreadedEncodeParams): Promise<FrameCounts> {
   throwIfAborted(p.signal);
   const progress = p.onProgress ?? (() => {});
-  const createWorker = p.createWorker ?? ((script: URL) => new Worker(script.href));
   return new Promise((resolve, reject) => {
-    const decodeW = createWorker(new URL("./workers/decode-worker.ts", import.meta.url));
-    let encodeW: Worker;
-    try {
-      encodeW = createWorker(new URL("./workers/encode-worker.ts", import.meta.url));
-    } catch (error) {
-      decodeW.terminate(); // both workers or neither
-      throw error;
-    }
+    const { decodeWorker: decodeW, encodeWorker: encodeW } = startWorkerPair(
+      { decode: new URL("./workers/decode-worker.ts", import.meta.url), encode: new URL("./workers/encode-worker.ts", import.meta.url) },
+      p.createWorker,
+    );
 
     // The engine belongs to the caller; the workers are all this run owns.
     const run = new WorkerPairRun<FrameCounts>({
