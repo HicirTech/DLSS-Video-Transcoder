@@ -4,12 +4,13 @@
  */
 import { describe, expect, test } from "bun:test";
 import { DlssRenderPreset, DEFAULT_SR_PRESET } from "../src/ngx/results.ts";
-import { dlssVersionOption } from "../src/cli/dlss-version-option.ts";
+import { dlssVersionOption, matchVersion } from "../src/cli/dlss-version-option.ts";
 import { fgCommand, targetFpsOption } from "../src/cli/fg-command.ts";
 import { nrCommand } from "../src/cli/nr-command.ts";
 import { presetKeyOption, srCommand } from "../src/cli/sr-command.ts";
 import { UsageError } from "../src/cli/usage-error.ts";
 import { videoRequest } from "../src/cli/video-command.ts";
+import type { VersionEntry } from "../src/ngx/runtime-catalog.ts";
 import { DEFAULT_RUNTIME_DIR } from "../src/paths.ts";
 import { FG_MULTIPLIER_OPTION } from "../src/cli/commands.ts";
 import { DEFAULT_ENCODE_SETTINGS, DEFAULT_NR_SETTINGS, DEFAULT_SCALE_SETTINGS, DEFAULT_SR_STEP, jobSteps } from "../src/server/api-types.ts";
@@ -200,5 +201,17 @@ describe("fg", () => {
     const unreadable = await usageErrorOf(() => targetFpsOption(["--fps", "x"]));
     expect(unreadable.message).toContain("Choose one of: 23.976, 25");
     expect(unreadable.message).toContain("or give an exact rate such as 60000/1001");
+  });
+});
+
+describe("version options", () => {
+  test("a version names whole components: the exact version first, else the newest it leads", () => {
+    const entry = (version: string): VersionEntry => ({ version, path: "", sizeMB: 0, dir: version, source: "installed", sortKey: "" });
+    const newestFirst = [entry("3.1.13.0"), entry("3.1.1.0")];
+    expect(matchVersion(newestFirst, "3.1.1")?.version).toBe("3.1.1.0");
+    expect(matchVersion(newestFirst, "3.1")?.version).toBe("3.1.13.0");
+    expect(matchVersion(newestFirst, "3.1.1.0")?.version).toBe("3.1.1.0");
+    expect(matchVersion([entry("3.1.1.10"), entry("3.1.1.1")], "3.1.1.1")?.version).toBe("3.1.1.1");
+    expect(matchVersion(newestFirst, "3.1.2")).toBeUndefined();
   });
 });
