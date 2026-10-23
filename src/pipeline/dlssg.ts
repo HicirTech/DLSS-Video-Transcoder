@@ -130,6 +130,12 @@ function isBrokenPipe(error: unknown): boolean {
   return (error as { code?: string }).code === "EPIPE";
 }
 
+/** Kill `proc` (it may already have exited) and wait for it to exit. */
+async function stopProcess(proc: Subprocess): Promise<void> {
+  try { proc.kill(); } catch { /* exited in the meantime */ }
+  await proc.exited.catch(() => 0);
+}
+
 /** A running host process and the end of what it wrote to stderr. */
 interface HostChild {
   host: DlssgHost;
@@ -206,8 +212,7 @@ export async function probeDlssgHost(host: DlssgHost, timeoutMs = PROBE_TIMEOUT_
   const stderr = new StderrTail(proc.stderr);
   const stdout = new Response(proc.stdout).text();
   if (!(await settlesWithin(proc.exited, timeoutMs))) {
-    try { proc.kill(); } catch { /* exited in the meantime */ }
-    await proc.exited.catch(() => 0);
+    await stopProcess(proc);
     return unansweredProbe(`${HOST_PROCESS_NAME} did not finish --probe within ${timeoutMs / 1000} s and was stopped. ${host.hint}`);
   }
   const text = await stdout;
@@ -409,8 +414,7 @@ export class DlssgSession {
       }
       return new DlssgSession(child, reader, frames, maximum);
     } catch (error) {
-      try { proc.kill(); } catch { /* already gone */ }
-      await proc.exited.catch(() => 0);
+      await stopProcess(proc);
       throw error;
     }
   }
@@ -457,18 +461,13 @@ export class DlssgSession {
   async close(timeoutMs: number): Promise<void> {
     const { proc } = this.child;
     try {
-      (proc.stdin as { end(): unknown }).end();
+      proc.stdin.end();
     } catch {
       // the pipe is already closed
     }
     try {
       if (await settlesWithin(proc.exited, timeoutMs)) return;
-      try {
-        proc.kill();
-      } catch {
-        // exited in the meantime
-      }
-      await proc.exited.catch(() => 0);
+      await stopProcess(proc);
     } finally {
       // After the host has stopped, so that this frees the mapping: it lives while any process maps it.
       this.frames.close();
