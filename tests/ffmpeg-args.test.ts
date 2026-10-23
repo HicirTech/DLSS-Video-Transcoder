@@ -53,12 +53,12 @@ describe("audioArgs and faststartArgs", () => {
 
 describe("aspectArgs", () => {
   test("a square-pixel source adds nothing", () => {
-    expect(aspectArgs(null, 1920, 1080, "h264")).toEqual([]);
+    expect(aspectArgs(null, { width: 1920, height: 1080 }, "h264")).toEqual([]);
   });
 
   test("a stream copy needs the container tag and the bitstream's sample aspect, and a re-encode only the tag", () => {
-    expect(aspectArgs(rational(4, 3), 720, 480, "h264")).toEqual(["-aspect", "4:3", "-bsf:v", "h264_metadata=sample_aspect_ratio=8/9"]);
-    expect(aspectArgs(rational(4, 3), 720, 480, null)).toEqual(["-aspect", "4:3"]);
+    expect(aspectArgs(rational(4, 3), { width: 720, height: 480 }, "h264")).toEqual(["-aspect", "4:3", "-bsf:v", "h264_metadata=sample_aspect_ratio=8/9"]);
+    expect(aspectArgs(rational(4, 3), { width: 720, height: 480 })).toEqual(["-aspect", "4:3"]);
   });
 });
 
