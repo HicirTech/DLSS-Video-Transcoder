@@ -20,7 +20,7 @@ import {
   stepsSuffix,
   type SuperResolutionStep,
 } from "../server/api-types.ts";
-import { evenSize, resolveTargetSize, srOutputProblem } from "../server/output-size.ts";
+import { srOutputProblem, videoTargetSize } from "../server/output-size.ts";
 import { throwIfAborted } from "./cancel.ts";
 import { dlssgRuntimeKey, type DlssgRuntime } from "./dlssg-host-launch.ts";
 import { DlssgSession, probeDlssg } from "./dlssg.ts";
@@ -318,12 +318,8 @@ async function planFrameGen(options: SettledFrameGenOptions): Promise<FrameGenJo
 
   const info = probeVideo(ffprobe, options.input, ffmpeg);
   const sr = options.superResolution;
-  // Every encoder here writes 4:2:0, which cannot represent an odd dimension,
-  // so frame generation runs at even sizes and the decoder or Super Resolution
-  // scales to match -- the same rule video.ts and image.ts apply to their targets.
-  const target = resolveTargetSize(info.width, info.height, sr?.scale ?? options.resize ?? DEFAULT_SCALE_SETTINGS);
-  const width = evenSize(target.width);
-  const height = evenSize(target.height);
+  // Frame generation runs at the even size every video job writes; the decoder or Super Resolution scales to match.
+  const { width, height } = videoTargetSize(info, sr?.scale ?? options.resize ?? DEFAULT_SCALE_SETTINGS);
   // SR's limits need the source size, so they are checked here, before any GPU work starts.
   const srProblem = sr ? srOutputProblem(info, { width, height }) : null;
   if (srProblem) throw new Error(srProblem);

@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { PerfQuality, qualityForSizes } from "../src/ngx/results.ts";
 import { DEFAULT_SCALE_SETTINGS, DLSS_SR_MAX_OUTPUT_SIDE } from "../src/server/api-types.ts";
-import { resolveTargetSize, srOutputProblem } from "../src/server/output-size.ts";
+import { resolveTargetSize, srOutputProblem, videoTargetSize } from "../src/server/output-size.ts";
 
 function srOutput(width: number, height: number, factor: number) {
   const output = resolveTargetSize(width, height, { ...DEFAULT_SCALE_SETTINGS, mode: "factor", factor });
@@ -26,6 +26,18 @@ describe("the shared SR size rule", () => {
 
   test("factor 1 runs DLAA, an odd side rounded up to even as for every job", () => {
     expect(srOutput(800, 1169, 1)).toEqual({ width: 800, height: 1170, quality: PerfQuality.DLAA });
+  });
+});
+
+describe("videoTargetSize", () => {
+  test("a video keeps an odd source's size only rounded to even, since 4:2:0 has no odd side", () => {
+    expect(videoTargetSize({ width: 801, height: 1169 }, DEFAULT_SCALE_SETTINGS)).toEqual({ width: 802, height: 1170 });
+  });
+
+  test("a factor or size gives what resolveTargetSize gives, which is already even", () => {
+    for (const scale of [{ ...DEFAULT_SCALE_SETTINGS, mode: "factor" as const, factor: 1.5 }, { ...DEFAULT_SCALE_SETTINGS, mode: "size" as const, width: 1279, height: 719 }]) {
+      expect(videoTargetSize({ width: 801, height: 1169 }, scale)).toEqual(resolveTargetSize(801, 1169, scale));
+    }
   });
 });
 

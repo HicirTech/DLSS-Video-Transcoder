@@ -8,8 +8,8 @@
  */
 import { existsSync } from "node:fs";
 import type { EncodeSettings, JobRequest, NeuralRenderingStep, ScaleSettings, StepKind, SuperResolutionStep } from "../server/api-types.ts";
-import { DEFAULT_ENCODE_SETTINGS, DEFAULT_SCALE_SETTINGS, jobSteps, stepsSuffix } from "../server/api-types.ts";
-import { evenSize, nvencLimitExceeded, resolveTargetSize, srOutputProblem } from "../server/output-size.ts";
+import { DEFAULT_ENCODE_SETTINGS, DEFAULT_SCALE_SETTINGS, jobSteps, resizesFrames, stepsSuffix } from "../server/api-types.ts";
+import { srOutputProblem, videoTargetSize } from "../server/output-size.ts";
 import { throwIfAborted, throwIfAbortedAfterYield } from "./cancel.ts";
 import { createEngineChain, type Engine } from "./engine.ts";
 import { nvencNativeTarget, resolveEncodeCodec } from "./encode-select.ts";
@@ -136,17 +136,13 @@ async function prepareVideoJob(options: VideoJobOptions): Promise<VideoJob> {
   const requestedEncode = options.encode ?? DEFAULT_ENCODE_SETTINGS;
   const info = probeVideo(ffprobe, options.input, ffmpeg);
   const sr = options.superResolution;
-  // Every codec here encodes 4:2:0 (yuv420p / NVENC NV12), which requires even
-  // width and height. resolveTargetSize leaves scale 'none' (the default) at the
-  // raw source size, so an odd-sized source would only fail at encode time.
-  const rawTarget = resolveTargetSize(info.width, info.height, sr?.scale ?? options.resize ?? DEFAULT_SCALE_SETTINGS);
-  const target = { width: evenSize(rawTarget.width), height: evenSize(rawTarget.height) };
+  // Even on both sides even for scale none (the default), so an odd-sized source does not fail at encode time.
+  const target = videoTargetSize(info, sr?.scale ?? options.resize ?? DEFAULT_SCALE_SETTINGS);
   // SR's limits need the source size, so they are checked here, before the GPU opens and the job says it is upscaling.
   const srProblem = sr ? srOutputProblem(info, target) : null;
   if (srProblem) throw new Error(srProblem);
   const steps = jobSteps({ superResolution: sr, neuralRendering: options.neuralRendering });
-  const resized = !sr && options.resize !== undefined && options.resize.mode !== "none";
-  const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resized), `.${requestedEncode.container}`);
+  const output = options.output ?? defaultOutputPath(options.input, stepsSuffix(steps, resizesFrames(options)), `.${requestedEncode.container}`);
   const inputProblem = inputAsOutputProblem(options.input, output);
   if (inputProblem) throw new Error(inputProblem);
   // Whether the destination is ours to delete after an abnormal end: see partial-output.ts.
