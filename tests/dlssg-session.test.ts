@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { SharedMemory } from "../src/native/shared-memory.ts";
+import { JobCancelledError } from "../src/pipeline/cancel.ts";
 import { DlssgSession, probeDlssgHost, type DlssgOptions } from "../src/pipeline/dlssg.ts";
 import { HOST_PROCESS_NAME, dlssgHost, dlssgRuntimeKey, type DlssgHost } from "../src/pipeline/dlssg-host-launch.ts";
 import { motionFieldBytes, rgbaFrameBytes } from "../src/pipeline/dlssg-protocol.ts";
@@ -67,6 +68,9 @@ function isReleased(name: string): boolean {
  * generated frame more than the session has room for, and exits shortly after.
  */
 const READY_THEN_TOO_MANY_FRAMES = `const input = Bun.stdin.stream().getReader(); await input.read(); process.stdout.write(new Uint8Array(new Uint32Array([0x31524746, 0, 5, 0]).buffer)); await input.read(); process.stdout.write(new Uint8Array(new Uint32Array([0x324f4746, 0, ${GENERATED_COUNT + 1}, 0]).buffer)); setTimeout(() => process.exit(0), 300);`;
+
+/** A host that never answers anything, as one wedged in D3D12 or NGX bring-up would. */
+const SILENT_HOST = "setInterval(() => {}, 1000)";
 
 /** A bun child that writes `lastWords` to stderr, then segfaults, so Bun prints its crash report (exit code 3). */
 function crashingCommand(lastWords: string): string[] {
@@ -140,6 +144,14 @@ describe("DlssgSession against a host process", () => {
 
   test("a maximum below the request is refused here with the lower-multiplier message", async () => {
     expect(await failure(openSession(servingHost(["--maximum", "2"])))).toMatch(/can generate at most 2 in-between frame\(s\) per source frame; 3 was requested\. Use a lower multiplier\./);
+  }, TEST_TIMEOUT_MS);
+
+  test("a cancel while the host has not answered the setup stops the host and releases the shared memory", async () => {
+    const controller = new AbortController();
+    const opening = openSession(fakeHost([process.execPath, "-e", SILENT_HOST]), { signal: controller.signal });
+    setTimeout(() => controller.abort(), 200);
+    await expect(opening).rejects.toBeInstanceOf(JobCancelledError);
+    expect(isReleased(startedMappings.at(-1)!)).toBe(true);
   }, TEST_TIMEOUT_MS);
 
   test("status 2 becomes the lower-multiplier message, quoting what the host said", async () => {

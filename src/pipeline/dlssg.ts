@@ -11,6 +11,7 @@
  */
 import type { Subprocess } from "bun";
 import { SharedMemory } from "../native/shared-memory.ts";
+import { raceAbort } from "./cancel.ts";
 import { HOST_PROCESS_NAME, dlssgHost, dlssgRuntimeKey, type DlssgHost, type DlssgRuntime } from "./dlssg-host-launch.ts";
 import {
   FRAME_RESULT_BYTES,
@@ -224,6 +225,8 @@ export interface DlssgOptions {
   generatedCount: number;
   /** Return generated frames in SharedArrayBuffers (for hand-off to Worker threads without copying). */
   sharedFrames?: boolean;
+  /** Cancels the wait for the host's setup reply; the host is then stopped. */
+  signal?: AbortSignal;
 }
 
 /** The way out when a session asks for more in-between frames than the runtime makes, whichever side notices. */
@@ -372,7 +375,7 @@ export class DlssgSession {
         throw await setupStoppedError(child);
       }
 
-      const replyBytes = await reader.next(SETUP_REPLY_BYTES);
+      const replyBytes = await raceAbort(opts.signal, reader.next(SETUP_REPLY_BYTES));
       if (!replyBytes) throw await setupStoppedError(child);
       const reply = decodeSetupReply(replyBytes);
       if (reply.outcome === "refused") throw await setupRefusal(child, reply.status, opts.generatedCount);

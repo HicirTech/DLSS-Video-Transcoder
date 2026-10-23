@@ -455,7 +455,7 @@ async function openStages({ options, progress, width, height, plan }: FrameGenJo
     // is not oversubscribed.
     const packInline = index !== generatedCounts.length - 1;
     const results = await Promise.allSettled([
-      DlssgSession.open(dlssgRuntimeOf(options), { width, height, generatedCount, sharedFrames: true }),
+      DlssgSession.open(dlssgRuntimeOf(options), { width, height, generatedCount, sharedFrames: true, signal: options.signal }),
       openGuideWorker({ type: "open", width, height, detectSourceCuts: index === 0, packInline }),
       packInline ? Promise.resolve(null) : openGuideWorker({ type: "open-packer", width, height }),
     ]);
