@@ -1,9 +1,6 @@
 /**
- * Runs the frames through the stages. The overlapped coordinator is
- * credit-bounded: one credit is one frame-sized buffer, every possible output
- * is reserved before the work that produces it starts, so no owner can block on
- * a full queue and memory stays under a fixed ceiling. runSequential is the
- * in-order fallback for frames too large for that window.
+ * Runs the frames through the stages: runOverlapped is the credit-bounded coordinator, runSequential the in-order
+ * fallback for frames too large for its window.
  */
 import { raceAbort, throwIfAborted } from "./cancel.ts";
 import type { FrameSource } from "./frame-reader.ts";
@@ -64,9 +61,11 @@ function sourceFrame(rgba: Uint8Array, index: number, sourceRate: Rational): Tim
 /**
  * Credit-bounded coordinator (reference pipeline.py, overlapped mode). Owners:
  * decode (this thread, async pipe), one guide Worker per stage (guide analysis
- * costs ~12 ms of CPU per frame at 720p, far too much for this thread), one
- * native evaluation per stage (its own DLSS-G host process, so stages overlap
- * on the GPU), and encode (its own Worker).
+ * is CPU work on every frame, far too much for this thread), one flow pack per
+ * stage (on its own packer thread for the bottleneck stage, inline otherwise;
+ * it reuses the guide's motion credit), one native evaluation per stage (its
+ * own DLSS-G host process, so stages overlap on the GPU), and encode (its own
+ * Worker).
  *
  * One credit = one frame-sized buffer. Every possible native output is reserved
  * before an evaluation, and motion storage before a guide, so no owner ever
@@ -278,7 +277,6 @@ export async function runSequential(params: RunParams): Promise<RunResult> {
   params.writer.endAt(decoded, params.sourceRate);
   await params.writer.finish();
   // null, not 0: this runner holds frames without a credit ledger, so its peak
-  // is unmeasured rather than zero. Reporting 0 put a number nobody measured
-  // into the job result as though it had been.
+  // is unmeasured rather than zero.
   return { decoded, peak: null };
 }
