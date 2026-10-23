@@ -27,9 +27,11 @@ async function inventoryRuntimeFiles(runtimeDir: string): Promise<RuntimeFile[]>
       files.push({ name, role, present: false, path: null, sizeMB: null, version: null, exports: null });
       continue;
     }
+    let sizeMB: number | null = null;
     let version: string | null = null;
     let exports: string[] | null = null;
     try {
+      sizeMB = toSizeMB(statSync(found.path).size);
       // One read serves both fields: nvngx_dlssnr.dll is 158 MB here, so opening
       // it again just for the version would double the probe's I/O. Version
       // first — parseVersionInfo does not throw, parsePe does on a malformed
@@ -46,7 +48,7 @@ async function inventoryRuntimeFiles(runtimeDir: string): Promise<RuntimeFile[]>
       role,
       present: true,
       path: found.path,
-      sizeMB: Math.round((statSync(found.path).size / 1048576) * 10) / 10,
+      sizeMB,
       version,
       exports,
     });
