@@ -31,8 +31,9 @@ export interface FrameGenEncodeArgs {
 /**
  * The two argv the worker chooses between: an in-process NVENC elementary
  * stream that ffmpeg only muxes, and a rawvideo pipe ffmpeg encodes itself.
- * NVENC is preferred because it spares ffmpeg an 8 MB/frame ingest; the worker
- * falls back to the raw argv when the encoder will not open.
+ * NVENC is preferred because it spares ffmpeg the raw RGBA ingest (width x
+ * height x 4 bytes per frame, 8.3 MB at 1080p); the worker falls back to the
+ * raw argv when the encoder will not open.
  *
  * ffmpeg options are positional, so the shared prefix stops at `-map`: putting
  * `-c:v copy` before the second `-i` would attach it to that input instead of
