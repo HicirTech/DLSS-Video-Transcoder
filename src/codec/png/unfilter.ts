@@ -1,60 +1,67 @@
 /** Reverses the five PNG scanline filters in place, as the specification defines them. */
-import { PngError } from "./types.ts";
+
+/** The filter types the specification defines: 0 None, 1 Sub, 2 Up, 3 Average, 4 Paeth. */
+export type FilterType = 0 | 1 | 2 | 3 | 4;
+
+/** Whether a scanline's filter byte names one of the five filter types. */
+export function isFilterType(filterByte: number): filterByte is FilterType {
+  return filterByte <= 4;
+}
+
+/** One scanline and the line above it, both without their filter bytes. */
+export interface Scanlines {
+  /** The line to reconstruct, in place. */
+  line: Uint8Array;
+  /** The already reconstructed line above, or zeros for the first line of a pass. */
+  above: Uint8Array;
+}
 
 /**
- * Reverses one scanline filter in place. `cur` is the first data byte of the line (just after the filter
- * byte); `prev[prevOff ..]` is the already reconstructed line above (or zeros for the first line of a pass).
+ * Reverses `filterType` on one scanline in place. `bytesPerPixel` is the filter unit: the bytes of one pixel,
+ * rounded up to one below 8 bits per pixel.
  */
-export function unfilterRow(
-  filterType: number,
-  buf: Uint8Array,
-  cur: number,
-  prev: Uint8Array,
-  prevOff: number,
-  n: number,
-  bpp: number,
-  row: number,
-): void {
+export function unfilterRow(filterType: FilterType, { line, above }: Scanlines, bytesPerPixel: number): void {
   switch (filterType) {
+    case 0:
+      // None: the line is stored as it is.
+      break;
     case 1:
-      unfilterSub(buf, cur, n, bpp);
+      unfilterSub(line, bytesPerPixel);
       break;
     case 2:
-      unfilterUp(buf, cur, prev, prevOff, n);
+      unfilterUp(line, above);
       break;
     case 3:
-      unfilterAverage(buf, cur, prev, prevOff, n, bpp);
+      unfilterAverage(line, above, bytesPerPixel);
       break;
     case 4:
-      unfilterPaeth(buf, cur, prev, prevOff, n, bpp);
+      unfilterPaeth(line, above, bytesPerPixel);
       break;
-    default:
-      throw new PngError(`invalid filter type ${filterType} on scanline ${row}`);
   }
 }
 
-function unfilterSub(buf: Uint8Array, cur: number, n: number, bpp: number): void {
-  for (let i = cur + bpp, end = cur + n; i < end; i++) buf[i] = (buf[i] + buf[i - bpp]) & 0xff;
+function unfilterSub(line: Uint8Array, bytesPerPixel: number): void {
+  for (let i = bytesPerPixel; i < line.length; i++) line[i] = (line[i] + line[i - bytesPerPixel]) & 0xff;
 }
 
-function unfilterUp(buf: Uint8Array, cur: number, prev: Uint8Array, prevOff: number, n: number): void {
-  for (let i = 0; i < n; i++) buf[cur + i] = (buf[cur + i] + prev[prevOff + i]) & 0xff;
+function unfilterUp(line: Uint8Array, above: Uint8Array): void {
+  for (let i = 0; i < line.length; i++) line[i] = (line[i] + above[i]) & 0xff;
 }
 
-function unfilterAverage(buf: Uint8Array, cur: number, prev: Uint8Array, prevOff: number, n: number, bpp: number): void {
+function unfilterAverage(line: Uint8Array, above: Uint8Array, bytesPerPixel: number): void {
   let i = 0;
-  for (; i < bpp; i++) buf[cur + i] = (buf[cur + i] + (prev[prevOff + i] >> 1)) & 0xff;
-  for (; i < n; i++) buf[cur + i] = (buf[cur + i] + ((buf[cur + i - bpp] + prev[prevOff + i]) >> 1)) & 0xff;
+  for (; i < bytesPerPixel; i++) line[i] = (line[i] + (above[i] >> 1)) & 0xff;
+  for (; i < line.length; i++) line[i] = (line[i] + ((line[i - bytesPerPixel] + above[i]) >> 1)) & 0xff;
 }
 
-function unfilterPaeth(buf: Uint8Array, cur: number, prev: Uint8Array, prevOff: number, n: number, bpp: number): void {
+function unfilterPaeth(line: Uint8Array, above: Uint8Array, bytesPerPixel: number): void {
   let i = 0;
   // With no left neighbour (a = c = 0) the predictor is always the byte above.
-  for (; i < bpp; i++) buf[cur + i] = (buf[cur + i] + prev[prevOff + i]) & 0xff;
-  for (; i < n; i++) {
-    const a = buf[cur + i - bpp];
-    const b = prev[prevOff + i];
-    const c = prev[prevOff + i - bpp];
+  for (; i < bytesPerPixel; i++) line[i] = (line[i] + above[i]) & 0xff;
+  for (; i < line.length; i++) {
+    const a = line[i - bytesPerPixel];
+    const b = above[i];
+    const c = above[i - bytesPerPixel];
     const p = a + b - c;
     let pa = p - a;
     if (pa < 0) pa = -pa;
@@ -63,6 +70,6 @@ function unfilterPaeth(buf: Uint8Array, cur: number, prev: Uint8Array, prevOff: 
     let pc = p - c;
     if (pc < 0) pc = -pc;
     const pred = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-    buf[cur + i] = (buf[cur + i] + pred) & 0xff;
+    line[i] = (line[i] + pred) & 0xff;
   }
 }
