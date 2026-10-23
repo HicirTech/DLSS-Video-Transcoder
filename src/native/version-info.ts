@@ -6,7 +6,7 @@
  * folders from it — while the optional StringFileInfo string may carry a
  * non-numeric label (e.g. "310.8.SF.0") that is only good for display.
  */
-import { parsePe, type PeSection } from "./pe.ts";
+import { parsePe, rvaToOffset, type PeInfo } from "./pe.ts";
 
 export interface VersionInfo {
   /** Numeric FixedFileInfo file version, "a.b.c.d", or null if not found. */
@@ -21,80 +21,60 @@ const RT_VERSION = 16;
 const FIXED_FILE_INFO_SIGNATURE = 0xfeef04bd;
 const STRUC_VERSION = 0x00010000;
 const SUBDIR_FLAG = 0x80000000;
+const RESOURCE_DIRECTORY_INDEX = 2;
 const NULL_VERSION: VersionInfo = { fileVersion: null, productVersion: null, stringFileVersion: null };
-
-/** Map an RVA to a file offset using the section table (same rule as pe.ts). */
-function makeRvaToOffset(sections: PeSection[]): (rva: number) => number {
-  return (rva: number): number => {
-    for (const section of sections) {
-      const size = Math.max(section.virtualSize, section.rawSize);
-      if (rva >= section.virtualAddress && rva < section.virtualAddress + size) {
-        return section.rawPointer + (rva - section.virtualAddress);
-      }
-    }
-    if (rva < (sections[0]?.rawPointer ?? 0)) return rva; // inside the headers
-    throw new Error(`RVA 0x${rva.toString(16)} is outside every section`);
-  };
-}
 
 /** Format one packed dword (MS or LS) as "high.low". */
 function fmtWord(word: number): string {
   return `${word >>> 16}.${word & 0xffff}`;
 }
 
+// Each IMAGE_RESOURCE_DIRECTORY (winnt.h) is a 16-byte header, holding the named and id entry counts at +12 and +14,
+// followed by 8-byte entries {name/id u32, offset u32}: named entries first, then id entries.
+
+/** The offset field of the id entry `id` in the resource directory at `directoryOffset`, or null. */
+function findEntryById(view: DataView, directoryOffset: number, id: number): number | null {
+  const total = view.getUint16(directoryOffset + 12, true) + view.getUint16(directoryOffset + 14, true);
+  for (let i = 0; i < total; i++) {
+    const entry = directoryOffset + 16 + i * 8;
+    const nameField = view.getUint32(entry, true);
+    if ((nameField & SUBDIR_FLAG) === 0 && nameField === id) return view.getUint32(entry + 4, true);
+  }
+  return null;
+}
+
+/** The offset field of the first entry of the resource directory at `directoryOffset`, or null when it is empty. */
+function firstEntryOffset(view: DataView, directoryOffset: number): number | null {
+  const total = view.getUint16(directoryOffset + 12, true) + view.getUint16(directoryOffset + 14, true);
+  return total > 0 ? view.getUint32(directoryOffset + 16 + 4, true) : null;
+}
+
+/** The blob an IMAGE_RESOURCE_DATA_ENTRY (winnt.h) {OffsetToData(RVA) u32, Size u32, ...} points at, or null when empty. */
+function readDataEntry(view: DataView, leafOffset: number, pe: PeInfo): { offset: number; size: number } | null {
+  const blobRva = view.getUint32(leafOffset, true);
+  const blobSize = view.getUint32(leafOffset + 4, true);
+  if (blobSize === 0) return null;
+  return { offset: rvaToOffset(pe.sections, blobRva), size: blobSize };
+}
+
 /**
  * Locate the first RT_VERSION resource leaf and return its file offset + size,
  * or null when the file has no resource section / version resource.
  */
-function findVersionBlob(view: DataView, sections: PeSection[]): { offset: number; size: number } | null {
-  const peOff = view.getUint32(0x3c, true);
-  const coff = peOff + 4;
-  const optional = coff + 20;
-  const magic = view.getUint16(optional, true);
-  const is64 = magic === 0x20b;
-  const directoryCount = view.getUint32(optional + (is64 ? 108 : 92), true);
-  if (directoryCount < 3) return null; // no resource data directory (index 2)
-  const directoriesOffset = optional + (is64 ? 112 : 96);
-  const resourceRva = view.getUint32(directoriesOffset + 2 * 8, true);
-  const resourceSize = view.getUint32(directoriesOffset + 2 * 8 + 4, true);
-  if (resourceRva === 0 || resourceSize === 0) return null;
-
-  const rvaToOffset = makeRvaToOffset(sections);
-  const resourceBase = rvaToOffset(resourceRva);
-
-  // Each IMAGE_RESOURCE_DIRECTORY is a 16-byte header followed by 8-byte
-  // entries: named entries first, then id entries. Entry = {name/id u32, offset u32}.
-  const findEntry = (dirOffset: number, wantId: number | null): number | null => {
-    const namedCount = view.getUint16(dirOffset + 12, true);
-    const idCount = view.getUint16(dirOffset + 14, true);
-    const entriesStart = dirOffset + 16;
-    const total = namedCount + idCount;
-    for (let i = 0; i < total; i++) {
-      const entry = entriesStart + i * 8;
-      const nameField = view.getUint32(entry, true);
-      const offsetField = view.getUint32(entry + 4, true);
-      if (wantId === null) return offsetField; // first entry (name / language level)
-      const isNamed = (nameField & SUBDIR_FLAG) !== 0;
-      if (!isNamed && nameField === wantId) return offsetField;
-    }
-    return null;
-  };
+function findVersionBlob(view: DataView, pe: PeInfo): { offset: number; size: number } | null {
+  const resources = pe.dataDirectories[RESOURCE_DIRECTORY_INDEX];
+  if (!resources || resources.rva === 0 || resources.size === 0) return null;
+  const resourceBase = rvaToOffset(pe.sections, resources.rva);
 
   // type(RT_VERSION) -> name -> language -> data entry (three subdirectory hops).
-  const typeOffset = findEntry(resourceBase, RT_VERSION);
+  const typeOffset = findEntryById(view, resourceBase, RT_VERSION);
   if (typeOffset === null || (typeOffset & SUBDIR_FLAG) === 0) return null;
-  const nameOffset = findEntry(resourceBase + (typeOffset & ~SUBDIR_FLAG), null);
+  const nameOffset = firstEntryOffset(view, resourceBase + (typeOffset & ~SUBDIR_FLAG));
   if (nameOffset === null || (nameOffset & SUBDIR_FLAG) === 0) return null;
-  const langOffset = findEntry(resourceBase + (nameOffset & ~SUBDIR_FLAG), null);
-  if (langOffset === null) return null;
-
-  // Leaf is an IMAGE_RESOURCE_DATA_ENTRY {OffsetToData(RVA) u32, Size u32, ...};
-  // its high bit is clear at this level.
-  const leaf = resourceBase + (langOffset & ~SUBDIR_FLAG);
-  const blobRva = view.getUint32(leaf, true);
-  const blobSize = view.getUint32(leaf + 4, true);
-  if (blobSize === 0) return null;
-  return { offset: rvaToOffset(blobRva), size: blobSize };
+  const languageOffset = firstEntryOffset(view, resourceBase + (nameOffset & ~SUBDIR_FLAG));
+  if (languageOffset === null) return null;
+  // The data entry's high bit is clear at this level.
+  return readDataEntry(view, resourceBase + (languageOffset & ~SUBDIR_FLAG), pe);
 }
 
 /** True when `bytes` holds `needle` at `offset`. */
@@ -146,8 +126,7 @@ export function parseVersionInfo(bytes: Uint8Array): VersionInfo {
   try {
     if (bytes.length < 0x40) return NULL_VERSION;
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const { sections } = parsePe(bytes);
-    const blob = findVersionBlob(view, sections);
+    const blob = findVersionBlob(view, parsePe(bytes));
     if (!blob) return NULL_VERSION;
 
     const blobEnd = Math.min(blob.offset + blob.size, bytes.length);

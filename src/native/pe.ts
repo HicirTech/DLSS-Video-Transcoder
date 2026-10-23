@@ -40,6 +40,12 @@ export interface PeInfo {
   exports: PeExport[];
 }
 
+// winnt.h
+export const IMAGE_DOS_SIGNATURE = 0x5a4d; // "MZ"
+export const IMAGE_NT_SIGNATURE = 0x00004550; // "PE\0\0"
+export const IMAGE_NT_OPTIONAL_HDR32_MAGIC = 0x10b;
+export const IMAGE_NT_OPTIONAL_HDR64_MAGIC = 0x20b;
+const E_LFANEW_OFFSET = 0x3c; // IMAGE_DOS_HEADER.e_lfanew: the file offset of the NT headers
 const IMAGE_FILE_DLL = 0x2000;
 const IMAGE_NUMBEROF_DIRECTORY_ENTRIES = 16;
 const IMAGE_DIRECTORY_ENTRY_EXPORT = 0;
@@ -99,9 +105,9 @@ function readExports(bytes: Uint8Array, view: DataView, directory: PeDataDirecto
 /** Parse headers and the export directory of a PE file already loaded into memory. */
 export function parsePe(bytes: Uint8Array): PeInfo {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (bytes.length < 0x40 || view.getUint16(0, true) !== 0x5a4d) throw new Error("Not a PE file: missing MZ header");
-  const peOffset = view.getUint32(0x3c, true);
-  if (peOffset + 24 > bytes.length || view.getUint32(peOffset, true) !== 0x00004550) {
+  if (bytes.length < 0x40 || view.getUint16(0, true) !== IMAGE_DOS_SIGNATURE) throw new Error("Not a PE file: missing MZ header");
+  const peOffset = view.getUint32(E_LFANEW_OFFSET, true);
+  if (peOffset + 24 > bytes.length || view.getUint32(peOffset, true) !== IMAGE_NT_SIGNATURE) {
     throw new Error("Not a PE file: missing PE signature");
   }
   const coff = peOffset + 4;
@@ -111,8 +117,8 @@ export function parsePe(bytes: Uint8Array): PeInfo {
   const characteristics = view.getUint16(coff + 18, true);
   const optional = coff + 20;
   const magic = view.getUint16(optional, true);
-  const is64 = magic === 0x20b;
-  if (!is64 && magic !== 0x10b) throw new Error(`Unknown optional header magic 0x${magic.toString(16)}`);
+  const is64 = magic === IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+  if (!is64 && magic !== IMAGE_NT_OPTIONAL_HDR32_MAGIC) throw new Error(`Unknown optional header magic 0x${magic.toString(16)}`);
 
   const entryPoint = view.getUint32(optional + 16, true);
   const imageBase = is64 ? view.getBigUint64(optional + 24, true) : BigInt(view.getUint32(optional + 28, true));
